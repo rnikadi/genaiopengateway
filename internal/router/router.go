@@ -9,11 +9,17 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/provider"
 	"github.com/rnikadi/genaiopengateway/internal/provider/anthropic"
 	"github.com/rnikadi/genaiopengateway/internal/provider/openai"
+	"github.com/rnikadi/genaiopengateway/internal/telemetry"
 )
 
 // Errors returned by Route.
@@ -33,20 +39,28 @@ var factories = map[string]func(config.Provider, *http.Client) provider.Provider
 type Router struct {
 	models    map[string]config.Model
 	providers map[string]provider.Provider
+	types     map[string]string // provider name to type
 }
 
 // New builds a router. All adapters share one HTTP client so connections
 // are pooled per upstream host.
 func New(c *config.Config, client *http.Client) (*Router, error) {
-	r := &Router{models: c.Models, providers: map[string]provider.Provider{}}
+	r := &Router{models: c.Models, providers: map[string]provider.Provider{}, types: map[string]string{}}
 	for name, p := range c.Providers {
 		f, ok := factories[p.Type]
 		if !ok {
 			return nil, fmt.Errorf("provider %q: type %q is not available", name, p.Type)
 		}
 		r.providers[name] = f(p, client)
+		r.types[name] = p.Type
 	}
 	return r, nil
+}
+
+// Has reports whether model is a configured virtual model.
+func (r *Router) Has(model string) bool {
+	_, ok := r.models[model]
+	return ok
 }
 
 // Models lists virtual model names in sorted order.
@@ -59,17 +73,20 @@ func (r *Router) Models() []string {
 	return names
 }
 
-// Attempt records one failed try, for logs and metrics.
+// Attempt records one try, for logs and metrics.
 type Attempt struct {
 	Target config.Target
-	Status int
-	Err    error
+	Status int   // zero when no response was received
+	Err    error // set when no response was received
+	// TTFB is the time from sending to response headers or failure.
+	TTFB time.Duration
 }
 
 // Result is the outcome of routing.
 type Result struct {
 	Response *provider.Response
 	Target   config.Target
+	TTFB     time.Duration
 	// Failed lists targets tried before the one that answered.
 	Failed []Attempt
 }
@@ -104,18 +121,50 @@ func (r *Router) Route(ctx context.Context, ep provider.Endpoint, model string, 
 			return res, err
 		}
 		req.Endpoint, req.Model, req.Body = ep, t.Model, raw
-		resp, err := r.providers[t.Provider].Send(ctx, &req)
-		if err != nil {
-			res.Failed = append(res.Failed, Attempt{Target: t, Err: err})
+		a := r.send(ctx, t, &req)
+		if a.Err != nil {
+			res.Failed = append(res.Failed, a.Attempt)
 			continue
 		}
-		if provider.Retryable(resp.StatusCode) && i < len(targets)-1 {
-			res.Failed = append(res.Failed, Attempt{Target: t, Status: resp.StatusCode})
-			provider.Drain(resp)
+		if provider.Retryable(a.resp.StatusCode) && i < len(targets)-1 {
+			res.Failed = append(res.Failed, a.Attempt)
+			provider.Drain(a.resp)
 			continue
 		}
-		res.Response, res.Target = resp, t
+		res.Response, res.Target, res.TTFB = a.resp, t, a.TTFB
 		return res, nil
 	}
 	return res, ErrAllTargetsFailed
+}
+
+type sent struct {
+	Attempt
+	resp *provider.Response
+}
+
+// send tries one target inside a gateway.upstream span. The span ends at
+// response headers; streaming time belongs to the request span.
+func (r *Router) send(ctx context.Context, t config.Target, req *provider.Request) sent {
+	ctx, span := telemetry.Tracer().Start(ctx, "gateway.upstream", trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(
+			attribute.String("gen_ai.operation.name", telemetry.Operation(req.Endpoint)),
+			attribute.String("gen_ai.provider.name", r.types[t.Provider]),
+			attribute.String("gen_ai.request.model", t.Model),
+			attribute.String("gog.target", t.String()),
+		))
+	defer span.End()
+	start := time.Now()
+	resp, err := r.providers[t.Provider].Send(ctx, req)
+	s := sent{Attempt: Attempt{Target: t, Err: err, TTFB: time.Since(start)}, resp: resp}
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "no response")
+		return s
+	}
+	s.Status = resp.StatusCode
+	span.SetAttributes(attribute.Int("http.response.status_code", resp.StatusCode))
+	if resp.StatusCode >= 400 {
+		span.SetStatus(codes.Error, http.StatusText(resp.StatusCode))
+	}
+	return s
 }

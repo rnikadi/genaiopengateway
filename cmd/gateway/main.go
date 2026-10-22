@@ -15,6 +15,7 @@ import (
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/server"
 	"github.com/rnikadi/genaiopengateway/internal/store"
+	"github.com/rnikadi/genaiopengateway/internal/telemetry"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -43,6 +44,18 @@ func run(path string, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	shutdownTracing, tracing, err := telemetry.SetupTracing(context.Background(), version)
+	if err != nil {
+		return fmt.Errorf("set up tracing: %w", err)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTracing(ctx); err != nil {
+			log.Error("flushing traces failed", "err", err)
+		}
+	}()
+
 	var st *store.Store
 	if cfg.Store.Driver != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -69,9 +82,21 @@ func run(path string, log *slog.Logger) error {
 		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
 	}
 
-	errc := make(chan error, 1)
+	errc := make(chan error, 2)
+	var metricsSrv *http.Server
+	if cfg.Metrics.Listen != "" {
+		mux := http.NewServeMux()
+		mux.Handle("GET /metrics", srv.MetricsHandler())
+		metricsSrv = &http.Server{Addr: cfg.Metrics.Listen, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+		go func() {
+			log.Info("serving metrics", "addr", cfg.Metrics.Listen)
+			if err := metricsSrv.ListenAndServe(); err != http.ErrServerClosed {
+				errc <- fmt.Errorf("metrics listener: %w", err)
+			}
+		}()
+	}
 	go func() {
-		log.Info("listening", "addr", cfg.Listen, "version", version, "tls", cfg.TLS.CertFile != "")
+		log.Info("listening", "addr", cfg.Listen, "version", version, "tls", cfg.TLS.CertFile != "", "tracing", tracing)
 		if cfg.TLS.CertFile != "" {
 			errc <- httpSrv.ListenAndServeTLS(cfg.TLS.CertFile, cfg.TLS.KeyFile)
 		} else {
@@ -94,6 +119,9 @@ func run(path string, log *slog.Logger) error {
 			ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 			defer cancel()
 			err := httpSrv.Shutdown(ctx)
+			if metricsSrv != nil {
+				_ = metricsSrv.Shutdown(ctx)
+			}
 			srv.Close(ctx)
 			if err != nil {
 				return fmt.Errorf("shutdown: %w", err)
@@ -113,8 +141,8 @@ func reload(path string, current *config.Config, srv *server.Server, log *slog.L
 		log.Error("config reload failed; keeping the previous config", "err", err)
 		return
 	}
-	if next.Listen != current.Listen || next.TLS != current.TLS {
-		log.Warn("listen and tls changes take effect after a restart")
+	if next.Listen != current.Listen || next.TLS != current.TLS || next.Metrics != current.Metrics {
+		log.Warn("listen, tls and metrics changes take effect after a restart")
 	}
 	log.Info("config reloaded")
 }

@@ -26,6 +26,9 @@ type Decision struct {
 	Code       string
 	Message    string
 	RetryAfter time.Duration
+	// Scope (org, team or key) and Kind (rpm, tpm or budget) name the
+	// limit that rejected the request, for metrics.
+	Scope, Kind string
 	// Requests and Tokens describe the tightest per-minute limits that
 	// apply, for rate limit headers. Limit is zero when none applies.
 	Requests, Tokens Window
@@ -51,7 +54,10 @@ func New(b Backend, failOpenRate, failOpenBudget bool) *Limiter {
 	return &Limiter{b: b, failOpenRate: failOpenRate, failOpenBudget: failOpenBudget, now: time.Now}
 }
 
-var levelNames = [3]string{"organization", "team", "key"}
+var (
+	levelNames  = [3]string{"organization", "team", "key"}
+	scopeLabels = [3]string{"org", "team", "key"}
+)
 
 func scopes(p *auth.Principal) [3]string { return [3]string{p.OrgID, p.TeamID, p.KeyID} }
 
@@ -103,7 +109,7 @@ func (l *Limiter) Admit(ctx context.Context, p *auth.Principal) Decision {
 			}
 			d.Requests = tighter(d.Requests, Window{pol.RPM, pol.RPM - int64(n), reset})
 			if int64(n) > pol.RPM {
-				return reject(d, CodeRateLimited, fmt.Sprintf("%s request limit of %d per minute reached", levelNames[i], pol.RPM), reset)
+				return reject(d, i, "rpm", CodeRateLimited, fmt.Sprintf("%s request limit of %d per minute reached", levelNames[i], pol.RPM), reset)
 			}
 		}
 		if pol.TPM > 0 {
@@ -113,7 +119,7 @@ func (l *Limiter) Admit(ctx context.Context, p *auth.Principal) Decision {
 			}
 			d.Tokens = tighter(d.Tokens, Window{pol.TPM, pol.TPM - int64(v[0]), reset})
 			if int64(v[0]) >= pol.TPM {
-				return reject(d, CodeRateLimited, fmt.Sprintf("%s token limit of %d per minute reached", levelNames[i], pol.TPM), reset)
+				return reject(d, i, "tpm", CodeRateLimited, fmt.Sprintf("%s token limit of %d per minute reached", levelNames[i], pol.TPM), reset)
 			}
 		}
 		if b := pol.Budget; b != nil {
@@ -123,7 +129,7 @@ func (l *Limiter) Admit(ctx context.Context, p *auth.Principal) Decision {
 				return l.unavailable(d, l.failOpenBudget, err)
 			}
 			if v[0] >= b.AmountUSD {
-				return reject(d, CodeBudget, fmt.Sprintf("%s %s budget of $%.2f is spent", levelNames[i], b.Period, b.AmountUSD), 0)
+				return reject(d, i, "budget", CodeBudget, fmt.Sprintf("%s %s budget of $%.2f is spent", levelNames[i], b.Period, b.AmountUSD), 0)
 			}
 		}
 	}
@@ -173,8 +179,9 @@ func (l *Limiter) unavailable(d Decision, failOpen bool, err error) Decision {
 	return Decision{Code: CodeUnavailable, Message: "limits could not be checked: " + err.Error()}
 }
 
-func reject(d Decision, code, msg string, retry time.Duration) Decision {
+func reject(d Decision, level int, kind, code, msg string, retry time.Duration) Decision {
 	d.Allowed, d.Code, d.Message = false, code, msg
+	d.Scope, d.Kind = scopeLabels[level], kind
 	d.RetryAfter = retry
 	return d
 }

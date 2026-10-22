@@ -50,4 +50,8 @@ curl -s -H "$ADMIN" "localhost:8080/admin/v1/usage?org_id=$ORG&group_by=team"
 
 Every change is recorded in the audit log (`GET /admin/v1/audit`).
 
+## Observability
+
+Prometheus metrics are at `/metrics` (or on `metrics.listen`), one JSON log line is written per request, and traces are exported over OTLP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. See [observability](docs/observability.md).
+
 Licensed under Apache-2.0 with no enterprise edition: see the [charter](CHARTER.md). Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).

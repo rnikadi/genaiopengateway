@@ -21,6 +21,7 @@ import (
 	"github.com/rnikadi/genaiopengateway/internal/provider"
 	"github.com/rnikadi/genaiopengateway/internal/router"
 	"github.com/rnikadi/genaiopengateway/internal/store"
+	"github.com/rnikadi/genaiopengateway/internal/telemetry"
 	"github.com/rnikadi/genaiopengateway/internal/usage"
 )
 
@@ -47,6 +48,9 @@ type Server struct {
 	valkey  *limits.Valkey // nil unless the valkey driver is used
 	stop    context.CancelFunc
 
+	metrics     *telemetry.Metrics
+	lastRefresh atomic.Int64 // unix nanoseconds of the last store load
+
 	// mu serializes rebuilding the key directory from its two sources.
 	mu        sync.Mutex
 	storeKeys map[string]*auth.Principal
@@ -70,6 +74,7 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error)
 	} else {
 		s.ready.Store(true)
 	}
+	s.metrics = telemetry.NewMetrics(s.usageWriteErrors, s.snapshotAge)
 	if err := s.Reload(cfg); err != nil {
 		return nil, err
 	}
@@ -172,8 +177,29 @@ func (s *Server) refresh(ctx context.Context) error {
 	s.storeKeys = keys
 	s.mu.Unlock()
 	s.rebuildKeys()
+	s.lastRefresh.Store(time.Now().UnixNano())
 	s.ready.Store(true)
 	return nil
+}
+
+func (s *Server) usageWriteErrors() float64 {
+	if s.usage == nil {
+		return 0
+	}
+	return float64(s.usage.Dropped())
+}
+
+// snapshotAge is zero without a store or before the first load, which
+// /readyz already reports.
+func (s *Server) snapshotAge() float64 {
+	if s.store == nil {
+		return 0
+	}
+	last := s.lastRefresh.Load()
+	if last == 0 {
+		return 0
+	}
+	return time.Since(time.Unix(0, last)).Seconds()
 }
 
 func (s *Server) pruneLoop(ctx context.Context, retention time.Duration) {
@@ -194,9 +220,16 @@ func (s *Server) pruneLoop(ctx context.Context, retention time.Duration) {
 	}
 }
 
-// Handler returns the HTTP handler with all routes registered.
+// MetricsHandler serves Prometheus metrics.
+func (s *Server) MetricsHandler() http.Handler { return s.metrics.Handler() }
+
+// Handler returns the HTTP handler with all routes registered. /metrics
+// is included unless metrics have a listener of their own.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	if s.rt.Load().cfg.Metrics.Listen == "" {
+		mux.Handle("GET /metrics", s.MetricsHandler())
+	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
 	mux.HandleFunc("GET /readyz", s.readyz)
 	mux.HandleFunc("GET /v1/models", s.listModels)
