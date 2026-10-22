@@ -21,7 +21,9 @@ Send a gateway key as `Authorization: Bearer <key>`. The `x-api-key: <key>` head
 
 ### The `model` field
 
-`model` names a **virtual model** from the gateway config, not an upstream model. The gateway rewrites it to the upstream model of whichever target serves the request. Responses report the virtual model name in `model` so clients see a stable value.
+`model` names a **virtual model** from the gateway config, not an upstream model. The gateway rewrites it to the upstream model of whichever target serves the request. Response bodies are not rewritten, so `model` in a response is whatever the upstream reports; the `x-gateway-target` header names the provider and upstream model.
+
+For streaming chat completions the gateway sets `stream_options.include_usage` to `true` unless the client set it, so usage can be metered. Clients then receive one extra final chunk with an empty `choices` array and a `usage` object, which the OpenAI SDKs handle.
 
 ### Routing and fallback
 
