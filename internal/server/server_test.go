@@ -292,3 +292,33 @@ keys:
 		t.Fatalf("upstream hits = %d, want 2", hits)
 	}
 }
+
+func TestAnthropicProviderEndToEnd(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" || r.Header.Get("X-Api-Key") != "upstream-key" {
+			t.Errorf("upstream got %s key %q", r.URL.Path, r.Header.Get("X-Api-Key"))
+		}
+		_, _ = io.WriteString(w, `{"id":"msg_1","model":"claude-x","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":4,"output_tokens":2}}`)
+	}))
+	t.Cleanup(up.Close)
+	var logs bytes.Buffer
+	h := gateway(t, `
+providers: {ant: {type: anthropic, base_url: "`+up.URL+`", api_key: upstream-key}}
+models: {claude: {targets: [{provider: ant, model: claude-x}]}}
+keys: [{name: dev, key: `+devKey+`}]
+`, &logs)
+	chat := do(h, "POST", "/v1/chat/completions", devKey, `{"model":"claude","messages":[{"role":"user","content":"hello"}]}`)
+	if chat.Code != 200 || !strings.Contains(chat.Body.String(), `"object":"chat.completion"`) || !strings.Contains(chat.Body.String(), `"content":"hi"`) {
+		t.Fatalf("chat = %d %s", chat.Code, chat.Body)
+	}
+	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude","max_tokens":10,"messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("X-Api-Key", devKey)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"type":"text"`) {
+		t.Fatalf("messages = %d %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(logs.String(), `"input_tokens":4`) {
+		t.Fatal("usage not logged")
+	}
+}

@@ -17,8 +17,8 @@ providers:
     base_url: https://api.openai.com/v1
     api_key: ${OPENAI_API_KEY}
   anthropic:
-    type: openai              # Anthropic's OpenAI-compatible endpoint until the native adapter lands
-    base_url: https://api.anthropic.com/v1
+    type: anthropic           # serves /v1/chat/completions (translated) and /v1/messages
+    base_url: https://api.anthropic.com
     api_key: ${ANTHROPIC_API_KEY}
   # local:
   #   type: openai            # vLLM, Ollama and other OpenAI-compatible servers
