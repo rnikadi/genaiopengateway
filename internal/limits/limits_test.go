@@ -58,7 +58,7 @@ func TestRequestsPerMinuteTightestLevelWins(t *testing.T) {
 				}
 			}
 			d := l.Admit(ctx, p)
-			if d.Allowed || d.Code != CodeRateLimited || d.RetryAfter != 30*time.Second {
+			if d.Allowed || d.Code != CodeRateLimited || d.RetryAfter != 30*time.Second || d.Scope != "key" || d.Kind != "rpm" {
 				t.Fatalf("third request = %+v", d)
 			}
 			if d.Requests.Limit != 2 || d.Requests.Remaining != 0 {
@@ -109,7 +109,7 @@ func TestBudgets(t *testing.T) {
 			}
 			_ = l.Charge(ctx, p, 10, 0.6)
 			d := l.Admit(ctx, p)
-			if d.Allowed || d.Code != CodeBudget {
+			if d.Allowed || d.Code != CodeBudget || d.Scope != "org" || d.Kind != "budget" {
 				t.Fatalf("over budget = %+v", d)
 			}
 			// Next month resets.
