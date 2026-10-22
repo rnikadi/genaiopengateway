@@ -6,17 +6,19 @@ One open-source gateway for every GenAI model type and every MCP server, with en
 - **MCP and agents:** registry, virtual servers, OAuth 2.1, tool-level RBAC, audit.
 - **Enterprise:** SSO, SCIM, RBAC, multi-tenancy, budgets, rate limits, guardrails, observability.
 
-> **Status:** v0.1 in development. Working today: OpenAI-compatible chat completions, embeddings and responses against any OpenAI-compatible provider; fallbacks and streaming; organizations, teams and keys with model allow lists through an admin API; usage and cost per request in SQLite or Postgres; and an audit log. Design docs are in [docs/](docs/README.md); see the [roadmap](docs/roadmap.md).
+> **Status:** v0.1. Working today: the OpenAI-compatible API (chat completions, embeddings, responses) for OpenAI-compatible providers and for Claude by translation, plus native Anthropic `/v1/messages`; virtual models with fallback and streaming; organizations, teams and keys with model allow lists, rate limits and budgets; usage and cost in SQLite or Postgres; an audit log; Prometheus metrics and OpenTelemetry traces. MCP, SSO and more modalities follow on the [roadmap](docs/roadmap.md). Design docs are in [docs/](docs/README.md).
 
 ## Quick start
+
+Download a binary from [releases](https://github.com/rnikadi/genaiopengateway/releases), or build from source with Go 1.26:
 
 ```
 cp config.example.yaml config.yaml          # edit providers, models and prices
 export OPENAI_API_KEY=sk-... ANTHROPIC_API_KEY=sk-ant-... GATEWAY_DEV_KEY=$(openssl rand -hex 24)
-make run
+make run                                    # or: genaiopengateway -config config.yaml
 ```
 
-Point any OpenAI SDK at `http://localhost:8080/v1` with the gateway key:
+Point any OpenAI SDK at `http://localhost:8080/v1`, or the Anthropic SDK at `http://localhost:8080`, with the gateway key:
 
 ```
 curl http://localhost:8080/v1/chat/completions \
@@ -28,9 +30,8 @@ curl http://localhost:8080/v1/chat/completions \
 With Docker:
 
 ```
-docker build -t genaiopengateway .
 docker run -p 8080:8080 -v $PWD/config.yaml:/etc/genaiopengateway/config.yaml:ro \
-  -e OPENAI_API_KEY -e ANTHROPIC_API_KEY -e GATEWAY_DEV_KEY genaiopengateway
+  -e OPENAI_API_KEY -e ANTHROPIC_API_KEY -e GATEWAY_DEV_KEY ghcr.io/rnikadi/genaiopengateway:0.1
 ```
 
 Send `SIGHUP` to reload the config without dropping requests.
