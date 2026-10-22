@@ -16,7 +16,7 @@ Semantic versioning. Before 1.0, minor versions (0.x) may change config or admin
 
 1. CI is green on `main`. CI already builds every binary and both image platforms.
 2. Move the `Unreleased` notes in `CHANGELOG.md` under a `## [X.Y.Z] - date` heading, with upgrade notes for any config change, and merge that.
-3. Tag `vX.Y.Z` on `main` and push the tag. `.github/workflows/release.yml` refuses to publish without changelog notes for the version, then builds, signs and publishes. Tags with a suffix, such as `v0.2.0-rc.1`, publish as prereleases.
+3. Push a `vX.Y.Z` tag on `main`, or run the **release** workflow from the Actions tab with the version, which tags the head of `main` itself. `.github/workflows/release.yml` refuses to publish without changelog notes for the version, then builds, signs and publishes. Versions with a suffix, such as `0.2.0-rc.1`, publish as prereleases.
 
 Image tags are `X.Y.Z`, `X.Y` and `latest`.
 
@@ -26,7 +26,7 @@ Binaries: check the archive against `checksums.txt`, and the checksum file again
 
 ```
 cosign verify-blob checksums.txt --bundle checksums.txt.sigstore.json \
-  --certificate-identity-regexp '^https://github.com/rnikadi/genaiopengateway/.github/workflows/release.yml@refs/tags/v' \
+  --certificate-identity-regexp '^https://github.com/rnikadi/genaiopengateway/.github/workflows/release.yml@refs/(tags/v|heads/main$)' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 sha256sum --ignore-missing -c checksums.txt
 ```
@@ -35,7 +35,7 @@ Image:
 
 ```
 cosign verify ghcr.io/rnikadi/genaiopengateway:X.Y.Z \
-  --certificate-identity-regexp '^https://github.com/rnikadi/genaiopengateway/.github/workflows/release.yml@refs/tags/v' \
+  --certificate-identity-regexp '^https://github.com/rnikadi/genaiopengateway/.github/workflows/release.yml@refs/(tags/v|heads/main$)' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
