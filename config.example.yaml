@@ -1,0 +1,40 @@
+# GenAIOpenGateway example config. See docs/config.md for every option.
+# Values like ${VAR} are read from the environment; unset variables are an error.
+listen: ":8080"
+
+providers:
+  openai:
+    type: openai
+    base_url: https://api.openai.com/v1
+    api_key: ${OPENAI_API_KEY}
+  anthropic:
+    type: openai              # Anthropic's OpenAI-compatible endpoint until the native adapter lands
+    base_url: https://api.anthropic.com/v1
+    api_key: ${ANTHROPIC_API_KEY}
+  # local:
+  #   type: openai            # vLLM, Ollama and other OpenAI-compatible servers
+  #   base_url: http://localhost:11434/v1
+
+# Virtual models that clients ask for. Targets are tried in order; later
+# ones are fallbacks on 429, 5xx or connection errors. Prices are USD per
+# million tokens; set them from your own contracts.
+models:
+  chat-default:
+    targets:
+      - provider: openai
+        model: gpt-4.1-mini
+        price: {input_per_mtok: 0.40, output_per_mtok: 1.60, cached_input_per_mtok: 0.10}
+      - provider: anthropic
+        model: claude-haiku-4-5
+        price: {input_per_mtok: 1.00, output_per_mtok: 5.00}
+  embed-default:
+    targets:
+      - provider: openai
+        model: text-embedding-3-small
+        price: {input_per_mtok: 0.02}
+
+# Static gateway keys. Without any key, every model request is rejected.
+keys:
+  - name: dev
+    key: ${GATEWAY_DEV_KEY}
+    allowed_models: []        # empty means all models

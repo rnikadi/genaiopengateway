@@ -38,7 +38,7 @@ providers:
     type: openai                     # openai | anthropic
     base_url: https://api.openai.com/v1
     api_key: ${OPENAI_API_KEY}
-    timeout: 120s                    # whole request, including streaming
+    timeout: 300s                    # whole request, including streaming; default 5m
     headers: {}                      # extra headers sent upstream
   anthropic:
     type: anthropic
