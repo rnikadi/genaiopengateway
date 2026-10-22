@@ -23,7 +23,7 @@ Every adapter must report usage (`input_tokens`, `output_tokens`, `cached_input_
 | `tool_choice` `auto` / `none` / `required` / named | `auto` / `none` / `any` / `tool` |
 | `max_tokens`, `max_completion_tokens` | `max_tokens` (default 4096 when absent, since Anthropic requires it) |
 | `temperature`, `top_p`, `stop` | `temperature`, `top_p`, `stop_sequences` |
-| `stream`, `stream_options.include_usage` | `stream`; usage is always reported in the final chunk |
+| `stream`, `stream_options.include_usage` | `stream`; usage is always metered, and sent as a final chunk only when the client asked for it |
 | `stop_reason` `end_turn` / `max_tokens` / `tool_use` / `stop_sequence` | `finish_reason` `stop` / `length` / `tool_calls` / `stop` |
 | `usage.input_tokens + cache_read + cache_creation`, `output_tokens` | `usage.prompt_tokens`, `completion_tokens`, `prompt_tokens_details.cached_tokens` |
 

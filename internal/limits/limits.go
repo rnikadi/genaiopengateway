@@ -129,7 +129,7 @@ func (l *Limiter) Admit(ctx context.Context, p *auth.Principal) Decision {
 				return l.unavailable(d, l.failOpenBudget, err)
 			}
 			if v[0] >= b.AmountUSD {
-				return reject(d, i, "budget", CodeBudget, fmt.Sprintf("%s %s budget of $%.2f is spent", levelNames[i], b.Period, b.AmountUSD), 0)
+				return reject(d, i, "budget", CodeBudget, fmt.Sprintf("%s %s budget of $%s is spent", levelNames[i], b.Period, strconv.FormatFloat(b.AmountUSD, 'f', -1, 64)), 0)
 			}
 		}
 	}
