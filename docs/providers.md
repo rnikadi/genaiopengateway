@@ -27,6 +27,8 @@ Every adapter must report usage (`input_tokens`, `output_tokens`, `cached_input_
 | `stop_reason` `end_turn` / `max_tokens` / `tool_use` / `stop_sequence` | `finish_reason` `stop` / `length` / `tool_calls` / `stop` |
 | `usage.input_tokens + cache_read + cache_creation`, `output_tokens` | `usage.prompt_tokens`, `completion_tokens`, `prompt_tokens_details.cached_tokens` |
 
+Cache writes (`cache_creation_input_tokens`) are counted as input tokens at the input price; Anthropic bills them at a premium, so budgets for prompt-caching workloads run slightly low.
+
 Unsupported fields (`n` greater than 1, `logprobs`, `response_format` of type `json_schema`) are rejected with `400 invalid_request` naming the field, never silently dropped. `response_format: json_object` is accepted and ignored with a warning header, as Claude follows JSON instructions in the prompt.
 
 ## Conformance tests

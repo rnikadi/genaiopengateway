@@ -122,6 +122,8 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 		w.WriteHeader(resp.StatusCode)
 		rec.UpstreamLatency = time.Since(start)
 		copyFlush(w, resp.Body)
+		// Close before reading usage: adapters finalize it on close.
+		_ = resp.Body.Close()
 
 		if resp.StatusCode == http.StatusOK {
 			rec.Tokens = *resp.Usage

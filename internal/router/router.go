@@ -12,6 +12,7 @@ import (
 
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/provider"
+	"github.com/rnikadi/genaiopengateway/internal/provider/anthropic"
 	"github.com/rnikadi/genaiopengateway/internal/provider/openai"
 )
 
@@ -24,7 +25,8 @@ var (
 
 // factories builds an adapter for each provider type.
 var factories = map[string]func(config.Provider, *http.Client) provider.Provider{
-	config.ProviderOpenAI: func(c config.Provider, h *http.Client) provider.Provider { return openai.New(c, h) },
+	config.ProviderOpenAI:    func(c config.Provider, h *http.Client) provider.Provider { return openai.New(c, h) },
+	config.ProviderAnthropic: func(c config.Provider, h *http.Client) provider.Provider { return anthropic.New(c, h) },
 }
 
 // Router dispatches requests to the targets of a virtual model.
