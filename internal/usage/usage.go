@@ -3,6 +3,7 @@ package usage
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/rnikadi/genaiopengateway/internal/config"
 )
@@ -88,4 +89,21 @@ func FromOpenAI(body []byte) (Tokens, bool) {
 		return v.Response.Usage.tokens(), true
 	}
 	return Tokens{}, false
+}
+
+// Record is the stored account of one request.
+type Record struct {
+	RequestID     string
+	Time          time.Time
+	OrgID         string
+	TeamID        string
+	KeyID         string
+	Endpoint      string
+	Model         string
+	Provider      string
+	UpstreamModel string
+	Status        int
+	LatencyMS     int64
+	Tokens        Tokens
+	CostUSD       float64
 }

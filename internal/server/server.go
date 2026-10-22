@@ -2,19 +2,25 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"regexp"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/rnikadi/genaiopengateway/internal/auth"
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/id"
+	"github.com/rnikadi/genaiopengateway/internal/policy"
 	"github.com/rnikadi/genaiopengateway/internal/provider"
 	"github.com/rnikadi/genaiopengateway/internal/router"
+	"github.com/rnikadi/genaiopengateway/internal/store"
+	"github.com/rnikadi/genaiopengateway/internal/usage"
 )
 
 // runtime is everything derived from one config version. It is replaced
@@ -22,19 +28,33 @@ import (
 type runtime struct {
 	cfg    *config.Config
 	router *router.Router
-	keys   *auth.Directory
 }
 
 // Server holds the live runtime and serves requests against it.
 type Server struct {
 	rt     atomic.Pointer[runtime]
+	keys   atomic.Pointer[auth.Directory]
+	ready  atomic.Bool
 	log    *slog.Logger
 	client *http.Client
+
+	// store and usage are nil when no database is configured.
+	store *store.Store
+	usage *usage.Writer
+
+	// mu serializes rebuilding the key directory from its two sources.
+	mu        sync.Mutex
+	storeKeys map[string]*auth.Principal
 }
 
-// New builds a server from config.
-func New(cfg *config.Config, log *slog.Logger) (*Server, error) {
-	s := &Server{log: log, client: newUpstreamClient()}
+// New builds a server. st may be nil.
+func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error) {
+	s := &Server{log: log, client: newUpstreamClient(), store: st}
+	if st != nil {
+		s.usage = usage.NewWriter(st.InsertUsage, log)
+	} else {
+		s.ready.Store(true)
+	}
 	if err := s.Reload(cfg); err != nil {
 		return nil, err
 	}
@@ -47,44 +67,138 @@ func (s *Server) Reload(cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	keys := auth.NewDirectory(auth.StaticPrincipals(cfg.Keys))
-	if keys.Len() == 0 {
+	s.rt.Store(&runtime{cfg: cfg, router: r})
+	s.rebuildKeys()
+	return nil
+}
+
+// rebuildKeys merges static keys from config with keys from the store.
+func (s *Server) rebuildKeys() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	all := auth.StaticPrincipals(s.rt.Load().cfg.Keys)
+	maps.Copy(all, s.storeKeys)
+	if len(all) == 0 && s.store == nil {
 		s.log.Warn("no API keys configured; every model request will be rejected")
 	}
-	s.rt.Store(&runtime{cfg: cfg, router: r, keys: keys})
+	s.keys.Store(auth.NewDirectory(all))
+}
+
+// Start runs background work until ctx is done: refreshing keys from the
+// store and pruning old usage.
+func (s *Server) Start(ctx context.Context) {
+	if s.store == nil {
+		return
+	}
+	go s.refreshLoop(ctx)
+	if retention := s.rt.Load().cfg.Store.UsageRetention.Std(); retention > 0 {
+		go s.pruneLoop(ctx, retention)
+	}
+}
+
+// Close flushes queued usage records.
+func (s *Server) Close(ctx context.Context) {
+	if s.usage != nil {
+		s.usage.Close(ctx)
+	}
+}
+
+func (s *Server) refreshLoop(ctx context.Context) {
+	for {
+		if err := s.refresh(ctx); err != nil {
+			s.log.Error("loading keys from the store failed; serving the previous snapshot", "err", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(s.rt.Load().cfg.Store.RefreshInterval.Std()):
+		}
+	}
+}
+
+// refresh loads tenants and keys from the store into the directory.
+func (s *Server) refresh(ctx context.Context) error {
+	snap, err := s.store.LoadSnapshot(ctx)
+	if err != nil {
+		return err
+	}
+	keys := make(map[string]*auth.Principal, len(snap.Keys))
+	for _, k := range snap.Keys {
+		org, team := snap.Orgs[k.OrgID], snap.Teams[k.TeamID]
+		if org == nil || team == nil {
+			continue
+		}
+		keys[k.SecretHash] = &auth.Principal{
+			OrgID: k.OrgID, TeamID: k.TeamID, KeyID: k.ID, KeyName: k.Name, KeyPrefix: k.Prefix,
+			Policies:  [3]policy.Policy{org.Policy, team.Policy, k.Policy},
+			ExpiresAt: k.ExpiresAt,
+		}
+	}
+	s.mu.Lock()
+	s.storeKeys = keys
+	s.mu.Unlock()
+	s.rebuildKeys()
+	s.ready.Store(true)
 	return nil
+}
+
+func (s *Server) pruneLoop(ctx context.Context, retention time.Duration) {
+	t := time.NewTicker(24 * time.Hour)
+	defer t.Stop()
+	for {
+		n, err := s.store.PruneUsage(ctx, time.Now().Add(-retention))
+		if err != nil {
+			s.log.Error("pruning usage failed", "err", err)
+		} else if n > 0 {
+			s.log.Info("pruned usage records", "rows", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
 }
 
 // Handler returns the HTTP handler with all routes registered.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
-	mux.HandleFunc("GET /readyz", s.ready)
+	mux.HandleFunc("GET /readyz", s.readyz)
 	mux.HandleFunc("GET /v1/models", s.listModels)
 	mux.HandleFunc("POST /v1/chat/completions", s.model(provider.ChatCompletions))
 	mux.HandleFunc("POST /v1/embeddings", s.model(provider.Embeddings))
 	mux.HandleFunc("POST /v1/responses", s.model(provider.Responses))
 	mux.HandleFunc("POST /v1/messages", s.model(provider.Messages))
+	s.adminRoutes(mux)
 	return s.recoverer(withRequestID(mux))
 }
 
-func (s *Server) ready(w http.ResponseWriter, _ *http.Request) {
-	if s.rt.Load() == nil {
-		http.Error(w, "not ready", http.StatusServiceUnavailable)
+func (s *Server) readyz(w http.ResponseWriter, _ *http.Request) {
+	if !s.ready.Load() {
+		http.Error(w, "loading keys", http.StatusServiceUnavailable)
 		return
 	}
 	_, _ = w.Write([]byte("ok"))
 }
 
+// authenticate resolves the presented key, rejecting expired keys.
+func (s *Server) authenticate(r *http.Request) (*auth.Principal, bool) {
+	p, ok := s.keys.Load().Lookup(presentedKey(r))
+	if !ok || p.Expired(time.Now()) {
+		return nil, false
+	}
+	return p, true
+}
+
 func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
-	rt := s.rt.Load()
-	p, ok := rt.keys.Lookup(presentedKey(r))
+	p, ok := s.authenticate(r)
 	if !ok {
 		writeError(w, provider.ChatCompletions, http.StatusUnauthorized, codeInvalidKey, "missing or invalid API key")
 		return
 	}
 	data := []map[string]any{}
-	for _, name := range rt.router.Models() {
+	for _, name := range s.rt.Load().router.Models() {
 		if p.AllowsModel(name) {
 			data = append(data, map[string]any{"id": name, "object": "model", "created": 0, "owned_by": "genaiopengateway"})
 		}

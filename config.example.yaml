@@ -2,6 +2,15 @@
 # Values like ${VAR} are read from the environment; unset variables are an error.
 listen: ":8080"
 
+# Uncomment to manage organizations, teams and keys through the admin API
+# and record usage. SQLite needs no setup; use postgres for several replicas.
+# store:
+#   driver: sqlite
+#   dsn: file:gateway.db
+#   usage_retention: 90d
+# admin:
+#   token: ${GATEWAY_ADMIN_TOKEN}   # at least 32 characters
+
 providers:
   openai:
     type: openai

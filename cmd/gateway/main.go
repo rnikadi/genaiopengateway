@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/server"
+	"github.com/rnikadi/genaiopengateway/internal/store"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -43,13 +43,23 @@ func run(path string, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	var st *store.Store
 	if cfg.Store.Driver != "" {
-		return errors.New("store is not available in this build yet; remove the store section")
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		st, err = store.Open(ctx, cfg.Store.Driver, cfg.Store.DSN.Value())
+		cancel()
+		if err != nil {
+			return fmt.Errorf("open store: %w", err)
+		}
+		defer st.Close()
 	}
-	srv, err := server.New(cfg, log)
+	srv, err := server.New(cfg, log, st)
 	if err != nil {
 		return err
 	}
+	bg, stopBackground := context.WithCancel(context.Background())
+	defer stopBackground()
+	srv.Start(bg)
 
 	httpSrv := &http.Server{
 		Addr:              cfg.Listen,
@@ -83,7 +93,9 @@ func run(path string, log *slog.Logger) error {
 			log.Info("shutting down", "signal", sig.String())
 			ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 			defer cancel()
-			if err := httpSrv.Shutdown(ctx); err != nil {
+			err := httpSrv.Shutdown(ctx)
+			srv.Close(ctx)
+			if err != nil {
 				return fmt.Errorf("shutdown: %w", err)
 			}
 			return nil

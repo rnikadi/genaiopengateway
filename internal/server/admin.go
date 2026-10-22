@@ -1,0 +1,511 @@
+package server
+
+import (
+	"bytes"
+	"context"
+	"crypto/subtle"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/rnikadi/genaiopengateway/internal/auth"
+	"github.com/rnikadi/genaiopengateway/internal/policy"
+	"github.com/rnikadi/genaiopengateway/internal/store"
+)
+
+// adminActor names the caller in the audit log until SSO adds users.
+const adminActor = "admin-token"
+
+// maxAdminBody bounds admin request bodies.
+const maxAdminBody = 1 << 20
+
+func (s *Server) adminRoutes(mux *http.ServeMux) {
+	h := func(pattern string, fn func(http.ResponseWriter, *http.Request) error) {
+		mux.Handle(pattern, s.adminAuth(fn))
+	}
+	h("POST /admin/v1/orgs", s.createOrg)
+	h("GET /admin/v1/orgs", s.listOrgs)
+	h("GET /admin/v1/orgs/{org_id}", s.getOrg)
+	h("PATCH /admin/v1/orgs/{org_id}", s.updateOrg)
+	h("DELETE /admin/v1/orgs/{org_id}", s.deleteOrg)
+	h("POST /admin/v1/orgs/{org_id}/teams", s.createTeam)
+	h("GET /admin/v1/orgs/{org_id}/teams", s.listTeams)
+	h("GET /admin/v1/teams/{team_id}", s.getTeam)
+	h("PATCH /admin/v1/teams/{team_id}", s.updateTeam)
+	h("DELETE /admin/v1/teams/{team_id}", s.deleteTeam)
+	h("POST /admin/v1/teams/{team_id}/keys", s.createKey)
+	h("GET /admin/v1/teams/{team_id}/keys", s.listKeys)
+	h("GET /admin/v1/keys/{key_id}", s.getKey)
+	h("PATCH /admin/v1/keys/{key_id}", s.updateKey)
+	h("POST /admin/v1/keys/{key_id}/revoke", s.revokeKey)
+	h("GET /admin/v1/usage", s.queryUsage)
+	h("GET /admin/v1/audit", s.listAudit)
+}
+
+// apiError is an admin error with an HTTP status.
+type apiError struct {
+	status int
+	code   string
+	msg    string
+}
+
+func (e *apiError) Error() string { return e.msg }
+
+func badRequest(format string, args ...any) error {
+	return &apiError{http.StatusBadRequest, "invalid_request", fmt.Sprintf(format, args...)}
+}
+
+// adminAuth checks the admin token and turns handler errors into
+// responses. The admin API answers 404 when it is disabled.
+func (s *Server) adminAuth(fn func(http.ResponseWriter, *http.Request) error) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := s.rt.Load().cfg.Admin.Token.Value()
+		if s.store == nil || token == "" {
+			http.NotFound(w, r)
+			return
+		}
+		presented := presentedKey(r)
+		if subtle.ConstantTimeCompare([]byte(presented), []byte(token)) != 1 {
+			writeAdminError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid admin token")
+			return
+		}
+		err := fn(w, r)
+		var ae *apiError
+		switch {
+		case err == nil:
+		case errors.As(err, &ae):
+			writeAdminError(w, ae.status, ae.code, ae.msg)
+		case errors.Is(err, store.ErrNotFound):
+			writeAdminError(w, http.StatusNotFound, "not_found", "not found")
+		case errors.Is(err, store.ErrConflict):
+			writeAdminError(w, http.StatusConflict, "conflict", err.Error())
+		default:
+			s.log.Error("admin request failed", "request_id", r.Header.Get("X-Request-Id"), "path", r.URL.Path, "err", err)
+			writeAdminError(w, http.StatusInternalServerError, "internal_error", "internal error")
+		}
+	})
+}
+
+func writeAdminError(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, map[string]any{"error": map[string]any{"message": msg, "code": code}})
+}
+
+// decode reads a JSON body strictly: unknown fields are errors.
+func decode(r *http.Request, v any) error {
+	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, maxAdminBody))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return badRequest("invalid JSON body: %v", err)
+	}
+	return nil
+}
+
+func page(r *http.Request) (store.Page, error) {
+	p := store.Page{After: r.URL.Query().Get("after")}
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 500 {
+			return p, badRequest("limit must be between 1 and 500")
+		}
+		p.Limit = n
+	}
+	return p, nil
+}
+
+func writeList[T any](w http.ResponseWriter, items []T, more bool) error {
+	writeJSON(w, http.StatusOK, map[string]any{"data": items, "has_more": more})
+	return nil
+}
+
+// optional distinguishes an absent JSON field from an explicit null.
+type optional[T any] struct {
+	Set   bool
+	Value *T
+}
+
+func (o *optional[T]) UnmarshalJSON(b []byte) error {
+	o.Set = true
+	if bytes.Equal(b, []byte("null")) {
+		o.Value = nil
+		return nil
+	}
+	o.Value = new(T)
+	return json.Unmarshal(b, o.Value)
+}
+
+// patch is the body of create and update requests for orgs, teams and
+// keys. On create, absent fields take their zero values.
+type patch struct {
+	Name          *string                 `json:"name"`
+	AllowedModels *[]string               `json:"allowed_models"`
+	RPM           *int64                  `json:"rpm"`
+	TPM           *int64                  `json:"tpm"`
+	Budget        optional[policy.Budget] `json:"budget"`
+	ExpiresAt     optional[time.Time]     `json:"expires_at"`
+	isKey         bool
+}
+
+// apply updates name and policy in place and validates the result
+// against the models currently configured.
+func (s *Server) apply(p *patch, name *string, pol *policy.Policy, expires **time.Time) error {
+	if p.Name != nil {
+		*name = *p.Name
+	}
+	if *name == "" {
+		return badRequest("name is required")
+	}
+	if p.AllowedModels != nil {
+		pol.AllowedModels = *p.AllowedModels
+	}
+	if p.RPM != nil {
+		pol.RPM = *p.RPM
+	}
+	if p.TPM != nil {
+		pol.TPM = *p.TPM
+	}
+	if p.Budget.Set {
+		pol.Budget = p.Budget.Value
+	}
+	if p.ExpiresAt.Set {
+		if !p.isKey {
+			return badRequest("expires_at applies only to keys")
+		}
+		*expires = p.ExpiresAt.Value
+	}
+	if err := pol.Validate(); err != nil {
+		return badRequest("%v", err)
+	}
+	models := s.rt.Load().cfg.Models
+	for _, m := range pol.AllowedModels {
+		if _, ok := models[m]; !ok {
+			return badRequest("allowed model %q is not configured", m)
+		}
+	}
+	return nil
+}
+
+// audit records a change and refreshes the key directory so the change
+// applies on this replica at once.
+func (s *Server) audit(ctx context.Context, action, resourceType, resourceID, orgID string, details any) error {
+	raw, _ := json.Marshal(details)
+	if err := s.store.AppendAudit(ctx, &store.AuditEntry{
+		Actor: adminActor, Action: action, ResourceType: resourceType, ResourceID: resourceID, OrgID: orgID, Details: raw,
+	}); err != nil {
+		return err
+	}
+	if err := s.refresh(ctx); err != nil {
+		s.log.Error("refreshing keys after admin change failed", "err", err)
+	}
+	return nil
+}
+
+// --- organizations ---
+
+func (s *Server) createOrg(w http.ResponseWriter, r *http.Request) error {
+	var p patch
+	if err := decode(r, &p); err != nil {
+		return err
+	}
+	o := &store.Org{}
+	if err := s.apply(&p, &o.Name, &o.Policy, nil); err != nil {
+		return err
+	}
+	if err := s.store.CreateOrg(r.Context(), o); err != nil {
+		return err
+	}
+	if err := s.audit(r.Context(), "org.create", "org", o.ID, o.ID, map[string]any{"after": o}); err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusCreated, o)
+	return nil
+}
+
+func (s *Server) listOrgs(w http.ResponseWriter, r *http.Request) error {
+	pg, err := page(r)
+	if err != nil {
+		return err
+	}
+	items, more, err := s.store.ListOrgs(r.Context(), pg)
+	if err != nil {
+		return err
+	}
+	return writeList(w, items, more)
+}
+
+func (s *Server) getOrg(w http.ResponseWriter, r *http.Request) error {
+	o, err := s.store.GetOrg(r.Context(), r.PathValue("org_id"))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, o)
+	return nil
+}
+
+func (s *Server) updateOrg(w http.ResponseWriter, r *http.Request) error {
+	var p patch
+	if err := decode(r, &p); err != nil {
+		return err
+	}
+	o, err := s.store.GetOrg(r.Context(), r.PathValue("org_id"))
+	if err != nil {
+		return err
+	}
+	before := *o
+	if err := s.apply(&p, &o.Name, &o.Policy, nil); err != nil {
+		return err
+	}
+	if err := s.store.UpdateOrg(r.Context(), o); err != nil {
+		return err
+	}
+	if err := s.audit(r.Context(), "org.update", "org", o.ID, o.ID, map[string]any{"before": before, "after": o}); err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, o)
+	return nil
+}
+
+func (s *Server) deleteOrg(w http.ResponseWriter, r *http.Request) error {
+	orgID := r.PathValue("org_id")
+	if err := s.store.DeleteOrg(r.Context(), orgID); err != nil {
+		return err
+	}
+	if err := s.audit(r.Context(), "org.delete", "org", orgID, orgID, nil); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+// --- teams ---
+
+func (s *Server) createTeam(w http.ResponseWriter, r *http.Request) error {
+	var p patch
+	if err := decode(r, &p); err != nil {
+		return err
+	}
+	t := &store.Team{OrgID: r.PathValue("org_id")}
+	if err := s.apply(&p, &t.Name, &t.Policy, nil); err != nil {
+		return err
+	}
+	if err := s.store.CreateTeam(r.Context(), t); err != nil {
+		return err
+	}
+	if err := s.audit(r.Context(), "team.create", "team", t.ID, t.OrgID, map[string]any{"after": t}); err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusCreated, t)
+	return nil
+}
+
+func (s *Server) listTeams(w http.ResponseWriter, r *http.Request) error {
+	pg, err := page(r)
+	if err != nil {
+		return err
+	}
+	if _, err := s.store.GetOrg(r.Context(), r.PathValue("org_id")); err != nil {
+		return err
+	}
+	items, more, err := s.store.ListTeams(r.Context(), r.PathValue("org_id"), pg)
+	if err != nil {
+		return err
+	}
+	return writeList(w, items, more)
+}
+
+func (s *Server) getTeam(w http.ResponseWriter, r *http.Request) error {
+	t, err := s.store.GetTeam(r.Context(), r.PathValue("team_id"))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, t)
+	return nil
+}
+
+func (s *Server) updateTeam(w http.ResponseWriter, r *http.Request) error {
+	var p patch
+	if err := decode(r, &p); err != nil {
+		return err
+	}
+	t, err := s.store.GetTeam(r.Context(), r.PathValue("team_id"))
+	if err != nil {
+		return err
+	}
+	before := *t
+	if err := s.apply(&p, &t.Name, &t.Policy, nil); err != nil {
+		return err
+	}
+	if err := s.store.UpdateTeam(r.Context(), t); err != nil {
+		return err
+	}
+	if err := s.audit(r.Context(), "team.update", "team", t.ID, t.OrgID, map[string]any{"before": before, "after": t}); err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, t)
+	return nil
+}
+
+func (s *Server) deleteTeam(w http.ResponseWriter, r *http.Request) error {
+	t, err := s.store.GetTeam(r.Context(), r.PathValue("team_id"))
+	if err != nil {
+		return err
+	}
+	if err := s.store.DeleteTeam(r.Context(), t.ID); err != nil {
+		return err
+	}
+	if err := s.audit(r.Context(), "team.delete", "team", t.ID, t.OrgID, nil); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+// --- keys ---
+
+func (s *Server) createKey(w http.ResponseWriter, r *http.Request) error {
+	p := patch{isKey: true}
+	if err := decode(r, &p); err != nil {
+		return err
+	}
+	k := &store.Key{TeamID: r.PathValue("team_id")}
+	if err := s.apply(&p, &k.Name, &k.Policy, &k.ExpiresAt); err != nil {
+		return err
+	}
+	secret, prefix, hash, err := auth.NewKey()
+	if err != nil {
+		return err
+	}
+	k.Prefix, k.SecretHash = prefix, hash
+	if err := s.store.CreateKey(r.Context(), k); err != nil {
+		return err
+	}
+	if err := s.audit(r.Context(), "key.create", "key", k.ID, k.OrgID, map[string]any{"after": k}); err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusCreated, struct {
+		*store.Key
+		Secret string `json:"key"`
+	}{k, secret})
+	return nil
+}
+
+func (s *Server) listKeys(w http.ResponseWriter, r *http.Request) error {
+	pg, err := page(r)
+	if err != nil {
+		return err
+	}
+	if _, err := s.store.GetTeam(r.Context(), r.PathValue("team_id")); err != nil {
+		return err
+	}
+	items, more, err := s.store.ListKeys(r.Context(), r.PathValue("team_id"), pg)
+	if err != nil {
+		return err
+	}
+	return writeList(w, items, more)
+}
+
+func (s *Server) getKey(w http.ResponseWriter, r *http.Request) error {
+	k, err := s.store.GetKey(r.Context(), r.PathValue("key_id"))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, k)
+	return nil
+}
+
+func (s *Server) updateKey(w http.ResponseWriter, r *http.Request) error {
+	p := patch{isKey: true}
+	if err := decode(r, &p); err != nil {
+		return err
+	}
+	k, err := s.store.GetKey(r.Context(), r.PathValue("key_id"))
+	if err != nil {
+		return err
+	}
+	if k.RevokedAt != nil {
+		return &apiError{http.StatusConflict, "conflict", "key is revoked"}
+	}
+	before := *k
+	if err := s.apply(&p, &k.Name, &k.Policy, &k.ExpiresAt); err != nil {
+		return err
+	}
+	if err := s.store.UpdateKey(r.Context(), k); err != nil {
+		return err
+	}
+	if err := s.audit(r.Context(), "key.update", "key", k.ID, k.OrgID, map[string]any{"before": before, "after": k}); err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, k)
+	return nil
+}
+
+func (s *Server) revokeKey(w http.ResponseWriter, r *http.Request) error {
+	k, err := s.store.GetKey(r.Context(), r.PathValue("key_id"))
+	if err != nil {
+		return err
+	}
+	if err := s.store.RevokeKey(r.Context(), k.ID); err != nil {
+		return err
+	}
+	if err := s.audit(r.Context(), "key.revoke", "key", k.ID, k.OrgID, nil); err != nil {
+		return err
+	}
+	k, err = s.store.GetKey(r.Context(), k.ID)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, k)
+	return nil
+}
+
+// --- usage and audit ---
+
+func (s *Server) queryUsage(w http.ResponseWriter, r *http.Request) error {
+	q := r.URL.Query()
+	now := time.Now().UTC()
+	uq := store.UsageQuery{
+		OrgID: q.Get("org_id"), TeamID: q.Get("team_id"), KeyID: q.Get("key_id"),
+		From:    time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC),
+		To:      now.Add(time.Millisecond),
+		GroupBy: q.Get("group_by"),
+	}
+	if uq.GroupBy == "" {
+		uq.GroupBy = "model"
+	}
+	for name, dst := range map[string]*time.Time{"from": &uq.From, "to": &uq.To} {
+		if v := q.Get(name); v != "" {
+			t, err := time.Parse(time.RFC3339, v)
+			if err != nil {
+				return badRequest("%s must be an RFC 3339 time", name)
+			}
+			*dst = t
+		}
+	}
+	switch uq.GroupBy {
+	case "model", "team", "key", "day":
+	default:
+		return badRequest("group_by must be model, team, key or day")
+	}
+	rows, err := s.store.QueryUsage(r.Context(), uq)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"from": uq.From, "to": uq.To, "group_by": uq.GroupBy, "data": rows,
+	})
+	return nil
+}
+
+func (s *Server) listAudit(w http.ResponseWriter, r *http.Request) error {
+	pg, err := page(r)
+	if err != nil {
+		return err
+	}
+	items, more, err := s.store.ListAudit(r.Context(), r.URL.Query().Get("org_id"), pg)
+	if err != nil {
+		return err
+	}
+	return writeList(w, items, more)
+}

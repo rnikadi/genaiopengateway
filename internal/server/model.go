@@ -32,7 +32,7 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 			writeError(w, ep, status, code, msg)
 		}
 
-		p, ok := rt.keys.Lookup(presentedKey(r))
+		p, ok := s.authenticate(r)
 		if !ok {
 			fail(http.StatusUnauthorized, codeInvalidKey, "missing or invalid API key")
 			return
@@ -108,6 +108,13 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 		if resp.StatusCode == http.StatusOK {
 			rec.Tokens = *resp.Usage
 			rec.CostUSD = usage.Cost(rec.Tokens, res.Target.Price)
+		}
+		if s.usage != nil {
+			s.usage.Add(usage.Record{
+				RequestID: rec.RequestID, Time: start, OrgID: p.OrgID, TeamID: p.TeamID, KeyID: p.KeyID,
+				Endpoint: string(ep), Model: rec.Model, Provider: res.Target.Provider, UpstreamModel: res.Target.Model,
+				Status: rec.Status, LatencyMS: time.Since(start).Milliseconds(), Tokens: rec.Tokens, CostUSD: rec.CostUSD,
+			})
 		}
 	}
 }

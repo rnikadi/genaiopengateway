@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"math/big"
+	"time"
 
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/policy"
@@ -54,6 +55,13 @@ type Principal struct {
 	KeyPrefix string
 	// Policies holds the org, team and key policies, in that order.
 	Policies [3]policy.Policy
+	// ExpiresAt is when the key stops working; nil means never.
+	ExpiresAt *time.Time
+}
+
+// Expired reports whether the key has expired at t.
+func (p *Principal) Expired(t time.Time) bool {
+	return p.ExpiresAt != nil && !t.Before(*p.ExpiresAt)
 }
 
 // AllowsModel reports whether every level permits the model.
