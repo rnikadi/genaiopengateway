@@ -48,7 +48,7 @@ func gateway(t *testing.T, yaml string, logs *bytes.Buffer) http.Handler {
 	if logs != nil {
 		out = logs
 	}
-	s, err := New(cfg, slog.New(slog.NewJSONHandler(out, nil)))
+	s, err := New(cfg, slog.New(slog.NewJSONHandler(out, nil)), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
