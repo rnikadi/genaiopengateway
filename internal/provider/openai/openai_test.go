@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,32 +48,48 @@ func TestNonStreamingReadsUsageAndSendsCredentials(t *testing.T) {
 	}
 }
 
-func TestStreamingAddsIncludeUsageAndTapsFinalChunk(t *testing.T) {
-	p := newProvider(t, func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			StreamOptions struct {
-				IncludeUsage bool `json:"include_usage"`
-			} `json:"stream_options"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		if !body.StreamOptions.IncludeUsage {
-			t.Error("include_usage not requested")
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n")
-		_, _ = io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n")
-	})
-	resp, err := p.Send(context.Background(), &provider.Request{
-		Endpoint: provider.ChatCompletions, Stream: true,
-		Body: []byte(`{"model":"m","stream":true,"messages":[]}`),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	if resp.Usage.InputTokens != 3 || resp.Usage.OutputTokens != 1 {
-		t.Fatalf("usage = %+v", *resp.Usage)
+func TestStreamingMetersUsageAndHidesChunkClientDidNotAskFor(t *testing.T) {
+	for name, tc := range map[string]struct {
+		body      string
+		wantUsage bool // whether the client sees the usage chunk
+	}{
+		"gateway asks":   {`{"model":"m","stream":true,"messages":[]}`, false},
+		"client asks":    {`{"model":"m","stream":true,"stream_options":{"include_usage":true}}`, true},
+		"client opts in": {`{"model":"m","stream":true,"stream_options":{"include_usage":true,"x":1}}`, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newProvider(t, func(w http.ResponseWriter, r *http.Request) {
+				var body struct {
+					StreamOptions struct {
+						IncludeUsage bool `json:"include_usage"`
+					} `json:"stream_options"`
+				}
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				if !body.StreamOptions.IncludeUsage {
+					t.Error("include_usage not requested")
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}],\"usage\":null}\n\n")
+				_, _ = io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n")
+			})
+			resp, err := p.Send(context.Background(), &provider.Request{
+				Endpoint: provider.ChatCompletions, Stream: true, Body: []byte(tc.body),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if resp.Usage.InputTokens != 3 || resp.Usage.OutputTokens != 1 {
+				t.Fatalf("usage = %+v", *resp.Usage)
+			}
+			if sees := strings.Contains(string(got), "prompt_tokens"); sees != tc.wantUsage {
+				t.Fatalf("client sees usage chunk = %v, want %v:\n%s", sees, tc.wantUsage, got)
+			}
+			if !strings.Contains(string(got), `"content":"hi"`) || !strings.HasSuffix(string(got), "data: [DONE]\n\n") {
+				t.Fatalf("content chunks altered:\n%s", got)
+			}
+		})
 	}
 }
 
@@ -99,7 +116,7 @@ func TestWithStreamUsage(t *testing.T) {
 		`not json`:                                   `not json`,
 	}
 	for in, want := range cases {
-		if got := string(withStreamUsage([]byte(in))); got != want {
+		if got, _ := withStreamUsage([]byte(in)); string(got) != want {
 			t.Errorf("withStreamUsage(%s) = %s, want %s", in, got, want)
 		}
 	}

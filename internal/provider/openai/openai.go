@@ -44,9 +44,9 @@ func (p *Provider) Supports(e provider.Endpoint) bool {
 
 // Send implements provider.Provider.
 func (p *Provider) Send(ctx context.Context, req *provider.Request) (*provider.Response, error) {
-	body := req.Body
+	body, injected := req.Body, false
 	if req.Stream && req.Endpoint == provider.ChatCompletions {
-		body = withStreamUsage(body)
+		body, injected = withStreamUsage(body)
 	}
 	ctx, cancel := context.WithTimeout(ctx, p.cfg.Timeout.Std())
 	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.cfg.BaseURL+paths[req.Endpoint], bytes.NewReader(body))
@@ -83,6 +83,11 @@ func (p *Provider) Send(ctx context.Context, req *provider.Request) (*provider.R
 				*out.Usage = t
 			}
 		})
+		if injected {
+			// The client did not ask for the usage chunk; code that
+			// reads choices[0] of every chunk would fail on it.
+			out.Body = sse.Drop(out.Body, usageOnlyChunk)
+		}
 		return out, nil
 	}
 	// Buffer non-streaming bodies to read usage before replying.
@@ -107,30 +112,40 @@ func (p *Provider) Send(ctx context.Context, req *provider.Request) (*provider.R
 }
 
 // withStreamUsage asks the upstream to send a final usage chunk, unless
-// the client already chose. Bodies that are not JSON objects are left
-// for the upstream to reject.
-func withStreamUsage(body []byte) []byte {
+// the client already chose, and reports whether it did. Bodies that are
+// not JSON objects are left for the upstream to reject.
+func withStreamUsage(body []byte) ([]byte, bool) {
 	var m map[string]json.RawMessage
 	if json.Unmarshal(body, &m) != nil {
-		return body
+		return body, false
 	}
 	var opts map[string]json.RawMessage
 	if raw, ok := m["stream_options"]; ok && json.Unmarshal(raw, &opts) != nil {
-		return body
+		return body, false
 	}
 	if opts == nil {
 		opts = map[string]json.RawMessage{}
 	}
 	if _, set := opts["include_usage"]; set {
-		return body
+		return body, false
 	}
 	opts["include_usage"] = json.RawMessage("true")
 	m["stream_options"], _ = json.Marshal(opts)
 	out, err := json.Marshal(m)
 	if err != nil {
-		return body
+		return body, false
 	}
-	return out
+	return out, true
+}
+
+// usageOnlyChunk matches the final chunk include_usage adds: usage with
+// no choices.
+func usageOnlyChunk(data []byte) bool {
+	var c struct {
+		Choices []json.RawMessage `json:"choices"`
+		Usage   json.RawMessage   `json:"usage"`
+	}
+	return json.Unmarshal(data, &c) == nil && len(c.Choices) == 0 && len(c.Usage) > 0 && string(c.Usage) != "null"
 }
 
 // cancelOnClose releases the request context when the body is closed.
