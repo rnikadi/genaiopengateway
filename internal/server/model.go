@@ -7,8 +7,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/rnikadi/genaiopengateway/internal/limits"
 	"github.com/rnikadi/genaiopengateway/internal/provider"
 	"github.com/rnikadi/genaiopengateway/internal/router"
 	"github.com/rnikadi/genaiopengateway/internal/usage"
@@ -68,6 +70,22 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 			return
 		}
 
+		d := s.limiter.Admit(r.Context(), p)
+		setRateHeaders(w.Header(), d)
+		if !d.Allowed {
+			status := http.StatusTooManyRequests
+			if d.Code == limits.CodeUnavailable {
+				status = http.StatusServiceUnavailable
+				s.log.Error("limiter unavailable", "request_id", rec.RequestID, "err", d.Message)
+				d.Message = "limits could not be checked"
+			}
+			if d.RetryAfter > 0 {
+				w.Header().Set("Retry-After", strconv.FormatInt(limits.RetryAfterSeconds(d.RetryAfter), 10))
+			}
+			fail(status, d.Code, d.Message)
+			return
+		}
+
 		hdr := http.Header{}
 		for _, h := range forwardedHeaders {
 			if v := r.Header.Values(h); len(v) > 0 {
@@ -108,6 +126,10 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 		if resp.StatusCode == http.StatusOK {
 			rec.Tokens = *resp.Usage
 			rec.CostUSD = usage.Cost(rec.Tokens, res.Target.Price)
+			// The client may be gone; charging must still happen.
+			if err := s.limiter.Charge(context.WithoutCancel(r.Context()), p, rec.Tokens.Total(), rec.CostUSD); err != nil {
+				s.log.Error("charging limits failed", "request_id", rec.RequestID, "err", err)
+			}
 		}
 		if s.usage != nil {
 			s.usage.Add(usage.Record{
@@ -116,6 +138,19 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 				Status: rec.Status, LatencyMS: time.Since(start).Milliseconds(), Tokens: rec.Tokens, CostUSD: rec.CostUSD,
 			})
 		}
+	}
+}
+
+// setRateHeaders adds OpenAI-style rate limit headers for the tightest
+// per-minute limits that apply.
+func setRateHeaders(h http.Header, d limits.Decision) {
+	for kind, win := range map[string]limits.Window{"requests": d.Requests, "tokens": d.Tokens} {
+		if win.Limit == 0 {
+			continue
+		}
+		h.Set("X-Ratelimit-Limit-"+kind, strconv.FormatInt(win.Limit, 10))
+		h.Set("X-Ratelimit-Remaining-"+kind, strconv.FormatInt(win.Remaining, 10))
+		h.Set("X-Ratelimit-Reset-"+kind, (time.Duration(limits.RetryAfterSeconds(win.Reset)) * time.Second).String())
 	}
 }
 
