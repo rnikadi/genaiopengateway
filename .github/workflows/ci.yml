@@ -20,8 +20,12 @@ jobs:
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+      valkey:
+        image: valkey/valkey:8
+        ports: ["6379:6379"]
     env:
       GOG_TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/gog_test?sslmode=disable
+      GOG_TEST_VALKEY_ADDR: localhost:6379
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6

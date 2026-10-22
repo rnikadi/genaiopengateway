@@ -261,3 +261,34 @@ func TestRequestIDEcho(t *testing.T) {
 		t.Fatalf("unsafe id kept: %q", got)
 	}
 }
+
+func TestRateLimitAndBudgetEnforced(t *testing.T) {
+	var hits int
+	h := gateway(t, `
+providers: {up: {base_url: "`+upstream(t, 200, &hits).URL+`", api_key: upstream-key}}
+models: {chat: {targets: [{provider: up, model: m, price: {input_per_mtok: 100000, output_per_mtok: 100000}}]}}
+keys:
+  - {name: slow, key: slow-key-0123456789, rpm: 1}
+  - {name: cheap, key: cheap-key-0123456789, budget: {amount_usd: 1, period: daily}}
+`, nil)
+	first := do(h, "POST", "/v1/chat/completions", "slow-key-0123456789", `{"model":"chat"}`)
+	if first.Code != 200 || first.Header().Get("X-Ratelimit-Limit-Requests") != "1" || first.Header().Get("X-Ratelimit-Remaining-Requests") != "0" {
+		t.Fatalf("first = %d %v", first.Code, first.Header())
+	}
+	second := do(h, "POST", "/v1/chat/completions", "slow-key-0123456789", `{"model":"chat"}`)
+	if second.Code != 429 || errorCode(t, second) != "rate_limit_exceeded" || second.Header().Get("Retry-After") == "" {
+		t.Fatalf("second = %d %s %v", second.Code, second.Body, second.Header())
+	}
+
+	// Each call costs 15 tokens * $0.1 = $1.50, so the second is over budget.
+	if rec := do(h, "POST", "/v1/chat/completions", "cheap-key-0123456789", `{"model":"chat"}`); rec.Code != 200 {
+		t.Fatalf("budget first = %d", rec.Code)
+	}
+	rec := do(h, "POST", "/v1/chat/completions", "cheap-key-0123456789", `{"model":"chat"}`)
+	if rec.Code != 429 || errorCode(t, rec) != "budget_exceeded" {
+		t.Fatalf("budget second = %d %s", rec.Code, rec.Body)
+	}
+	if hits != 2 {
+		t.Fatalf("upstream hits = %d, want 2", hits)
+	}
+}

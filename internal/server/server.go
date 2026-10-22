@@ -16,6 +16,7 @@ import (
 	"github.com/rnikadi/genaiopengateway/internal/auth"
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/id"
+	"github.com/rnikadi/genaiopengateway/internal/limits"
 	"github.com/rnikadi/genaiopengateway/internal/policy"
 	"github.com/rnikadi/genaiopengateway/internal/provider"
 	"github.com/rnikadi/genaiopengateway/internal/router"
@@ -42,6 +43,10 @@ type Server struct {
 	store *store.Store
 	usage *usage.Writer
 
+	limiter *limits.Limiter
+	valkey  *limits.Valkey // nil unless the valkey driver is used
+	stop    context.CancelFunc
+
 	// mu serializes rebuilding the key directory from its two sources.
 	mu        sync.Mutex
 	storeKeys map[string]*auth.Principal
@@ -50,6 +55,16 @@ type Server struct {
 // New builds a server. st may be nil.
 func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error) {
 	s := &Server{log: log, client: newUpstreamClient(), store: st}
+	ctx, stop := context.WithCancel(context.Background())
+	s.stop = stop
+	var backend limits.Backend
+	if lc := cfg.Limiter; lc.Driver == "valkey" {
+		s.valkey = limits.NewValkey(lc.Address, lc.Password.Value())
+		backend = s.valkey
+	} else {
+		backend = limits.NewMemory(ctx)
+	}
+	s.limiter = limits.New(backend, cfg.Limiter.FailOpenRateLimits, cfg.Limiter.FailOpenBudgets)
 	if st != nil {
 		s.usage = usage.NewWriter(st.InsertUsage, log)
 	} else {
@@ -90,16 +105,35 @@ func (s *Server) Start(ctx context.Context) {
 	if s.store == nil {
 		return
 	}
+	go s.seedBudgets(ctx)
 	go s.refreshLoop(ctx)
 	if retention := s.rt.Load().cfg.Store.UsageRetention.Std(); retention > 0 {
 		go s.pruneLoop(ctx, retention)
 	}
 }
 
-// Close flushes queued usage records.
+// Close flushes queued usage records and releases background resources.
 func (s *Server) Close(ctx context.Context) {
 	if s.usage != nil {
 		s.usage.Close(ctx)
+	}
+	s.stop()
+	if s.valkey != nil {
+		_ = s.valkey.Close()
+	}
+}
+
+// seedBudgets raises budget counters to the spend recorded in the store,
+// so a restart does not reset budgets.
+func (s *Server) seedBudgets(ctx context.Context) {
+	for _, period := range []string{policy.PeriodDaily, policy.PeriodMonthly, policy.PeriodTotal} {
+		spend, err := s.store.SpendSince(ctx, limits.PeriodStart(period, time.Now()))
+		if err == nil {
+			err = s.limiter.Seed(ctx, period, spend)
+		}
+		if err != nil {
+			s.log.Error("seeding budget counters failed", "period", period, "err", err)
+		}
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/store"
+	"github.com/rnikadi/genaiopengateway/internal/usage"
 )
 
 const adminToken = "admin-token-0123456789-0123456789-xx"
@@ -212,5 +213,28 @@ func TestReadyAfterFirstSnapshot(t *testing.T) {
 			t.Fatal("never became ready")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestBudgetSeededFromStoredUsage(t *testing.T) {
+	e := newAdminEnv(t, "")
+	var org, team, key idResp
+	e.call("POST", "/admin/v1/orgs", `{"name":"a"}`, 201, &org)
+	e.call("POST", "/admin/v1/orgs/"+org.ID+"/teams", `{"name":"t","budget":{"amount_usd":5,"period":"monthly"}}`, 201, &team)
+	e.call("POST", "/admin/v1/teams/"+team.ID+"/keys", `{"name":"k"}`, 201, &key)
+	// Spend recorded before this process started, as after a restart.
+	err := e.srv.store.InsertUsage(context.Background(), []usage.Record{{
+		RequestID: "r", Time: time.Now(), OrgID: org.ID, TeamID: team.ID, KeyID: key.ID,
+		Endpoint: "chat.completions", Model: "chat", Provider: "up", UpstreamModel: "m", Status: 200, CostUSD: 6,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := do(e.h, "POST", "/v1/chat/completions", key.Key, `{"model":"chat"}`); rec.Code != 200 {
+		t.Fatalf("before seeding = %d", rec.Code)
+	}
+	e.srv.seedBudgets(context.Background())
+	if rec := do(e.h, "POST", "/v1/chat/completions", key.Key, `{"model":"chat"}`); rec.Code != 429 || errorCode(t, rec) != "budget_exceeded" {
+		t.Fatalf("after seeding = %d %s", rec.Code, rec.Body)
 	}
 }
