@@ -14,7 +14,7 @@ This adds a `Signed-off-by: Your Name <you@example.com>` line. There is no CLA.
 
 ## Development
 
-Requires Go 1.25 or newer.
+Requires Go 1.26 or newer.
 
 ```
 make test   # run the test suite with the race detector
