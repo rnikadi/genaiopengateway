@@ -6,6 +6,6 @@ One open-source gateway for every GenAI model type and every MCP server, with en
 - **MCP and agents:** registry, virtual servers, OAuth 2.1, tool-level RBAC, audit.
 - **Enterprise:** SSO, SCIM, RBAC, multi-tenancy, budgets, rate limits, guardrails, observability.
 
-Licensed under [Apache-2.0](LICENSE). No enterprise edition, no license keys.
+> **Status:** design docs are in [docs/](docs/README.md); v0.1 is in development. See the [roadmap](docs/roadmap.md).
 
-> Status: early design. The code scaffold is in progress.
+Licensed under Apache-2.0 with no enterprise edition: see the [charter](CHARTER.md). Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
