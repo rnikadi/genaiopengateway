@@ -1,0 +1,18 @@
+# Architecture decision records
+
+| ADR | Decision |
+| --- | --- |
+| [0001](0001-api-surface.md) | OpenAI-compatible API as the contract, plus native passthrough |
+| [0002](0002-request-model.md) | Typed request envelope with pass-through of unknown fields |
+| [0003](0003-config-model.md) | YAML for infrastructure, database for runtime objects |
+| [0004](0004-storage.md) | Postgres for clusters, SQLite for single node |
+| [0005](0005-hot-state.md) | Valkey for shared counters, memory for single node |
+| [0006](0006-tenancy.md) | Organization, team, key hierarchy |
+| [0007](0007-metering.md) | Per-modality usage units and an editable price catalog |
+| [0008](0008-plugins.md) | Go interfaces for built-ins, WebAssembly for third-party plugins |
+| [0009](0009-policy.md) | Built-in RBAC plus Cedar for attribute-based policy |
+| [0010](0010-config-sync.md) | Data plane serves from a local snapshot |
+| [0011](0011-mcp-scope.md) | MCP gateway scope |
+| [0012](0012-governance.md) | Governance |
+
+New ADRs copy [0000-template.md](0000-template.md).
