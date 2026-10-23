@@ -1,6 +1,6 @@
 # Provider adapters
 
-An adapter connects one provider API to the gateway: `openai` and `anthropic` here, and `gemini` and `vertex` in [cloud-providers.md](cloud-providers.md), which also has their translation tables.
+An adapter connects one provider API to the gateway: `openai` and `anthropic` here, and `gemini`, `vertex` and `bedrock` in [cloud-providers.md](cloud-providers.md), which also has their translation tables.
 
 ## Interface
 

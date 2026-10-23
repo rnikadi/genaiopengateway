@@ -35,9 +35,10 @@ type Upstream struct {
 	// URL returns the URL of a model's method, generateContent or
 	// streamGenerateContent.
 	URL func(model, method string) string
-	// Authorize sets credentials on an upstream request. A failure is
-	// returned to the client as a 502, which allows fallback.
-	Authorize func(ctx context.Context, h http.Header) error
+	// Authorize sets credentials on an upstream request, after every
+	// other header; a signer may read the body through GetBody. A
+	// failure is returned to the client as a 502, which allows fallback.
+	Authorize func(r *http.Request) error
 }
 
 // New returns an adapter for the Gemini API.
@@ -124,7 +125,7 @@ func (p *Provider) post(ctx context.Context, model string, body []byte, stream b
 		hreq.Header.Set(k, v)
 	}
 	if p.up.Authorize != nil {
-		if err := p.up.Authorize(ctx, hreq.Header); err != nil {
+		if err := p.up.Authorize(hreq); err != nil {
 			cancel()
 			return upstreamError(http.StatusBadGateway, "upstream credentials: "+err.Error()), nil
 		}

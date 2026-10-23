@@ -95,7 +95,7 @@ limits:
 
 providers:
   openai:
-    type: openai                     # openai | anthropic | gemini | vertex
+    type: openai                     # openai | anthropic | gemini | vertex | bedrock
     base_url: https://api.openai.com/v1
     api_key: ${OPENAI_API_KEY}
     timeout: 300s                    # whole request, including streaming; default 5m
@@ -112,6 +112,10 @@ providers:
     project: acme-ai-prod
     location: global                 # global, us, eu, or a region
     # credentials_file: /var/run/secrets/gcp/key.json   (default: Application Default Credentials)
+  bedrock:
+    type: bedrock                    # every Bedrock model; see cloud-providers.md
+    region: eu-central-1
+    # api_key: ${AWS_BEARER_TOKEN_BEDROCK}   (default: the AWS credential chain, signed with SigV4)
 
 models:
   chat-default:
@@ -155,13 +159,14 @@ Prices in the example are placeholders; set them from your contracts.
 | `openai` | OpenAI, Azure OpenAI (v1 API), Google Gemini OpenAI-compatible endpoint, Mistral, Groq, Together, Fireworks, vLLM, SGLang, Ollama, LM Studio and other OpenAI-compatible servers | chat, embeddings, responses |
 | `anthropic` | Anthropic API | chat (translated), messages (passthrough) |
 | `gemini` | Gemini API | chat (translated), generateContent (passthrough) |
+| `bedrock` | Amazon Bedrock: any model through Converse; Claude (ids with `anthropic.`) also through InvokeModel; Titan and Cohere embedding models | chat (translated), messages (Claude, passthrough), embeddings (translated) |
 | `vertex` | Vertex AI: Gemini models (`gemini-2.5-pro` or `google/gemini-2.5-pro`) and Claude models (`anthropic/claude-sonnet-4-6`) | Gemini: chat (translated), generateContent (passthrough). Claude: chat (translated), messages (passthrough) |
 
 ### Validation
 
 The admin API and UI are enabled when there is a `store` and either `admin.token` or `sso.oidc`. The UI is served at `/ui/`.
 
-Startup fails if a model references an unknown provider, a virtual MCP server references an unknown upstream or two of its names collide, a provider other than `gemini` or `vertex` has no `base_url`, a `vertex` provider has no `project` or `location`, a target has no `model`, a static key is empty or duplicated, a duration or number is malformed, a guardrail is incomplete or names an unknown model, or a virtual server names an unknown guardrail, or `sso` is incomplete (an http(s) issuer, a client id and secret, a redirect URL ending in `/ui/auth/callback`, at least one role mapping with exactly one of `group` or `email`, `org` on every `admin`, none on `owner`).
+Startup fails if a model references an unknown provider, a virtual MCP server references an unknown upstream or two of its names collide, a provider other than `gemini`, `vertex` or `bedrock` has no `base_url`, a `vertex` provider has no `project` or `location`, a `bedrock` provider has no `region`, a target has no `model`, a static key is empty or duplicated, a duration or number is malformed, a guardrail is incomplete or names an unknown model, or a virtual server names an unknown guardrail, or `sso` is incomplete (an http(s) issuer, a client id and secret, a redirect URL ending in `/ui/auth/callback`, at least one role mapping with exactly one of `group` or `email`, `org` on every `admin`, none on `owner`).
 
 ## Data model
 

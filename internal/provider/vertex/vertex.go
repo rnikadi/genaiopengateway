@@ -129,8 +129,8 @@ type tokens struct {
 	ts   oauth2.TokenSource
 }
 
-func (t *tokens) authorize(ctx context.Context, h http.Header) error {
-	ts, err := t.source(ctx)
+func (t *tokens) authorize(r *http.Request) error {
+	ts, err := t.source(r.Context())
 	if err != nil {
 		return err
 	}
@@ -138,7 +138,7 @@ func (t *tokens) authorize(ctx context.Context, h http.Header) error {
 	if err != nil {
 		return err
 	}
-	tok.SetAuthHeader(&http.Request{Header: h})
+	tok.SetAuthHeader(r)
 	return nil
 }
 

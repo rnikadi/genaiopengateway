@@ -127,7 +127,9 @@ Cache writes are counted at the input price, as for Anthropic.
 
 **Claude through `/v1/messages`** uses InvokeModel (`/model/{id}/invoke` and `invoke-with-response-stream`) with the body unchanged except that `model` is removed and `anthropic_version: bedrock-2023-05-31` is set. Stream chunks arrive as event stream frames carrying Anthropic events, and are re-emitted as Anthropic SSE, so Anthropic SDKs and Claude Code work unchanged.
 
-**Embeddings** use InvokeModel with the model's own body: Titan Text Embeddings V2 (one input per call, so an input array becomes parallel calls) and Cohere Embed (arrays in one call). `dimensions` maps to Titan's `dimensions`. Token counts come from the `x-amzn-bedrock-input-token-count` header.
+On Bedrock, `/v1/messages` is served for model ids and inference profile ids that contain `anthropic.`; an application inference profile ARN does not show its model, so use it through chat completions. `anthropic-beta` headers are sent as `anthropic_beta` in the body, as Bedrock expects.
+
+**Embeddings** use InvokeModel with the model's own body: Titan Text Embeddings V2 (one input per call, so an input array becomes parallel calls) and Cohere Embed (arrays in one call). `dimensions` maps to Titan's `dimensions` and Cohere's `output_dimension`. Inputs must be strings (at most 2048, and 96 for Cohere), Cohere texts are embedded as `search_document`, and only the `float` encoding is served. Token counts come from the `x-amzn-bedrock-input-token-count` header.
 
 **Errors.** `ThrottlingException` and `ServiceQuotaExceededException` become `429`, `ValidationException` `400`, `AccessDeniedException` `403`, `ModelNotReadyException`, `ServiceUnavailableException` and `InternalServerException` `5xx`. Fallback follows the existing rules.
 

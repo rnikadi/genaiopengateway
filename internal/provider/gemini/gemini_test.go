@@ -336,8 +336,8 @@ func TestUpstreamHooks(t *testing.T) {
 		URL: func(model, method string) string {
 			return strings.TrimSuffix(p.cfg.BaseURL, "/") + "/custom/" + model + ":" + method
 		},
-		Authorize: func(_ context.Context, h http.Header) error {
-			h.Set("Authorization", "Bearer tok")
+		Authorize: func(r *http.Request) error {
+			r.Header.Set("Authorization", "Bearer tok")
 			return nil
 		},
 	}
@@ -345,7 +345,7 @@ func TestUpstreamHooks(t *testing.T) {
 	if f.url != "/custom/m:generateContent" || f.header.Get("Authorization") != "Bearer tok" || f.header.Get("X-Goog-Api-Key") != "" {
 		t.Errorf("hooks: %s %v", f.url, f.header)
 	}
-	p.up.Authorize = func(context.Context, http.Header) error { return io.ErrUnexpectedEOF }
+	p.up.Authorize = func(*http.Request) error { return io.ErrUnexpectedEOF }
 	resp, body := send(t, p, provider.ChatCompletions, "m", false, `{"model":"m","messages":[{"role":"user","content":"Hi"}]}`)
 	if resp.StatusCode != 502 || !strings.Contains(body, "upstream credentials") {
 		t.Errorf("auth failure: %d %s", resp.StatusCode, body)

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/provider"
@@ -39,9 +40,13 @@ type Upstream struct {
 	// model is removed from the body, and the anthropic-version header is
 	// not sent.
 	Version string
-	// Authorize sets credentials on an upstream request. A failure is
-	// returned to the client as a 502, which allows fallback.
-	Authorize func(ctx context.Context, h http.Header) error
+	// BetasInBody sends the client's anthropic-beta headers as
+	// anthropic_beta in the body, as Bedrock expects.
+	BetasInBody bool
+	// Authorize sets credentials on an upstream request, after every
+	// other header; a signer may read the body through GetBody. A
+	// failure is returned to the client as a 502, which allows fallback.
+	Authorize func(r *http.Request) error
 	// Decode turns a streamed response into Anthropic server-sent events.
 	Decode func(io.ReadCloser) io.ReadCloser
 }
@@ -102,7 +107,11 @@ func (p *Provider) post(ctx context.Context, body []byte, stream bool, clientHea
 	if p.up.URL != nil {
 		var model string
 		var err error
-		if body, model, err = cloudBody(body, p.up.Version); err != nil {
+		var betas []string
+		if p.up.BetasInBody {
+			betas = clientHeader.Values("Anthropic-Beta")
+		}
+		if body, model, err = cloudBody(body, p.up.Version, betas); err != nil {
 			return upstreamError(http.StatusBadRequest, "invalid_request_error", err.Error()), nil
 		}
 		url = p.up.URL(model, stream)
@@ -120,8 +129,10 @@ func (p *Provider) post(ctx context.Context, body []byte, stream bool, clientHea
 			hreq.Header.Set("Anthropic-Version", v)
 		}
 	}
-	for _, v := range clientHeader.Values("Anthropic-Beta") {
-		hreq.Header.Add("Anthropic-Beta", v)
+	if !p.up.BetasInBody {
+		for _, v := range clientHeader.Values("Anthropic-Beta") {
+			hreq.Header.Add("Anthropic-Beta", v)
+		}
 	}
 	if stream {
 		hreq.Header.Set("Accept", "text/event-stream")
@@ -130,7 +141,7 @@ func (p *Provider) post(ctx context.Context, body []byte, stream bool, clientHea
 		hreq.Header.Set(k, v)
 	}
 	if p.up.Authorize != nil {
-		if err := p.up.Authorize(ctx, hreq.Header); err != nil {
+		if err := p.up.Authorize(hreq); err != nil {
 			cancel()
 			return upstreamError(http.StatusBadGateway, "api_error", "upstream credentials: "+err.Error()), nil
 		}
@@ -158,7 +169,7 @@ func (p *Provider) post(ctx context.Context, body []byte, stream bool, clientHea
 
 // cloudBody moves the model out of a Messages body and sets
 // anthropic_version, as Vertex AI and Bedrock expect.
-func cloudBody(body []byte, version string) ([]byte, string, error) {
+func cloudBody(body []byte, version string, betas []string) ([]byte, string, error) {
 	var m map[string]json.RawMessage
 	if json.Unmarshal(body, &m) != nil {
 		return nil, "", errors.New("request body must be a JSON object")
@@ -168,6 +179,17 @@ func cloudBody(body []byte, version string) ([]byte, string, error) {
 	delete(m, "model")
 	if version != "" {
 		m["anthropic_version"], _ = json.Marshal(version)
+	}
+	if len(betas) > 0 {
+		var list []string
+		for _, b := range betas {
+			for v := range strings.SplitSeq(b, ",") {
+				if v = strings.TrimSpace(v); v != "" {
+					list = append(list, v)
+				}
+			}
+		}
+		m["anthropic_beta"], _ = json.Marshal(list)
 	}
 	out, err := json.Marshal(m)
 	return out, model, err
