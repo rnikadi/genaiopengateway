@@ -23,15 +23,21 @@ type Budget struct {
 // Policy is the set of rules at one level of the tenancy hierarchy. Zero
 // values mean "no restriction".
 type Policy struct {
-	AllowedModels []string `yaml:"allowed_models" json:"allowed_models,omitempty"`
-	RPM           int64    `yaml:"rpm" json:"rpm,omitempty"`
-	TPM           int64    `yaml:"tpm" json:"tpm,omitempty"`
-	Budget        *Budget  `yaml:"budget" json:"budget,omitempty"`
+	AllowedModels     []string `yaml:"allowed_models" json:"allowed_models,omitempty"`
+	AllowedMCPServers []string `yaml:"allowed_mcp_servers" json:"allowed_mcp_servers,omitempty"`
+	RPM               int64    `yaml:"rpm" json:"rpm,omitempty"`
+	TPM               int64    `yaml:"tpm" json:"tpm,omitempty"`
+	Budget            *Budget  `yaml:"budget" json:"budget,omitempty"`
 }
 
 // AllowsModel reports whether the policy permits a virtual model.
 func (p Policy) AllowsModel(model string) bool {
 	return len(p.AllowedModels) == 0 || slices.Contains(p.AllowedModels, model)
+}
+
+// AllowsMCPServer reports whether the policy permits a virtual MCP server.
+func (p Policy) AllowsMCPServer(name string) bool {
+	return len(p.AllowedMCPServers) == 0 || slices.Contains(p.AllowedMCPServers, name)
 }
 
 // Validate checks that limits are non-negative and the budget is well formed.

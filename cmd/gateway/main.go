@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rnikadi/genaiopengateway/internal/config"
+	"github.com/rnikadi/genaiopengateway/internal/mcpgw"
 	"github.com/rnikadi/genaiopengateway/internal/server"
 	"github.com/rnikadi/genaiopengateway/internal/store"
 	"github.com/rnikadi/genaiopengateway/internal/telemetry"
@@ -44,6 +45,7 @@ func run(path string, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	mcpgw.Version = version
 	shutdownTracing, tracing, err := telemetry.SetupTracing(context.Background(), version)
 	if err != nil {
 		return fmt.Errorf("set up tracing: %w", err)

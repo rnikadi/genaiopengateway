@@ -54,9 +54,9 @@ client ──POST /mcp/{virtual}──▶ auth ─▶ policy ─▶ limits ─�
 
 ## Discovery and the catalog
 
-At startup and then every `mcp.refresh_interval` (default 60s, or sooner when an upstream's `ttlMs` asks for it), the gateway lists the tools, prompts, resources and resource templates of every upstream server. For each virtual server it builds a catalog: the allowed, approved items with names prefixed. Catalogs swap in atomically, so a request always sees one consistent view.
+At startup and then every `mcp.refresh_interval` (default 60s), the gateway lists the tools, prompts, resources and resource templates of every upstream server. For each virtual server it builds a catalog: the allowed, approved items with names prefixed. Catalogs swap in atomically, so a request always sees one consistent view.
 
-An upstream that cannot be reached keeps its last good catalog and is retried with backoff. Its calls fail with a JSON-RPC error until it recovers, and `gog_mcp_upstream_up` drops to 0.
+Until an upstream's first listing succeeds, its items are absent. An upstream that cannot be reached keeps its last good catalog and is retried with backoff (1s, doubling up to the refresh interval). Its calls fail with a JSON-RPC error until it recovers, and `gog_mcp_upstream_up` drops to 0.
 
 ## Tool pinning
 
@@ -69,7 +69,7 @@ Pins live in the store. Without a store they live in memory, so every restart is
 
 ## Upstream sessions
 
-The gateway keeps one client session per upstream server per replica, shared by every client, because v0.2 upstream credentials are per server, not per user. Calls on a shared session are independent, which matches stateless servers and the way remote MCP servers are used for tools. A session the upstream expires (`404`) is re-established once and the call retried.
+The gateway keeps one client session per upstream server per replica, shared by every client, because v0.2 upstream credentials are per server, not per user. Calls on a shared session are independent, which matches stateless servers and the way remote MCP servers are used for tools. When a call was never delivered, because the upstream expired the session (`404`) or the session had closed, the session is re-established and the call retried once. A call that may have reached the upstream is never retried, since tools can have side effects.
 
 ## Audit records
 
@@ -115,6 +115,7 @@ mcp:
           prefix: github                            # default: the server name
         - server: docs
           prompts: false                            # omit prompts from this upstream
+          resources: false                          # omit resources and templates
   oauth:                                    # optional; see ADR 0014
     issuer: https://login.example.com/
     audience: https://gateway.example.com/mcp
@@ -161,7 +162,7 @@ The threats listed in [security.md](security.md) and their controls in v0.2:
 | Rug pull: a tool definition changes after approval | Pinning hides changed tools until approved again. |
 | Name collision or shadowing across servers | Per-upstream prefixes; a collision within a virtual server fails config validation. |
 | Confused deputy | The gateway does not run an OAuth proxy or dynamic client registration; it is only a resource server. |
-| DNS rebinding and cross-origin requests to the gateway | Bearer authentication on every request; browser origins are checked. |
+| DNS rebinding and cross-origin requests to the gateway | Bearer authentication on every request. The gateway sends no CORS headers, so a page on another origin cannot make an authenticated request. |
 | SSRF through upstream URLs | Upstream URLs come only from operator config. |
 | Prompt injection in tool output | Out of scope for the transport; guardrails on tool output arrive with the guardrail pipeline. Audit makes every call traceable. |
 | Denial of service through slow or huge upstream responses | Per-server timeouts and a 4 MiB request body limit. |

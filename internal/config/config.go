@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +30,7 @@ type Config struct {
 	Providers map[string]Provider `yaml:"providers"`
 	Models    map[string]Model    `yaml:"models"`
 	Keys      []StaticKey         `yaml:"keys"`
+	MCP       MCP                 `yaml:"mcp"`
 }
 
 // TLS enables HTTPS on the main listener when both files are set.
@@ -109,6 +111,57 @@ type Price struct {
 // IsZero reports whether no price is configured.
 func (p Price) IsZero() bool { return p == Price{} }
 
+// MCP configures the MCP gateway. See docs/mcp.md.
+type MCP struct {
+	RefreshInterval Duration                 `yaml:"refresh_interval"`
+	Servers         map[string]MCPServer     `yaml:"servers"`
+	VirtualServers  map[string]VirtualServer `yaml:"virtual_servers"`
+}
+
+// MCPServer is an upstream MCP server reached over Streamable HTTP.
+type MCPServer struct {
+	URL     string            `yaml:"url"`
+	Headers map[string]Secret `yaml:"headers"`
+	Timeout Duration          `yaml:"timeout"`
+}
+
+// VirtualServer is what clients connect to at /mcp/{name}.
+type VirtualServer struct {
+	Description string             `yaml:"description"`
+	Servers     []VirtualServerRef `yaml:"servers"`
+}
+
+// VirtualServerRef exposes part of one upstream server in a virtual server.
+type VirtualServerRef struct {
+	Server string `yaml:"server"`
+	// Tools lists the upstream tool names to expose; nil exposes all.
+	Tools []string `yaml:"tools"`
+	// Prefix is prepended to tool and prompt names with an underscore.
+	// Nil means the server name; an empty string means no prefix.
+	Prefix    *string `yaml:"prefix"`
+	Prompts   *bool   `yaml:"prompts"`
+	Resources *bool   `yaml:"resources"`
+}
+
+// NamePrefix returns the prefix applied to tool and prompt names,
+// including the separator.
+func (r VirtualServerRef) NamePrefix() string {
+	p := r.Server
+	if r.Prefix != nil {
+		p = *r.Prefix
+	}
+	if p == "" {
+		return ""
+	}
+	return p + "_"
+}
+
+// ExposesPrompts reports whether the upstream's prompts are included.
+func (r VirtualServerRef) ExposesPrompts() bool { return r.Prompts == nil || *r.Prompts }
+
+// ExposesResources reports whether the upstream's resources are included.
+func (r VirtualServerRef) ExposesResources() bool { return r.Resources == nil || *r.Resources }
+
 // StaticKey is an API key declared in the config file.
 type StaticKey struct {
 	Name          string `yaml:"name"`
@@ -122,6 +175,8 @@ const (
 	DefaultMaxRequestBytes = 32 << 20
 	DefaultProviderTimeout = 5 * time.Minute
 	DefaultRefreshInterval = 5 * time.Second
+	DefaultMCPRefresh      = time.Minute
+	DefaultMCPTimeout      = time.Minute
 	MinAdminTokenLength    = 32
 	MinStaticKeyLength     = 16
 )
@@ -150,6 +205,7 @@ func Parse(raw []byte) (*Config, error) {
 		Limits:  Limits{MaxRequestBytes: DefaultMaxRequestBytes},
 		Limiter: Limiter{Driver: "memory", FailOpenRateLimits: true},
 		Store:   Store{RefreshInterval: Duration(DefaultRefreshInterval)},
+		MCP:     MCP{RefreshInterval: Duration(DefaultMCPRefresh)},
 	}
 	if len(doc.Content) > 0 {
 		dec := doc.Content[0]
@@ -257,6 +313,8 @@ func (c *Config) validate() error {
 		}
 	}
 
+	c.validateMCP(add)
+
 	seen := map[string]bool{}
 	names := map[string]bool{}
 	for i, k := range c.Keys {
@@ -283,8 +341,64 @@ func (c *Config) validate() error {
 				add("key %q: allowed model %q is not configured", k.Name, m)
 			}
 		}
+		for _, v := range k.AllowedMCPServers {
+			if _, ok := c.MCP.VirtualServers[v]; !ok {
+				add("key %q: allowed MCP server %q is not configured", k.Name, v)
+			}
+		}
 	}
 	return errors.Join(errs...)
+}
+
+var (
+	// mcpName is a server or virtual server name: safe in a URL path and
+	// as a metric label.
+	mcpName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
+	// mcpPrefix fits the MCP tool name alphabet.
+	mcpPrefix = regexp.MustCompile(`^[A-Za-z0-9.-][A-Za-z0-9_.-]{0,63}$`)
+)
+
+func (c *Config) validateMCP(add func(string, ...any)) {
+	m := &c.MCP
+	if m.RefreshInterval < Duration(time.Second) {
+		add("mcp.refresh_interval must be at least 1s")
+	}
+	for name, s := range m.Servers {
+		if !mcpName.MatchString(name) {
+			add("mcp server %q: names use lowercase letters, digits, - and _", name)
+		}
+		if u, err := url.Parse(s.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			add("mcp server %q: url must be an http or https URL", name)
+		}
+		if s.Timeout <= 0 {
+			s.Timeout = Duration(DefaultMCPTimeout)
+		}
+		m.Servers[name] = s
+	}
+	for name, v := range m.VirtualServers {
+		if !mcpName.MatchString(name) {
+			add("mcp virtual server %q: names use lowercase letters, digits, - and _", name)
+		}
+		if len(v.Servers) == 0 {
+			add("mcp virtual server %q: at least one server is required", name)
+		}
+		prefixes := map[string]bool{}
+		for i, r := range v.Servers {
+			if _, ok := m.Servers[r.Server]; !ok {
+				add("mcp virtual server %q servers[%d]: unknown server %q", name, i, r.Server)
+			}
+			p := r.NamePrefix()
+			switch {
+			case p != "" && !mcpPrefix.MatchString(strings.TrimSuffix(p, "_")):
+				add("mcp virtual server %q servers[%d]: prefix may use letters, digits, _, . and -", name, i)
+			case p == "" && len(v.Servers) > 1:
+				add("mcp virtual server %q servers[%d]: an empty prefix is allowed only for a single server", name, i)
+			case prefixes[p]:
+				add("mcp virtual server %q servers[%d]: prefix %q is used twice", name, i, strings.TrimSuffix(p, "_"))
+			}
+			prefixes[p] = true
+		}
+	}
 }
 
 // Secret is a string that never prints its value.

@@ -74,6 +74,16 @@ func (p *Principal) AllowsModel(model string) bool {
 	return true
 }
 
+// AllowsMCPServer reports whether every level permits the virtual MCP server.
+func (p *Principal) AllowsMCPServer(name string) bool {
+	for _, pol := range p.Policies {
+		if !pol.AllowsMCPServer(name) {
+			return false
+		}
+	}
+	return true
+}
+
 // Directory is an immutable index of principals by key hash.
 type Directory struct {
 	byHash map[string]*Principal
