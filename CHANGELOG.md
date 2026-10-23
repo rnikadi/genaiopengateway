@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-23
+
+The MCP gateway: one governed endpoint for the MCP servers a company uses.
+
 ### Added
 
 - MCP gateway: virtual MCP servers at `/mcp/{name}` that expose chosen tools, prompts and resources from upstream MCP servers over Streamable HTTP, with per-upstream name prefixes, tool allow lists, static upstream credentials, `allowed_mcp_servers` policies, rate limits on calls, and MCP metrics, logs and traces. Clients on MCP 2024-11-05 through 2026-07-28 are supported.
@@ -40,5 +44,6 @@ The first release: an OpenAI-compatible gateway with tenants, keys, limits, budg
 - Config reload on `SIGHUP` and graceful shutdown.
 - Signed binaries and images with SBOMs.
 
-[Unreleased]: https://github.com/rnikadi/genaiopengateway/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/rnikadi/genaiopengateway/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/rnikadi/genaiopengateway/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/rnikadi/genaiopengateway/releases/tag/v0.1.0

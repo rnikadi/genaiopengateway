@@ -6,7 +6,7 @@ One open-source gateway for every GenAI model type and every MCP server, with en
 - **MCP and agents:** registry, virtual servers, OAuth 2.1, tool-level RBAC, audit.
 - **Enterprise:** SSO, SCIM, RBAC, multi-tenancy, budgets, rate limits, guardrails, observability.
 
-> **Status:** v0.1. Working today: the OpenAI-compatible API (chat completions, embeddings, responses) for OpenAI-compatible providers and for Claude by translation, plus native Anthropic `/v1/messages`; virtual models with fallback and streaming; organizations, teams and keys with model allow lists, rate limits and budgets; usage and cost in SQLite or Postgres; an audit log; Prometheus metrics and OpenTelemetry traces. MCP, SSO and more modalities follow on the [roadmap](docs/roadmap.md). Design docs are in [docs/](docs/README.md).
+> **Status:** v0.2. Working today: the OpenAI-compatible API (chat completions, embeddings, responses) for OpenAI-compatible providers and for Claude by translation, plus native Anthropic `/v1/messages`; virtual models with fallback and streaming; organizations, teams and keys with model allow lists, rate limits and budgets; usage and cost in SQLite or Postgres; an audit log; Prometheus metrics and OpenTelemetry traces; and an MCP gateway with virtual servers, tool pinning, call audit and OAuth 2.1. SSO, an admin UI and more modalities follow on the [roadmap](docs/roadmap.md). Design docs are in [docs/](docs/README.md).
 
 ## Quick start
 
