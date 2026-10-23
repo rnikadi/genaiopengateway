@@ -20,7 +20,7 @@ func Assemble(contentType string, body []byte) []byte {
 		return body
 	}
 	events := parseSSE(body)
-	for _, assemble := range []func([]sseEvent) ([]byte, bool){responsesStream, anthropicStream, chatStream} {
+	for _, assemble := range []func([]sseEvent) ([]byte, bool){responsesStream, anthropicStream, chatStream, geminiStream} {
 		if out, ok := assemble(events); ok {
 			return out
 		}
@@ -278,6 +278,93 @@ func anthropicStream(events []sseEvent) ([]byte, bool) {
 	msg["content"] = content
 	out, _ := json.Marshal(msg)
 	return out, true
+}
+
+// geminiStream assembles Gemini streamGenerateContent events, each a
+// partial GenerateContentResponse, into one response. Text parts are
+// joined; other parts are kept in order.
+func geminiStream(events []sseEvent) ([]byte, bool) {
+	type part = map[string]any
+	var out map[string]any
+	candidates := map[int]map[string]any{}
+	parts := map[int][]part{}
+	for _, ev := range events {
+		var e map[string]any
+		if json.Unmarshal(ev.data, &e) != nil {
+			continue
+		}
+		cands, ok := e["candidates"].([]any)
+		if !ok && e["usageMetadata"] == nil && e["promptFeedback"] == nil {
+			continue
+		}
+		if out == nil {
+			out = map[string]any{}
+		}
+		for k, v := range e {
+			if k != "candidates" {
+				out[k] = v
+			}
+		}
+		for _, c := range cands {
+			c, _ := c.(map[string]any)
+			if c == nil {
+				continue
+			}
+			idx := 0
+			if f, ok := c["index"].(float64); ok {
+				idx = int(f)
+			}
+			cur := candidates[idx]
+			if cur == nil {
+				cur = map[string]any{}
+				candidates[idx] = cur
+			}
+			for k, v := range c {
+				if k != "content" {
+					cur[k] = v
+				}
+			}
+			content, _ := c["content"].(map[string]any)
+			ps, _ := content["parts"].([]any)
+			for _, p := range ps {
+				p, _ := p.(map[string]any)
+				if p == nil {
+					continue
+				}
+				list := parts[idx]
+				text, isText := p["text"].(string)
+				if n := len(list); isText && n > 0 {
+					last := list[n-1]
+					if lt, ok := last["text"].(string); ok && last["thought"] == p["thought"] {
+						last["text"] = lt + text
+						if last["thoughtSignature"] == nil && p["thoughtSignature"] != nil {
+							last["thoughtSignature"] = p["thoughtSignature"]
+						}
+						continue
+					}
+				}
+				parts[idx] = append(list, p)
+			}
+		}
+	}
+	if out == nil {
+		return nil, false
+	}
+	var list []any
+	for _, idx := range sortedKeys(candidates) {
+		c := candidates[idx]
+		ps := []any{}
+		for _, p := range parts[idx] {
+			ps = append(ps, p)
+		}
+		c["content"] = map[string]any{"role": "model", "parts": ps}
+		list = append(list, c)
+	}
+	if list != nil {
+		out["candidates"] = list
+	}
+	b, _ := json.Marshal(out)
+	return b, true
 }
 
 func sortedKeys[V any](m map[int]V) []int {

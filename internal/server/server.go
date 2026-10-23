@@ -322,6 +322,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/embeddings", s.model(provider.Embeddings))
 	mux.HandleFunc("POST /v1/responses", s.model(provider.Responses))
 	mux.HandleFunc("POST /v1/messages", s.model(provider.Messages))
+	mux.HandleFunc("POST /v1beta/models/{action}", s.model(provider.GenerateContent))
 	mux.HandleFunc("/mcp/{name}", s.serveMCP)
 	if s.store != nil {
 		mux.HandleFunc("GET /mcp/connect/callback", s.connectCallback)
@@ -366,12 +367,15 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 }
 
 // presentedKey returns the gateway key from Authorization: Bearer or,
-// for the Anthropic SDK, x-api-key.
+// for the Anthropic and Google SDKs, x-api-key or x-goog-api-key.
 func presentedKey(r *http.Request) string {
 	if v := r.Header.Get("Authorization"); len(v) > 7 && (v[:7] == "Bearer " || v[:7] == "bearer ") {
 		return v[7:]
 	}
-	return r.Header.Get("X-Api-Key")
+	if v := r.Header.Get("X-Api-Key"); v != "" {
+		return v
+	}
+	return r.Header.Get("X-Goog-Api-Key")
 }
 
 var safeRequestID = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)

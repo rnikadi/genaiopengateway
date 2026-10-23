@@ -68,13 +68,13 @@ Used by `gemini`, and by `vertex` for Google models. The request and response bo
 | `user`, `assistant` messages | `contents` with roles `user` and `model` |
 | text parts, image parts as data URLs | `text` and `inlineData` parts. Image URLs are rejected with `400`, as the gateway does not fetch URLs. |
 | `assistant.tool_calls` | `functionCall` parts. Gemini's thought signature is returned in `tool_calls[].extra_content.google.thought_signature`, as Google's own OpenAI compatibility layer does, and sent back when the client includes it. |
-| `tool` messages | `functionResponse` parts; the function name is found from the matching `tool_call_id` earlier in the request |
+| `tool` messages | `functionResponse` parts; the function name is found from the matching `tool_call_id` earlier in the request, and a `tool_call_id` that matches no earlier call is a `400`. A result that is a JSON object is sent as the response; any other text is sent as `{"result": text}`. |
 | `tools` (function type) | `functionDeclarations` with the JSON Schema as `parametersJsonSchema` |
 | `tool_choice` `auto` / `none` / `required` / named | `functionCallingConfig.mode` `AUTO` / `NONE` / `ANY` / `ANY` with `allowedFunctionNames` |
 | `max_tokens`, `max_completion_tokens` | `generationConfig.maxOutputTokens` |
 | `temperature`, `top_p`, `stop`, `seed` | `temperature`, `topP`, `stopSequences`, `seed` |
 | `response_format` `json_object` / `json_schema` | `responseMimeType: application/json`, plus `responseJsonSchema` |
-| `reasoning_effort` | `thinkingConfig.thinkingLevel` |
+| `reasoning_effort` `minimal` / `low` / `medium` / `high` | `thinkingConfig.thinkingLevel` (Gemini 3 and later; older models reject it upstream) |
 | `stream` | `streamGenerateContent?alt=sse` |
 | `finishReason` `STOP` / `MAX_TOKENS` / `SAFETY`, `RECITATION`, `BLOCKLIST`, `PROHIBITED_CONTENT`, `SPII` | `finish_reason` `stop` / `length` / `content_filter`; `tool_calls` when the reply has function calls |
 | `usageMetadata` | `prompt_tokens` = `promptTokenCount`; `completion_tokens` = `candidatesTokenCount` + `thoughtsTokenCount`; `reasoning_tokens` = `thoughtsTokenCount`; `cached_tokens` = `cachedContentTokenCount` |
@@ -90,6 +90,8 @@ Unsupported fields (`n` greater than 1, `logprobs`, audio parts) are rejected wi
 - `POST /v1beta/models/{model}:generateContent` and `:streamGenerateContent`, where `{model}` is a virtual model.
 - The client's gateway key is accepted in `x-goog-api-key`, as these clients send it.
 - The body is forwarded unchanged; usage is read from `usageMetadata`.
+- Streams are always server-sent events (`alt=sse`), which is what the Google SDKs ask for. A key in the `key` query parameter is not accepted, since URLs end up in logs.
+- When an `output` guardrail redacts a stream, the client gets the whole redacted response as one event.
 
 On `vertex` the gateway sends the request to the publisher model URL. Model allow lists, limits, budgets, guardrails and body logging apply as on every endpoint.
 

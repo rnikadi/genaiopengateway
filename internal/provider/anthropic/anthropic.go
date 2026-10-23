@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 
@@ -26,11 +27,33 @@ const maxBody = 64 << 20
 type Provider struct {
 	cfg    config.Provider
 	client *http.Client
+	up     Upstream
+}
+
+// Upstream adapts the Messages API as a cloud serves it, such as Claude
+// on Vertex AI or Bedrock. The zero value is the Anthropic API.
+type Upstream struct {
+	// URL returns where to send a request for model.
+	URL func(model string, stream bool) string
+	// Version, when set, is sent in the body as anthropic_version, the
+	// model is removed from the body, and the anthropic-version header is
+	// not sent.
+	Version string
+	// Authorize sets credentials on an upstream request. A failure is
+	// returned to the client as a 502, which allows fallback.
+	Authorize func(ctx context.Context, h http.Header) error
+	// Decode turns a streamed response into Anthropic server-sent events.
+	Decode func(io.ReadCloser) io.ReadCloser
 }
 
 // New returns an adapter for cfg.
 func New(cfg config.Provider, client *http.Client) *Provider {
 	return &Provider{cfg: cfg, client: client}
+}
+
+// NewUpstream returns an adapter for Claude served by a cloud.
+func NewUpstream(cfg config.Provider, client *http.Client, up Upstream) *Provider {
+	return &Provider{cfg: cfg, client: client, up: up}
 }
 
 // Supports implements provider.Provider.
@@ -75,16 +98,27 @@ func (p *Provider) Send(ctx context.Context, req *provider.Request) (*provider.R
 // post sends a Messages API request. Only anthropic-version and
 // anthropic-beta are taken from the client.
 func (p *Provider) post(ctx context.Context, body []byte, stream bool, clientHeader http.Header) (*provider.Response, error) {
+	url := p.cfg.BaseURL + "/v1/messages"
+	if p.up.URL != nil {
+		var model string
+		var err error
+		if body, model, err = cloudBody(body, p.up.Version); err != nil {
+			return upstreamError(http.StatusBadRequest, "invalid_request_error", err.Error()), nil
+		}
+		url = p.up.URL(model, stream)
+	}
 	ctx, cancel := context.WithTimeout(ctx, p.cfg.Timeout.Std())
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.cfg.BaseURL+"/v1/messages", bytes.NewReader(body))
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		cancel()
 		return nil, err
 	}
 	hreq.Header.Set("Content-Type", "application/json")
-	hreq.Header.Set("Anthropic-Version", DefaultVersion)
-	if v := clientHeader.Get("Anthropic-Version"); v != "" {
-		hreq.Header.Set("Anthropic-Version", v)
+	if p.up.Version == "" {
+		hreq.Header.Set("Anthropic-Version", DefaultVersion)
+		if v := clientHeader.Get("Anthropic-Version"); v != "" {
+			hreq.Header.Set("Anthropic-Version", v)
+		}
 	}
 	for _, v := range clientHeader.Values("Anthropic-Beta") {
 		hreq.Header.Add("Anthropic-Beta", v)
@@ -92,23 +126,63 @@ func (p *Provider) post(ctx context.Context, body []byte, stream bool, clientHea
 	if stream {
 		hreq.Header.Set("Accept", "text/event-stream")
 	}
-	if key := p.cfg.APIKey.Value(); key != "" {
-		hreq.Header.Set("X-Api-Key", key)
-	}
 	for k, v := range p.cfg.Headers {
 		hreq.Header.Set(k, v)
+	}
+	if p.up.Authorize != nil {
+		if err := p.up.Authorize(ctx, hreq.Header); err != nil {
+			cancel()
+			return upstreamError(http.StatusBadGateway, "api_error", "upstream credentials: "+err.Error()), nil
+		}
+	} else if key := p.cfg.APIKey.Value(); key != "" {
+		hreq.Header.Set("X-Api-Key", key)
 	}
 	resp, err := p.client.Do(hreq)
 	if err != nil {
 		cancel()
 		return nil, err
 	}
-	return &provider.Response{
+	out := &provider.Response{
 		StatusCode: resp.StatusCode,
 		Header:     resp.Header,
 		Body:       &cancelOnClose{ReadCloser: resp.Body, cancel: cancel},
 		Usage:      &usage.Tokens{},
-	}, nil
+	}
+	if stream && resp.StatusCode == http.StatusOK && p.up.Decode != nil {
+		out.Body = p.up.Decode(out.Body)
+		out.Header = out.Header.Clone()
+		out.Header.Set("Content-Type", "text/event-stream")
+	}
+	return out, nil
+}
+
+// cloudBody moves the model out of a Messages body and sets
+// anthropic_version, as Vertex AI and Bedrock expect.
+func cloudBody(body []byte, version string) ([]byte, string, error) {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(body, &m) != nil {
+		return nil, "", errors.New("request body must be a JSON object")
+	}
+	var model string
+	_ = json.Unmarshal(m["model"], &model)
+	delete(m, "model")
+	if version != "" {
+		m["anthropic_version"], _ = json.Marshal(version)
+	}
+	out, err := json.Marshal(m)
+	return out, model, err
+}
+
+// upstreamError is an error response in the Messages API shape, for
+// failures before the upstream answered.
+func upstreamError(status int, typ, msg string) *provider.Response {
+	b, _ := json.Marshal(map[string]any{"type": "error", "error": map[string]any{"type": typ, "message": msg}})
+	return &provider.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(bytes.NewReader(b)),
+		Usage:      &usage.Tokens{},
+	}
 }
 
 func readAll(rc io.ReadCloser) ([]byte, error) {

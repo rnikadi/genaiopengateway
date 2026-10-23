@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -73,6 +74,13 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 		if json.Unmarshal(raw, &body) != nil || body == nil {
 			fail(http.StatusBadRequest, codeInvalidRequest, "request body must be a JSON object")
 			return
+		}
+		if ep == provider.GenerateContent {
+			if !googleRequest(r, body) {
+				fail(http.StatusNotFound, codeModelNotFound, "unknown method: use generateContent or streamGenerateContent")
+				return
+			}
+			raw, _ = json.Marshal(body)
 		}
 		var envelope struct {
 			Model  string `json:"model"`
@@ -352,4 +360,22 @@ func (s *Server) finish(rt *runtime, rec *requestLog, span trace.Span, start tim
 		slog.Int("fallbacks", rec.Fallbacks),
 		slog.String("error_code", rec.ErrorCode),
 	)...)
+}
+
+// googleRequest adds the model and stream flag of a generateContent
+// path, such as /v1beta/models/chat:streamGenerateContent, to the body
+// so the request takes the same path as every model endpoint. The
+// adapter removes them again.
+func googleRequest(r *http.Request, body map[string]json.RawMessage) bool {
+	model, method, _ := strings.Cut(r.PathValue("action"), ":")
+	switch method {
+	case "generateContent":
+		body["stream"] = json.RawMessage("false")
+	case "streamGenerateContent":
+		body["stream"] = json.RawMessage("true")
+	default:
+		return false
+	}
+	body["model"], _ = json.Marshal(model)
+	return true
 }
