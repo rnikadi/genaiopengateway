@@ -54,6 +54,8 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	h("GET /admin/v1/models", s.listConfiguredModels)
 	h("GET /admin/v1/alerts", s.listAlerts)
 	h("POST /admin/v1/alerts/test", s.testAlert)
+	h("GET /admin/v1/mcp/connections", s.listMCPConnections)
+	h("DELETE /admin/v1/mcp/connections/{server}/{subject}", s.deleteMCPConnection)
 	h("GET /admin/v1/requests", s.listRequests)
 	h("GET /admin/v1/requests/{request_id}", s.getRequestBody)
 	h("DELETE /admin/v1/requests", s.deleteRequestBodies)

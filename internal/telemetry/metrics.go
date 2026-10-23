@@ -39,6 +39,10 @@ type Metrics struct {
 
 	bodiesWritten prometheus.Counter
 	redactions    *prometheus.CounterVec
+
+	mcpConnections *prometheus.GaugeVec
+	connectFlows   *prometheus.CounterVec
+	tokenRefreshes *prometheus.CounterVec
 }
 
 // Model request latencies span milliseconds (embeddings) to minutes
@@ -101,11 +105,21 @@ func NewMetrics(usageErrors, snapshotAge, bodiesDropped func() float64) *Metrics
 		redactions: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "gog_redactions_total", Help: "Values redacted from logged bodies, by type.",
 		}, []string{"type"}),
+		mcpConnections: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "gog_mcp_connections", Help: "Users connected to each user_auth MCP server.",
+		}, []string{"server"}),
+		connectFlows: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "gog_mcp_connect_flows_total", Help: "MCP connect flows finished, by result.",
+		}, []string{"server", "result"}),
+		tokenRefreshes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "gog_mcp_token_refreshes_total", Help: "Refreshes of users' upstream MCP tokens, by result.",
+		}, []string{"server", "result"}),
 	}
 	m.reg.MustRegister(
 		m.requests, m.duration, m.ttfb, m.tokens, m.cost, m.fallbacks, m.limitRejection, m.unpriced,
 		m.mcpRequests, m.mcpDuration, m.mcpToolCalls, m.mcpUp, m.mcpPending,
 		m.alerts, m.alertDeliveries, m.bodiesWritten, m.redactions,
+		m.mcpConnections, m.connectFlows, m.tokenRefreshes,
 		prometheus.NewCounterFunc(prometheus.CounterOpts{
 			Name: "gog_request_bodies_dropped_total", Help: "Bodies not logged because the queue was full or the write failed.",
 		}, bodiesDropped),
@@ -241,6 +255,22 @@ func (m *Metrics) ObserveRedactions(counts map[string]int) {
 	for typ, n := range counts {
 		m.redactions.WithLabelValues(typ).Add(float64(n))
 	}
+}
+
+// SetMCPConnections sets how many users connected a server.
+func (m *Metrics) SetMCPConnections(server string, n int) {
+	m.mcpConnections.WithLabelValues(server).Set(float64(n))
+}
+
+// ObserveConnectFlow counts a finished connect flow: completed, denied,
+// expired or error.
+func (m *Metrics) ObserveConnectFlow(server, result string) {
+	m.connectFlows.WithLabelValues(server, result).Inc()
+}
+
+// ObserveTokenRefresh counts a token refresh: ok, invalid_grant or error.
+func (m *Metrics) ObserveTokenRefresh(server, result string) {
+	m.tokenRefreshes.WithLabelValues(server, result).Inc()
 }
 
 func statusClass(status int) string {

@@ -69,6 +69,9 @@ type authFlow struct {
 	Verifier string `json:"v"`
 	Return   string `json:"r"`
 	Expires  int64  `json:"e"`
+	// Connect, when set, is the id of an MCP connect request whose user
+	// signs in only to prove who they are (docs/mcp-user-credentials.md).
+	Connect string `json:"c,omitempty"`
 }
 
 // flowKey signs the flow cookie. It is derived from the client secret, so
@@ -141,10 +144,13 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "The identity provider cannot be reached. Try again shortly.", http.StatusBadGateway)
 		return
 	}
-	f := &authFlow{
-		State: randomString(), Nonce: randomString(), Verifier: oauth2.GenerateVerifier(),
-		Return: returnPath(r.URL.Query().Get("return")), Expires: time.Now().Add(authFlowTTL).Unix(),
-	}
+	s.signIn(w, r, cfg, c, &authFlow{Return: returnPath(r.URL.Query().Get("return"))})
+}
+
+// signIn sends the browser to the identity provider with a new flow.
+func (s *Server) signIn(w http.ResponseWriter, r *http.Request, cfg *config.OIDC, c *oidcClient, f *authFlow) {
+	f.State, f.Nonce, f.Verifier = randomString(), randomString(), oauth2.GenerateVerifier()
+	f.Expires = time.Now().Add(authFlowTTL).Unix()
 	setCookie(w, r, authCookie, sealFlow(cfg, f), authFlowTTL)
 	http.Redirect(w, r, c.oauth2().AuthCodeURL(f.State, oidc.Nonce(f.Nonce), oauth2.S256ChallengeOption(f.Verifier)), http.StatusFound)
 }
@@ -195,6 +201,10 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	if subtle.ConstantTimeCompare([]byte(idt.Nonce), []byte(f.Nonce)) != 1 {
 		fail(http.StatusUnauthorized, "The ID token was not issued for this sign-in.", nil)
+		return
+	}
+	if f.Connect != "" {
+		s.connectSignedIn(w, r, f.Connect, idt.Subject)
 		return
 	}
 	claims := map[string]any{}

@@ -1,5 +1,5 @@
 import {
-  html, useState, useEffect, api, qs, useLoad, useSession, Loading, Table, Modal, PageHeader, ErrorBox, JSONView, OrgPicker, defaultOrg, when, num,
+  html, useState, useEffect, api, qs, useLoad, useSession, Loading, Table, Modal, Confirm, PageHeader, ErrorBox, JSONView, OrgPicker, defaultOrg, when, num,
 } from '../lib.js';
 
 const statusBadge = {
@@ -50,6 +50,7 @@ export function MCP() {
             columns=${[
               { label: 'Server', render: (v) => html`<strong>${v.name}</strong><br /><span class="muted small">${v.url}</span>` },
               { label: 'Status', render: (v) => (v.up ? html`<span class="badge good">Up</span>` : html`<span class="badge bad">Down</span>`) },
+              { label: 'Credentials', render: (v) => (v.user_auth ? 'Per user' : 'Shared') },
               { label: 'Pinning', render: (v) => v.pin_tools },
               { label: 'Tools', num: true, render: (v) => html`${num(v.tools)}${v.hidden_tools ? html` <span class="muted small">(${num(v.hidden_tools)} hidden)</span>` : ''}` },
               { label: 'Prompts', num: true, render: (v) => num(v.prompts) },
@@ -92,6 +93,7 @@ export function MCP() {
             ]}
           />
         </section>
+        ${s.owner && d.servers.some((v) => v.user_auth) && html`<${Connections} />`}
         <${Calls} />
         ${review && html`<${Review} tool=${review} canApprove=${s.owner} onClose=${() => setReview(null)} onApproved=${() => { setReview(null); state.reload(); }} />`}`;
     }}<//>`;
@@ -120,6 +122,41 @@ function Review({ tool, canApprove, onClose, onApproved }) {
       ${tool.status !== 'approved' && (canApprove ? html`<button disabled=${busy} onClick=${approve}>Approve this definition</button>` : html`<span class="muted small">Only owners approve tools.</span>`)}
     </footer>
   <//>`;
+}
+
+// Connections lists users' connections to per-user servers. Only owners
+// see them: they belong to people, not organizations.
+function Connections() {
+  const state = useLoad(() => api('GET', '/admin/v1/mcp/connections?limit=500'));
+  const [revoking, setRevoking] = useState(null);
+  return html`<section class="panel">
+    <h2>User connections</h2>
+    <p class="muted">Users connect their own accounts to per-user servers from their MCP client. Revoking a connection makes its user connect again.</p>
+    <${Loading} state=${state}>${(d) => html`<${Table}
+      rowKey=${(c) => c.server + '/' + c.subject}
+      rows=${d.data}
+      empty="Nobody has connected an account yet."
+      columns=${[
+        { label: 'Server', render: (c) => html`<code>${c.server}</code>` },
+        { label: 'User', render: (c) => c.subject },
+        { label: 'Scopes', render: (c) => html`<span class="small">${(c.scopes || []).join(' ')}</span>` },
+        { label: 'Connected', render: (c) => when(c.created_at) },
+        { label: 'Last used', render: (c) => when(c.last_used_at) },
+        { label: '', render: (c) => html`<button class="link danger" onClick=${() => setRevoking(c)}>Revoke</button>` },
+      ]}
+    />`}<//>
+    ${revoking && html`<${Confirm}
+      title="Revoke connection"
+      message=${`${revoking.subject} will have to connect their ${revoking.server} account again. The gateway also asks ${revoking.server} to revoke the token.`}
+      action="Revoke"
+      onConfirm=${async () => {
+        await api('DELETE', `/admin/v1/mcp/connections/${encodeURIComponent(revoking.server)}/${encodeURIComponent(revoking.subject)}`);
+        setRevoking(null);
+        state.reload();
+      }}
+      onClose=${() => setRevoking(null)}
+    />`}
+  </section>`;
 }
 
 // Calls lists recent MCP calls.

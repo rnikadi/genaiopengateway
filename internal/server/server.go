@@ -73,6 +73,7 @@ type Server struct {
 	uiFiles map[string]*uiFile
 
 	notifier *alerts.Notifier
+	conns    *connections
 }
 
 // New builds a server. st may be nil.
@@ -99,7 +100,9 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error)
 	s.notifier = alerts.New(log, s.client.Transport, mcpgw.Version, s.metrics.ObserveAlertDelivery)
 	mo := mcpgw.Options{Log: log, Transport: s.client.Transport, Limiter: s.limiter, Metrics: s.metrics}
 	if st != nil {
+		s.conns = newConnections(s)
 		mo.Pins, mo.Record, mo.Audit, mo.OnPending, mo.LogBody = st, s.calls.Add, st.AppendAudit, s.toolPending, s.logMCPBody
+		mo.Credentials = s.conns
 	}
 	s.mcp = mcpgw.New(ctx, cfg.MCP, mo)
 	if err := s.Reload(cfg); err != nil {
@@ -158,6 +161,7 @@ func (s *Server) Start(ctx context.Context) {
 	go s.notifier.Run(ctx)
 	go s.keyExpiryLoop(ctx)
 	go s.bodyPruneLoop(ctx)
+	go s.connectionsLoop(ctx)
 	if retention := s.rt.Load().cfg.Store.UsageRetention.Std(); retention > 0 {
 		go s.pruneLoop(ctx, retention)
 	}
@@ -303,6 +307,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/responses", s.model(provider.Responses))
 	mux.HandleFunc("POST /v1/messages", s.model(provider.Messages))
 	mux.HandleFunc("/mcp/{name}", s.serveMCP)
+	if s.store != nil {
+		mux.HandleFunc("GET /mcp/connect/callback", s.connectCallback)
+		mux.HandleFunc("GET /mcp/connect/{id}", s.connectStart)
+	}
 	mux.HandleFunc("/.well-known/oauth-protected-resource/mcp/{name}", s.mcpResourceMetadata)
 	s.adminRoutes(mux)
 	s.uiRoutes(mux)

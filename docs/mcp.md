@@ -22,6 +22,7 @@ This document is the design for v0.2. Decisions are recorded in ADRs [0011](adr/
 - Tool pinning against silent definition changes ("rug pulls").
 - Gateway keys and OAuth 2.1 bearer tokens for clients.
 - Static upstream credentials (headers, such as a bearer token or API key), set per upstream server.
+- From v0.3, per-user upstream credentials: each user connects their own upstream account and the gateway calls that upstream as them ([mcp-user-credentials.md](mcp-user-credentials.md)).
 - Rate limits: each `tools/call`, `prompts/get` and `resources/read` counts against the caller's RPM at org, team and key level. Listing does not.
 - An audit record per tool call, Prometheus metrics, and OpenTelemetry spans that continue the client's trace.
 
@@ -31,7 +32,6 @@ This document is the design for v0.2. Decisions are recorded in ADRs [0011](adr/
 | --- | --- |
 | stdio servers | Running arbitrary local processes needs sandboxing; planned with hosted servers. Use a stdio-to-HTTP bridge meanwhile. |
 | The deprecated HTTP+SSE transport | Deprecated by the spec since 2025-03-26. |
-| Per-user upstream credentials (upstream OAuth on behalf of each user) | Designed for v0.3 in [mcp-user-credentials.md](mcp-user-credentials.md). |
 | Server-to-client requests: sampling, elicitation, roots, and the 2026-07-28 multi round-trip results that carry them | Rare in remote servers, and sampling, roots and logging are deprecated by the spec. A tool that needs input gets a clear error. |
 | The tasks extension, completions, subscriptions and list-changed notifications to clients | Clients see changes through `ttlMs` on list results and by listing again. |
 | Admin API for MCP servers | MCP servers are infrastructure, like providers, so they live in config (ADR 0003). Pins and audit are runtime data and do have admin endpoints. |
@@ -71,7 +71,7 @@ The hash covers the whole definition except `_meta`, which carries nothing for t
 
 ## Upstream sessions
 
-The gateway keeps one client session per upstream server per replica, shared by every client, because v0.2 upstream credentials are per server, not per user. Calls on a shared session are independent, which matches stateless servers and the way remote MCP servers are used for tools. When a call was never delivered, because the upstream expired the session (`404`) or the session had closed, the session is re-established and the call retried once. A call that may have reached the upstream is never retried, since tools can have side effects.
+The gateway keeps one client session per upstream server per replica, shared by every client, because static upstream credentials are per server, not per user. A server with `user_auth` gets one session per user instead ([mcp-user-credentials.md](mcp-user-credentials.md#calls-with-a-users-token)). Calls on a shared session are independent, which matches stateless servers and the way remote MCP servers are used for tools. When a call was never delivered, because the upstream expired the session (`404`) or the session had closed, the session is re-established and the call retried once. A call that may have reached the upstream is never retried, since tools can have side effects.
 
 ## Audit records
 
@@ -106,6 +106,12 @@ mcp:
         Authorization: Bearer ${GITHUB_MCP_TOKEN}
       timeout: 60s                          # per call; default 60s
       pin_tools: true                       # true (default) | strict | false
+    linear:
+      url: https://mcp.linear.app/mcp
+      user_auth:                            # call with each user's own token; see mcp-user-credentials.md
+        client_id: ${LINEAR_CLIENT_ID}
+        client_secret: ${LINEAR_CLIENT_SECRET}
+        scopes: [read, write]
     docs:
       url: https://mcp.internal.example.com/mcp
   virtual_servers:
@@ -148,6 +154,9 @@ Key, team and org policies gain `allowed_mcp_servers`, a list of virtual server 
 | `GET /admin/v1/mcp/tools?server=&status=` | Tools with pin status: `approved`, `pending`, `changed` |
 | `POST /admin/v1/mcp/servers/{server}/tools/{tool}/approve` | Approve the current definition. The body, `{"hash": "…"}`, carries the hash shown, so an admin approves what they saw; a definition that changed since answers `409`. |
 | `GET /admin/v1/mcp/calls?org_id=&team_id=&key_id=&server=&from=&to=` | Audit records, newest first, paginated |
+| `GET /mcp/connect/{id}`, `GET /mcp/connect/callback` | The browser side of the connect flow for `user_auth` servers |
+| `GET /admin/v1/mcp/connections?server=&subject=` | Users' connections to `user_auth` servers, without tokens (owners only) |
+| `DELETE /admin/v1/mcp/connections/{server}/{subject}` | Revoke a connection at the upstream when it can, and delete it (owners only, audited) |
 
 ## Errors
 
@@ -162,6 +171,8 @@ Protocol-level failures use HTTP status codes, so any client or proxy can see th
 | Unknown or hidden tool | JSON-RPC error `-32602` (invalid params), as the spec prescribes |
 | Upstream unreachable or timed out | JSON-RPC error `-32603` with `data.server` |
 | Tool returned an error | Passed through as a result with `isError: true` |
+| The user has not connected a `user_auth` server | JSON-RPC error `-32042` (URL elicitation required) with the connect link, or for `tools/call` from clients before 2025-11-25 a result with `isError: true` and the link |
+| A gateway key calls a `user_auth` server | JSON-RPC error `-32600`: these servers need an OAuth caller |
 
 ## Security
 

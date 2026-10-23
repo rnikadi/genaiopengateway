@@ -113,6 +113,9 @@ mcp:                                 # optional; see mcp.md for every field
     github:
       url: https://api.githubcopilot.com/mcp/
       headers: {Authorization: "Bearer ${GITHUB_MCP_TOKEN}"}
+    linear:                          # each user connects their own account
+      url: https://mcp.linear.app/mcp
+      user_auth: {client_id: "${LINEAR_CLIENT_ID}", client_secret: "${LINEAR_CLIENT_SECRET}"}
   virtual_servers:
     engineering:
       servers:
@@ -149,6 +152,8 @@ All ids are prefixed, time-sortable strings (`org_`, `team_`, `key_`, `req_`). T
 | `mcp_tool_pins` | `server`, `tool`, `hash` (of the definition last seen), `definition` (JSON), `approved_hash` (empty until approved), `updated_at`. Status is derived: `approved` when the hashes match, `pending` when nothing was approved, `changed` otherwise. |
 | `mcp_calls` | `id`, `ts`, `org_id`, `team_id`, `key_id`, `subject`, `virtual_server`, `server`, `method`, `name`, `status`, `error_code`, `latency_ms`, `request_id`. Pruned with `usage_retention`. |
 | `alerts_sent` | `id`, `ts`, `event`, `dedupe_key` (unique), `org_id`, `data` (JSON) |
+| `mcp_connections` | `server`, `subject` (key), `access_token` and `refresh_token` (AES-256-GCM encrypted), `scopes`, `expires_at`, `created_at`, `updated_at`, `last_used_at` |
+| `mcp_connect_requests` | `id_hash`, `state_hash`, `server`, `subject`, `virtual_server`, `verifier`, `expires_at`. Pruned hourly. |
 | `request_bodies` | `id`, `request_id`, `ts`, `org_id`, `team_id`, `key_id`, `kind` (`model` or `mcp`), `endpoint`, `request` and `response` (redacted, then AES-256-GCM encrypted), `truncated`, `redactions` (JSON counts). Pruned after `body_logging.retention`. |
 | `schema_migrations` | `version`, `applied_at` |
 
