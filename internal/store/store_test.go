@@ -266,3 +266,51 @@ func TestConcurrentMigrations(t *testing.T) {
 		t.Fatalf("migrations recorded: %d, %v", n, err)
 	}
 }
+
+func TestUsageByProviderAndHealth(t *testing.T) {
+	for name, s := range backends(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			now := time.Now().UTC().Truncate(time.Millisecond)
+			rec := func(provider, upstream, endpoint string, status int, latency int64, at time.Time) usage.Record {
+				return usage.Record{RequestID: "r", Time: at, OrgID: "o", TeamID: "t", KeyID: "k", Endpoint: endpoint, Model: "m",
+					Provider: provider, UpstreamModel: upstream, Status: status, LatencyMS: latency}
+			}
+			err := s.InsertUsage(ctx, []usage.Record{
+				rec("openai", "gpt", "chat.completions", 200, 100, now.Add(-10*time.Minute)),
+				rec("openai", "gpt", "chat.completions", 500, 300, now.Add(-5*time.Minute)),
+				rec("openai", "emb", "embeddings", 200, 20, now.Add(-time.Minute)),
+				rec("bedrock", "claude", "messages", 200, 50, now.Add(-2*time.Hour)),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			from, to := now.Add(-3*time.Hour), now.Add(time.Hour)
+			rows, err := s.QueryUsage(ctx, UsageQuery{From: from, To: to, GroupBy: "provider"})
+			if err != nil || len(rows) != 2 || rows[0].Group != "bedrock" || rows[1].Requests != 3 {
+				t.Fatalf("by provider = %+v, %v", rows, err)
+			}
+			rows, err = s.QueryUsage(ctx, UsageQuery{From: from, To: to, GroupBy: "endpoint"})
+			if err != nil || len(rows) != 3 || rows[0].Group != "chat.completions" || rows[0].Requests != 2 {
+				t.Fatalf("by endpoint = %+v, %v", rows, err)
+			}
+
+			health, err := s.Health(ctx, now.Add(-time.Hour))
+			if err != nil || len(health) != 2 {
+				t.Fatalf("health = %+v, %v", health, err)
+			}
+			byModel := map[string]TargetHealth{}
+			for _, h := range health {
+				byModel[h.Provider+"/"+h.UpstreamModel] = h
+			}
+			gpt := byModel["openai/gpt"]
+			if gpt.Requests != 2 || gpt.Errors != 1 || gpt.ErrorRate != 0.5 || gpt.AvgLatencyMS != 200 ||
+				gpt.LastErrorAt == nil || !gpt.LastErrorAt.Equal(now.Add(-5*time.Minute)) {
+				t.Fatalf("openai/gpt = %+v", gpt)
+			}
+			if emb := byModel["openai/emb"]; emb.Errors != 0 || emb.LastErrorAt != nil {
+				t.Fatalf("openai/emb = %+v", emb)
+			}
+		})
+	}
+}

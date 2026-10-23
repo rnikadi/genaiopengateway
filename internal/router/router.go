@@ -174,3 +174,21 @@ func (r *Router) send(ctx context.Context, t config.Target, req *provider.Reques
 	}
 	return s
 }
+
+// AllEndpoints lists every endpoint the gateway serves, in display order.
+var AllEndpoints = []provider.Endpoint{provider.ChatCompletions, provider.Responses, provider.Messages, provider.GenerateContent, provider.Embeddings}
+
+// Endpoints lists what a provider serves for an upstream model.
+func (r *Router) Endpoints(providerName, model string) []provider.Endpoint {
+	p, ok := r.providers[providerName]
+	if !ok {
+		return nil
+	}
+	out := []provider.Endpoint{}
+	for _, e := range AllEndpoints {
+		if provider.SupportsModel(p, e, model) {
+			out = append(out, e)
+		}
+	}
+	return out
+}

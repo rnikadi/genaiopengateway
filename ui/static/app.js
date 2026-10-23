@@ -10,6 +10,9 @@ import { Models } from './pages/models.js';
 import { Audit } from './pages/audit.js';
 import { Requests, RequestBody } from './pages/requests.js';
 import { Guardrails } from './pages/guardrails.js';
+import { Providers } from './pages/providers.js';
+import { Alerts } from './pages/alerts.js';
+import { Settings } from './pages/settings.js';
 
 const routes = [
   [/^\/$/, Overview, 'overview'],
@@ -22,6 +25,9 @@ const routes = [
   [/^\/guardrails$/, Guardrails, 'guardrails'],
   [/^\/mcp$/, MCP, 'mcp'],
   [/^\/models$/, Models, 'models'],
+  [/^\/providers$/, Providers, 'providers'],
+  [/^\/alerts$/, Alerts, 'alerts'],
+  [/^\/settings$/, Settings, 'settings'],
   [/^\/audit$/, Audit, 'audit'],
 ];
 
@@ -33,7 +39,10 @@ const nav = [
   ['guardrails', '#/guardrails', 'Guardrails'],
   ['mcp', '#/mcp', 'MCP'],
   ['models', '#/models', 'Models'],
+  ['providers', '#/providers', 'Providers'],
+  ['alerts', '#/alerts', 'Alerts'],
   ['audit', '#/audit', 'Audit log'],
+  ['settings', '#/settings', 'Settings', 'owner'],
 ];
 
 function parseHash() {
@@ -106,11 +115,12 @@ function Shell({ session, onSignOut }) {
     }
   }
   const op = session.me.operator;
+  const owner = op.grants.some((g) => g.role === 'owner');
   return html`<${Session.Provider} value=${session}>
     <div class="layout">
       <aside class="sidebar">
         <a class="brand" href="#/"><span class="logo" aria-hidden="true"></span>GenAIOpenGateway</a>
-        <nav>${nav.map(([key, href, label]) => html`<a href=${href} class=${key === section ? 'active' : ''} aria-current=${key === section ? 'page' : undefined}>${label}</a>`)}</nav>
+        <nav>${nav.filter(([, , , role]) => !role || owner).map(([key, href, label]) => html`<a href=${href} class=${key === section ? 'active' : ''} aria-current=${key === section ? 'page' : undefined}>${label}</a>`)}</nav>
         <div class="who">
           <span class="who-name" title=${op.email || op.subject}>${op.name || op.email || op.subject}</span>
           <span class="muted small">${roleLabel(op.grants, session.orgNames)}</span>

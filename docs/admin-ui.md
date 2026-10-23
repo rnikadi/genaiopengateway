@@ -16,7 +16,7 @@ v0.3 adds a web UI for operators, sign-in through the company's identity provide
 | SAML | Every identity provider we target speaks OIDC, and SAML-only ones can be bridged with Keycloak or Dex. Added if users ask. |
 | SCIM provisioning | Roles come from the identity provider's groups at each sign-in, so users and access stay in sync without SCIM. Revisited with self-service keys. |
 | Custom roles, team-level roles, self-service keys for members | Fixed roles cover operators and team leads. Finer rules are Cedar policies in v0.5 (ADR 0009). |
-| Editing providers, models and MCP servers from the UI | They live in the config file by design (ADR 0003). The UI shows them read-only. |
+| Editing providers, models and MCP servers from the UI | They live in the config file by design (ADR 0003). The UI shows them read-only ([admin-ui-config.md](admin-ui-config.md)); editing them from the UI as well is planned (issue #34). |
 | Personal API tokens for the admin API | Automation keeps using the admin token. Per-user tokens can follow if needed. |
 
 ## Pages
@@ -28,12 +28,15 @@ v0.3 adds a web UI for operators, sign-in through the company's identity provide
 | Organization | Its teams, usage by team, edit | `orgs/{id}`, `orgs/{id}/teams`, `usage` |
 | Team | Its keys, usage by key and model, edit policy | `teams/{id}`, `teams/{id}/keys`, `usage` |
 | Key | Limits, expiry, revoke; the secret is shown once, on create | `keys/{id}`, `keys/{id}/revoke` |
-| Usage | Filter by organization, team, key and dates; group by model, team, key or day; chart, table and CSV download | `usage` |
+| Usage | Filter by organization, team, key and dates; group by model, team, key, day, provider or endpoint; chart, table and CSV download | `usage` |
 | MCP | Upstream servers and their status, virtual servers, tools with pin status; review a tool's definition and approve it; users' connections to per-user servers, with revoke (owners); call records | `mcp/*` |
 | Requests | Recent model requests; for those with a logged body, the redacted request and response (owners and organization admins; each view is audited) | `requests` |
-| Guardrails | What guardrails blocked, redacted or logged, by organization and action; never the matched text ([guardrails.md](guardrails.md)) | `guardrail-events` |
+| Guardrails | Events: what guardrails blocked, redacted or logged, by organization and action, never the matched text ([guardrails.md](guardrails.md)). Definitions: each guardrail's checks, action, stages and error handling | `guardrail-events`, `guardrails` |
 | Audit log | Who changed what, filterable | `audit` |
-| Models | Virtual models and their targets, read-only | `models` (new) |
+| Models | Virtual models, the endpoints they serve, and their targets with provider type, price and last-hour health, read-only ([admin-ui-config.md](admin-ui-config.md)) | `models` |
+| Providers | Upstream providers with type, endpoint, auth, the models using them and last-hour health | `providers` |
+| Alerts | Alerts raised, filterable; webhooks with a test button (owners) | `alerts`, `alerts/webhooks`, `alerts/test` |
+| Settings | The gateway's own configuration, secrets shown only as set (owners) | `settings` |
 
 Forms for allowed models and MCP servers offer the configured names, so a typo cannot create a policy that silently allows nothing.
 

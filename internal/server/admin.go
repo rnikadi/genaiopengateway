@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/rnikadi/genaiopengateway/internal/auth"
-	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/policy"
 	"github.com/rnikadi/genaiopengateway/internal/store"
 )
@@ -53,6 +52,10 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	h("GET /admin/v1/mcp/virtual-servers", s.listVirtualServers)
 	h("GET /admin/v1/me", s.me)
 	h("GET /admin/v1/models", s.listConfiguredModels)
+	h("GET /admin/v1/providers", s.listProviders)
+	h("GET /admin/v1/guardrails", s.listGuardrails)
+	h("GET /admin/v1/alerts/webhooks", s.listWebhooks)
+	h("GET /admin/v1/settings", s.settings)
 	h("GET /admin/v1/alerts", s.listAlerts)
 	h("POST /admin/v1/alerts/test", s.testAlert)
 	h("GET /admin/v1/mcp/connections", s.listMCPConnections)
@@ -591,9 +594,9 @@ func (s *Server) queryUsage(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 	switch uq.GroupBy {
-	case "model", "team", "key", "day":
+	case "model", "team", "key", "day", "provider", "endpoint":
 	default:
-		return badRequest("group_by must be model, team, key or day")
+		return badRequest("group_by must be model, team, key, day, provider or endpoint")
 	}
 	rows, err := s.store.QueryUsage(r.Context(), uq)
 	if err != nil {
@@ -659,22 +662,5 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) error {
 		"body_logging": cfg.BodyLogging.Enabled,
 		"guardrails":   slices.Sorted(maps.Keys(cfg.Guardrails)),
 	})
-	return nil
-}
-
-// configuredModel is a virtual model as the admin UI shows it: targets
-// and prices, never credentials.
-type configuredModel struct {
-	Name    string          `json:"name"`
-	Targets []config.Target `json:"targets"`
-}
-
-func (s *Server) listConfiguredModels(w http.ResponseWriter, _ *http.Request) error {
-	cfg := s.rt.Load().cfg
-	out := []configuredModel{}
-	for _, name := range slices.Sorted(maps.Keys(cfg.Models)) {
-		out = append(out, configuredModel{Name: name, Targets: cfg.Models[name].Targets})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out})
 	return nil
 }

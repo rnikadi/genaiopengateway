@@ -46,6 +46,7 @@ func run(path string, log *slog.Logger) error {
 		return err
 	}
 	mcpgw.Version = version
+	server.Version = version
 	shutdownTracing, tracing, err := telemetry.SetupTracing(context.Background(), version)
 	if err != nil {
 		return fmt.Errorf("set up tracing: %w", err)

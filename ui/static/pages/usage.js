@@ -1,9 +1,9 @@
 import {
   html, useState, api, useLoad, useSession, Loading, Table, Bars, Columns, PageHeader, OrgPicker, defaultOrg, Card,
-  periods, usageQuery, totals, downloadCSV, usd, num, compact,
+  periods, usageQuery, totals, downloadCSV, usd, num, compact, endpointNames,
 } from '../lib.js';
 
-const groups = { model: 'Model', team: 'Team', key: 'Key', day: 'Day' };
+const groups = { model: 'Model', team: 'Team', key: 'Key', day: 'Day', provider: 'Provider', endpoint: 'Endpoint' };
 
 export function Usage({ params }) {
   const s = useSession();
@@ -20,7 +20,7 @@ export function Usage({ params }) {
 
   // Rows grouped by team or key show names where this page knows them.
   const names = { ...s.orgNames, ...Object.fromEntries((teams.data || []).map((t) => [t.id, t.name])) };
-  const label = (g) => names[g] || g;
+  const label = (g) => names[g] || (f.group_by === 'endpoint' && endpointNames[g]) || g;
 
   const csv = (rows) =>
     downloadCSV(

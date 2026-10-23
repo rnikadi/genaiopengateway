@@ -138,6 +138,27 @@ await step('owner approves an MCP tool', async () => {
   await ctx.close();
 });
 
+await step('owner sees everything the gateway is configured with', async () => {
+  const { ctx, page } = await signIn('owner@example.com');
+  await page.click('nav >> text=Providers');
+  await page.waitForSelector('td:has-text("openai")');
+  assert.ok(await page.locator('td:has-text("Anthropic")').count(), 'provider types are shown');
+  await page.click('nav >> text=Models');
+  await page.waitForSelector('text=chat-default');
+  assert.ok(await page.locator('.badge:has-text("Chat completions")').count(), 'endpoints are shown');
+  await page.click('nav >> text=Guardrails');
+  await page.click('[role=tab]:has-text("Definitions")');
+  await page.waitForSelector('td code:has-text("no-pii")');
+  await page.click('nav >> text=Alerts');
+  await page.waitForSelector('h2:has-text("Webhooks")');
+  await page.click('nav >> text=Settings');
+  await page.waitForSelector('dt:has-text("Version")');
+  assert.ok(await page.locator('text=Identity provider').count(), 'sign-in settings are shown');
+  const html = await page.content();
+  for (const secret of [adminToken, 'local-dex-client-secret']) assert.ok(!html.includes(secret), 'no secret on the settings page');
+  await ctx.close();
+});
+
 await step('viewer reads but cannot change anything', async () => {
   const { ctx, page } = await signIn('viewer@example.com');
   await page.click('text=Organizations');
@@ -148,6 +169,9 @@ await step('viewer reads but cannot change anything', async () => {
   }
   assert.equal(await pageFetch(page, 'POST', '/admin/v1/orgs', { body: '{"name":"nope"}' }), 403);
   assert.equal(await pageFetch(page, 'GET', '/admin/v1/usage'), 200);
+  assert.equal(await page.locator('nav >> text=Settings').count(), 0, 'settings are for owners');
+  assert.equal(await pageFetch(page, 'GET', '/admin/v1/settings'), 403);
+  assert.equal(await pageFetch(page, 'GET', '/admin/v1/providers'), 200);
   await ctx.close();
 });
 

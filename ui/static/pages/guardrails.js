@@ -1,4 +1,4 @@
-import { html, useState, useEffect, api, qs, useSession, PageHeader, OrgPicker, defaultOrg, Table, ErrorBox, when, num } from '../lib.js';
+import { html, useState, useEffect, api, qs, useSession, useLoad, Loading, PageHeader, OrgPicker, defaultOrg, Table, ErrorBox, Tabs, when, num } from '../lib.js';
 
 const actionBadge = { block: 'bad', redact: 'warn', log: '' };
 
@@ -13,9 +13,49 @@ export const guardrailColumns = [
   { label: 'Latency', num: true, render: (e) => `${num(e.latency_ms)} ms` },
 ];
 
-// Guardrails lists what guardrails blocked, redacted or logged
+// Guardrails shows what guardrails did and how they are defined
 // (docs/guardrails.md).
 export function Guardrails({ params }) {
+  const [tab, setTab] = useState(params.get('tab') === 'definitions' ? 'definitions' : 'events');
+  return html`
+    <${PageHeader} title="Guardrails" sub="Checks on model and MCP calls. Matched text is never stored." />
+    <${Tabs} tabs=${{ events: 'Events', definitions: 'Definitions' }} value=${tab} onChange=${setTab} />
+    ${tab === 'events' ? html`<${Events} params=${params} />` : html`<${Definitions} />`}`;
+}
+
+const stageNames = { input: 'Input', output: 'Output', tool_input: 'Tool input', tool_output: 'Tool output' };
+
+// check describes what a guardrail looks for.
+function check(g) {
+  switch (g.type) {
+    case 'pii':
+      return g.detect?.length ? `PII: ${g.detect.join(', ')}` : 'PII: every detector';
+    case 'regex':
+      return html`Regex: ${g.patterns.map((p) => html`<code class="small" key=${p}>${p}</code> `)}`;
+    case 'model':
+      return html`Classifier model <code>${g.model}</code>${g.unsafe_if ? html`, unsafe if <code>${g.unsafe_if}</code>` : ''}`;
+    case 'webhook':
+      return html`Webhook <code class="small">${g.webhook_host}</code>`;
+    default:
+      return g.type;
+  }
+}
+
+function Definitions() {
+  const state = useLoad(() => api('GET', '/admin/v1/guardrails'));
+  return html`<${Loading} state=${state}>${(d) => html`
+    <p class="muted small">Guardrails are defined in <code>guardrails</code> in the gateway's configuration. They run where an organization, team or key policy names them, and on the virtual MCP servers listed here.</p>
+    <${Table} rows=${d.data} rowKey=${(g) => g.name} empty="No guardrails are configured." columns=${[
+      { label: 'Guardrail', render: (g) => html`<code>${g.name}</code>` },
+      { label: 'Checks', render: (g) => check(g) },
+      { label: 'Action', render: (g) => html`<span class=${'badge ' + (actionBadge[g.action] ?? '')}>${g.action}</span>` },
+      { label: 'Stages', render: (g) => g.stages.map((st) => stageNames[st] || st).join(', ') },
+      { label: 'If the check fails', render: (g) => (g.on_error ? `${g.on_error === 'allow' ? 'Allow' : 'Block'}${g.timeout ? `; timeout ${g.timeout}` : ''}` : html`<span class="muted small">Runs in the gateway</span>`) },
+      { label: 'Virtual MCP servers', render: (g) => g.virtual_servers.join(', ') },
+    ]} />`}<//>`;
+}
+
+function Events({ params }) {
   const s = useSession();
   const [org, setOrg] = useState(params.get('org') ?? defaultOrg(s));
   const [action, setAction] = useState('');
@@ -42,7 +82,6 @@ export function Guardrails({ params }) {
     { label: 'Request', render: (e) => html`<code class="small">${e.request_id}</code>` },
   ];
   return html`
-    <${PageHeader} title="Guardrails" sub="What guardrails blocked, redacted or logged, newest first. Matched text is never stored." />
     <div class="filters">
       <${OrgPicker} value=${org} onChange=${setOrg} />
       <label class="inline"><span>Action</span>
