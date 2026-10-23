@@ -187,5 +187,5 @@ The threats listed in [security.md](security.md) and their controls in v0.2:
 | Confused deputy | The gateway does not run an OAuth proxy or dynamic client registration; it is only a resource server. |
 | DNS rebinding and cross-origin requests to the gateway | Bearer authentication on every request. The gateway sends no CORS headers, so a page on another origin cannot make an authenticated request. |
 | SSRF through upstream URLs | Upstream URLs come only from operator config. |
-| Prompt injection in tool output | Out of scope for the transport; guardrails on tool output arrive with the guardrail pipeline. Audit makes every call traceable. |
+| Prompt injection in tool output | Out of scope for the transport; `tool_output` [guardrails](guardrails.md) on a virtual server check results with a classifier or webhook from v0.5. Audit makes every call traceable. |
 | Denial of service through slow or huge upstream responses | Per-server timeouts and a 4 MiB request body limit. |

@@ -1,6 +1,6 @@
 # 0008. Go interfaces for built-ins, WebAssembly for third-party plugins
 
-- Status: accepted (implementation in v0.5)
+- Status: accepted; WebAssembly plugins deferred by [0020](0020-guardrails.md)
 - Date: 2026-10-22
 
 ## Decision
