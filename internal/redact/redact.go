@@ -31,7 +31,24 @@ type rule struct {
 	name  string
 	re    *regexp.Regexp
 	valid func(string) bool // nil accepts every match
+	// trigger, when set, is a byte every match contains, and no match
+	// reaches further than reach bytes from one. The regexp then runs
+	// only on the text around those bytes, which is much faster on long
+	// text with few candidates.
+	trigger func(byte) bool
+	reach   int
+	// literals, when set, are strings one of which every match contains;
+	// text with none of them is skipped.
+	literals []string
 }
+
+func isDigit(c byte) bool { return c >= '0' && c <= '9' }
+func isAt(c byte) bool    { return c == '@' }
+
+// digitReach bounds the distance from any digit of a card number, IBAN,
+// SSN or phone number to the ends of the match; the longest, an IBAN
+// with spaces, is under 48 bytes.
+const digitReach = 64
 
 var builtinRules = map[string]rule{
 	Secret: {Secret, regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----` +
@@ -41,14 +58,17 @@ var builtinRules = map[string]rule{
 		`|\bgithub_pat_[A-Za-z0-9_]{30,}` +
 		`|\bxox[abprs]-[A-Za-z0-9-]{10,}` +
 		`|\bAIza[0-9A-Za-z_-]{35}` +
-		`|\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`), nil},
-	Email:      {Email, regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}`), nil},
-	CreditCard: {CreditCard, regexp.MustCompile(`\b\d(?:[ -]?\d){12,18}\b`), luhn},
-	IBAN:       {IBAN, regexp.MustCompile(`\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,3})?\b`), ibanValid},
-	USSSN:      {USSSN, regexp.MustCompile(`\b\d{3}-\d{2}-\d{4}\b`), ssnValid},
+		`|\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`), nil, nil, 0,
+		[]string{"-----BEGIN ", "sk-", "AKIA", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", "xoxa-", "xoxb-", "xoxp-", "xoxr-", "xoxs-", "AIza", "eyJ"}},
+	// Emails hold no whitespace, so the text around each @ up to the next
+	// whitespace holds the whole match.
+	Email:      {Email, regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}`), nil, isAt, 1, nil},
+	CreditCard: {CreditCard, regexp.MustCompile(`\b\d(?:[ -]?\d){12,18}\b`), luhn, isDigit, digitReach, nil},
+	IBAN:       {IBAN, regexp.MustCompile(`\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,3})?\b`), ibanValid, isDigit, digitReach, nil},
+	USSSN:      {USSSN, regexp.MustCompile(`\b\d{3}-\d{2}-\d{4}\b`), ssnValid, isDigit, digitReach, nil},
 	// International numbers with a leading +, and North American ones
 	// written with separators. Dates and times do not match.
-	Phone: {Phone, regexp.MustCompile(`\+\d{1,3}(?:[ .-]?\(?\d{1,4}\)?){2,5}\d\b|(?:\(\d{3}\) ?|\b\d{3}[.-])\d{3}[.-]\d{4}\b`), phoneValid},
+	Phone: {Phone, regexp.MustCompile(`\+\d{1,3}(?:[ .-]?\(?\d{1,4}\)?){2,5}\d\b|(?:\(\d{3}\) ?|\b\d{3}[.-])\d{3}[.-]\d{4}\b`), phoneValid, isDigit, digitReach, nil},
 }
 
 // Config selects the redactions to apply.
@@ -97,20 +117,91 @@ type Counts map[string]int
 // String redacts free text.
 func (r *Redactor) String(s string, counts Counts) string {
 	for _, rl := range r.rules {
-		s = rl.re.ReplaceAllStringFunc(s, func(m string) string {
-			n := len(m)
-			if rl.valid != nil {
-				n = validPrefix(m, rl.valid)
-			}
-			if n == 0 {
-				return m
-			}
-			counts[rl.name]++
-			return "[REDACTED:" + rl.name + "]" + m[n:]
-		})
+		s = rl.apply(s, counts)
 	}
 	return s
 }
+
+func (rl *rule) apply(s string, counts Counts) string {
+	if rl.literals != nil && !containsAny(s, rl.literals) {
+		return s
+	}
+	replace := func(m string) string {
+		n := len(m)
+		if rl.valid != nil {
+			n = validPrefix(m, rl.valid)
+		}
+		if n == 0 {
+			return m
+		}
+		counts[rl.name]++
+		return "[REDACTED:" + rl.name + "]" + m[n:]
+	}
+	if rl.trigger == nil {
+		return rl.re.ReplaceAllStringFunc(s, replace)
+	}
+	var b strings.Builder
+	done := 0
+	for _, w := range windows(s, rl.trigger, rl.reach) {
+		if done == 0 {
+			b.Grow(len(s))
+		}
+		b.WriteString(s[done:w[0]])
+		b.WriteString(rl.re.ReplaceAllStringFunc(s[w[0]:w[1]], replace))
+		done = w[1]
+	}
+	if done == 0 {
+		return s
+	}
+	b.WriteString(s[done:])
+	return b.String()
+}
+
+func containsAny(s string, subs []string) bool {
+	for _, sub := range subs {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+// windows returns the spans of s within reach of a trigger byte, widened
+// to whitespace so that word boundaries at their edges are the same as in
+// s, and merged where they touch.
+func windows(s string, trigger func(byte) bool, reach int) [][2]int {
+	var out [][2]int
+	for i := 0; i < len(s); i++ {
+		if !trigger(s[i]) {
+			continue
+		}
+		end := min(i+reach+1, len(s))
+		n := len(out)
+		if n > 0 && out[n-1][1] >= len(s) {
+			break // the last window runs to the end
+		}
+		if n > 0 && i-reach <= out[n-1][1] {
+			end = max(end, out[n-1][1])
+		} else {
+			start, floor := max(i-reach, 0), 0
+			if n > 0 {
+				floor = out[n-1][1]
+			}
+			for start > floor && !isSpace(s[start-1]) {
+				start--
+			}
+			out = append(out, [2]int{start, end})
+			n++
+		}
+		for end < len(s) && !isSpace(s[end]) {
+			end++
+		}
+		out[n-1][1] = end
+	}
+	return out
+}
+
+func isSpace(c byte) bool { return c == ' ' || c == '\n' || c == '\t' || c == '\r' }
 
 // validPrefix returns the length of the longest prefix of m that is valid,
 // trying m and then m cut at each separator, or 0. A greedy match can run

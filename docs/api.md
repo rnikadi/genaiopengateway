@@ -41,6 +41,7 @@ It never falls back on other 4xx responses, which indicate a problem with the re
 | `x-request-id` | Gateway request id; echoes the client's `x-request-id` if it is a safe token of up to 128 characters |
 | `x-gateway-target` | `<provider>/<upstream model>` that served the request |
 | `x-ratelimit-limit-requests`, `x-ratelimit-remaining-requests`, `x-ratelimit-reset-requests` | Tightest request limit that applies to the key, as in the OpenAI API |
+| `x-gog-guardrails` | Guardrails that acted on the request, as `name=action` pairs, for example `no-pii=redact` ([guardrails.md](guardrails.md)) |
 | `x-ratelimit-limit-tokens`, `x-ratelimit-remaining-tokens`, `x-ratelimit-reset-tokens` | Same for tokens per minute |
 
 ### Errors
@@ -50,6 +51,7 @@ OpenAI-style endpoints return `{"error": {"message": "...", "type": "<code>", "c
 | Status | Code | When |
 | --- | --- | --- |
 | 400 | `invalid_request` | Body is not valid JSON, `model` missing, or a field the target adapter cannot translate |
+| 400 | `guardrail_blocked` | A guardrail blocked the request or the model's response; the message names the guardrail |
 | 401 | `invalid_api_key` | Key missing, unknown, revoked or expired |
 | 403 | `model_not_allowed` | Key, team or organization may not use this model |
 | 404 | `model_not_found` | Virtual model does not exist, or does not support this endpoint |
@@ -84,6 +86,7 @@ Base path `/admin/v1`. JSON in and out. Authenticate with `Authorization: Bearer
 | `GET /admin/v1/mcp/connections`, `DELETE /admin/v1/mcp/connections/{server}/{subject}` | Users' connections to per-user MCP servers; list and revoke (owners only, see [mcp.md](mcp.md#api-additions)) |
 | `GET /admin/v1/requests` | Model requests from usage records, newest first, with `has_body`; filter with `org_id`, `team_id`, `key_id`, `from`, `to`. `after` is a `request_id` ([body-logging.md](body-logging.md)) |
 | `GET /admin/v1/requests/{request_id}` | A request's logged body, decrypted: `request`, `response`, `truncated`, `redactions`. Owners and the organization's admins only; each read is audited as `request_body.read` |
+| `GET /admin/v1/guardrail-events` | Guardrails that matched or failed, newest first; filter with `org_id`, `team_id`, `key_id`, `guardrail`, `action`, `request_id`, `from`, `to`. Never the matched text ([guardrails.md](guardrails.md)) |
 | `DELETE /admin/v1/requests?org_id=&before=` | Delete an organization's bodies logged before a time, for erasure requests. Returns `{"deleted": n}` (owners only, audited) |
 
 Organizations, teams and keys share the same policy fields, all optional:
@@ -96,11 +99,14 @@ Organizations, teams and keys share the same policy fields, all optional:
   "rpm": 600,
   "tpm": 200000,
   "budget": {"amount_usd": 500, "period": "monthly", "alert_at": [0.8, 1]},
+  "guardrails": ["no-pii"],
   "log_bodies": true
 }
 ```
 
 `log_bodies` (true or false) turns body logging on or off for that scope; the most specific level that sets it wins, and unset everywhere means off ([body-logging.md](body-logging.md)).
+
+`guardrails` names guardrails from config. Unlike the other fields, the lists of the organization, team and key add up: a request runs every guardrail named at any level. Unknown names are rejected ([guardrails.md](guardrails.md)).
 
 `alert_at` is optional: it overrides the gateway's alert thresholds for this budget, and `[]` turns its alerts off.
 

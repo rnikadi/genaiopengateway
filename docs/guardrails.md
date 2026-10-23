@@ -14,8 +14,8 @@ Today the gateway controls who may call which model or tool, and how much. It do
 | Feature | Why |
 | --- | --- |
 | WebAssembly plugins (ADR 0008) | A webhook covers custom logic in any language without a host API the project must keep stable. Revisited when someone needs custom checks in-process. See ADR 0020. |
-| Built-in ML classifiers for toxicity or injection | Large models do not belong in the gateway binary. Use the `model` guardrail with Llama Guard, Prompt Guard or ShieldGemma served through any configured model, or the `webhook` guardrail. |
-| Checking images, audio and files | Text only. Media parts pass unchecked, and this is stated in the decision record of each request. |
+| Built-in ML classifiers for toxicity or injection | Large models do not belong in the gateway binary. Use the `model` guardrail with a safety model such as Llama Guard or ShieldGemma served through any configured model, or the `webhook` guardrail. |
+| Checking images, audio and files | Text only. Media parts, including `data:` URLs, pass unchecked. |
 | Rewriting prompts (adding a system prompt, templating) | A transform, not a guardrail. Can be added later on the same hook. |
 
 ## Guardrails in config
@@ -41,8 +41,9 @@ guardrails:
     stages: [input, output]
   injection:
     type: model                    # ask a classifier model
-    model: prompt-guard            # a virtual model from `models`
-    unsafe_if: '(?i)^\s*(unsafe|injection)'   # pattern on the model's reply
+    model: llama-guard             # a virtual model from `models`
+    prompt: ""                     # optional system prompt; Llama Guard needs none
+    unsafe_if: '(?i)^\s*unsafe'    # pattern on the model's reply (this is the default)
     action: block
     stages: [tool_output]
     timeout: 2s
@@ -51,6 +52,7 @@ guardrails:
     type: webhook                  # call the company's DLP service
     url: https://dlp.internal.example.com/check
     secret: ${DLP_WEBHOOK_SECRET}  # signs the body, as alert webhooks do
+    action: block                  # default; the reply chooses block or redact. log only records.
     stages: [input, output]
     timeout: 1s
     on_error: block
@@ -61,16 +63,16 @@ guardrails:
 | Stage | What is checked | When |
 | --- | --- | --- |
 | `input` | The text of every message in a model request: system, user, assistant and tool messages, text parts only | After authentication and limits, before routing |
-| `output` | The text and tool call arguments of the model's response | After the response, before it reaches the client |
+| `output` | The text and tool call arguments of the model's response | After the response, before it reaches the client. Only `200` responses are checked. |
 | `tool_input` | The arguments of an MCP `tools/call` | Before the call is forwarded upstream |
-| `tool_output` | The text content of an MCP tool result | Before the result reaches the client |
+| `tool_output` | The text content and structured content of an MCP tool result | Before the result reaches the client |
 
 ### Actions
 
 | Action | Effect |
 | --- | --- |
 | `block` | The request is refused with `400 guardrail_blocked` naming the guardrail (an MCP tool error for MCP stages). For `output`, the tokens were spent, so usage and cost are still recorded. |
-| `redact` | Matches are replaced with `[REDACTED:<kind>]` and the request continues. On `input` the provider never sees the original value. Available for `pii` and `regex`, and for a `webhook` that returns replacements. |
+| `redact` | Matches are replaced with `[REDACTED:<kind>]` and the request continues. On `input` the provider never sees the original value. Available for `pii` and `regex`. A `webhook` redacts when its reply says so. |
 | `log` | Nothing changes for the client. The decision is recorded and counted. |
 
 ### Types
@@ -79,7 +81,7 @@ guardrails:
 | --- | --- | --- |
 | `pii` | Emails, phone numbers, card numbers with Luhn, IBANs with mod-97, US SSNs, well-known secrets | The detectors of [body logging](body-logging.md), already tested and fuzzed. |
 | `regex` | RE2 patterns | Linear time, so a pattern cannot stall the gateway. |
-| `model` | Sends the text to a virtual model with a fixed classifier prompt, and matches `unsafe_if` against the reply | Uses the gateway's own routing, keys and metering, so the classifier's cost is visible under the requesting key. Slower; meant for `tool_output` and selected keys. |
+| `model` | Sends the texts, joined, as one user message to a virtual model, with `prompt` as the system message when set, and matches `unsafe_if` against the reply | Uses the gateway's own routing, limits and metering, so the classifier's cost is recorded under the requesting key. Slower; meant for `tool_output` and selected keys. Cannot `redact`. |
 | `webhook` | `POST` of a JSON document to the operator's service, which answers `allow`, `block` or `redact` with replacements | The way to plug in Presidio, a DLP product, Azure AI Content Safety, Lakera or an in-house service. |
 
 The webhook request and response:
@@ -93,7 +95,7 @@ The webhook request and response:
 {"action": "redact", "reason": "customer account number", "texts": ["first message text", "[REDACTED] text"]}
 ```
 
-`texts` in the reply replaces the texts by position and is only read for `redact`. The body is signed with `X-GOG-Signature` like alert webhooks, and only `https` URLs are allowed outside `localhost`.
+`action` is `allow`, `block` or `redact`. `texts` in the reply replaces the texts by position, must have as many entries as the request, and is only read for `redact`. A webhook configured with `action: log` only records what the reply asked for. Any status but `200`, or a reply that cannot be read, is a failed check and follows `on_error`. The body is signed with `X-GOG-Signature` like alert webhooks, redirects are not followed, and only `https` URLs are allowed outside `localhost`.
 
 ## Attaching guardrails
 
@@ -114,29 +116,28 @@ mcp:
       servers: [{server: zendesk}]
 ```
 
-A config `guardrails` entry that no policy or virtual server names does nothing. Startup fails on an unknown name in a virtual server, and the admin API rejects an unknown name in a policy. Removing a guardrail from config while a policy still names it logs a warning on reload and skips it.
+A config `guardrails` entry that no policy or virtual server names does nothing. Startup fails on an unknown name in a virtual server, and the admin API rejects an unknown name in a policy. Removing a guardrail from config while a policy still names it skips it; the admin UI drops the stale name the next time the policy is saved.
 
 ## Order and cost
 
-Guardrails at one stage run in a fixed order: `pii` and `regex` first (in-process, under a millisecond for typical requests), then `model` and `webhook` in parallel. A `block` from any of them wins; otherwise redactions apply in order. External checks run only when the in-process ones did not already block.
+Guardrails at one stage run in a fixed order, by name within each group: `pii` and `regex` first (in-process, a few milliseconds at most), then `model` guardrails and webhooks that cannot redact in parallel, then webhooks that may redact one after another, each on the texts the previous one returned. The first `block` stops the stage; external checks run only when the in-process ones did not already block.
 
-The gate for v0.5 is that the built-ins add under 10 ms at p50, measured by a benchmark on a 32 KiB chat request with every built-in on. External checks are bounded by their `timeout` (default 2 s, at most 30 s) and their result follows `on_error` when they fail or time out.
+The gate for v0.5 is that the built-ins add under 10 ms at p50, measured on a 32 KiB chat request with every built-in on (about 2.5 ms on a CI runner). The detectors run their regular expressions only around the characters a match must contain, such as digits or `@`, which keeps long prose cheap. External checks are bounded by their `timeout` (default 2 s, at most 30 s) and their result follows `on_error` when they fail or time out.
 
 ## Streaming
 
 `input` checks finish before the request is sent, so they do not affect streaming.
 
-An `output` guardrail on a streamed response means the gateway must see the response before the client does. The gateway buffers the upstream stream, assembles it as body logging does, and checks it. If it passes, the original events are sent unchanged; if it is redacted, the gateway sends the assembled, redacted result as one short stream in the client's format (text deltas, tool calls, finish reason and usage). The client gets a valid stream, but the first token arrives only when the whole response is done. This trade-off is shown in the docs and on the policy form, and `output` guardrails are meant for the keys that need them, not for every key.
+An `output` guardrail on a streamed response means the gateway must see the response before the client does. The gateway buffers the upstream stream, assembles it as body logging does, and checks it. If it passes, the original events are sent unchanged; if it is redacted, the gateway sends the assembled, redacted result as one short stream in the client's format (text deltas, tool calls, finish reason and usage). If a redacted stream cannot be rebuilt, or a response is over 16 MiB, it is blocked rather than sent unchecked. The client gets a valid stream, but the first token arrives only when the whole response is done, so `output` guardrails are meant for the keys that need them, not for every key.
 
 Stream checks that release text as it arrives and cut the stream off on a match are possible later, but cannot take back text already sent.
 
 ## What is recorded
 
-- **Response header** `x-gog-guardrails` on model calls, listing the guardrails that acted, for example `no-pii=redact`.
-- **A table `guardrail_events`**: `request_id`, `ts`, `org_id`, `team_id`, `key_id`, `guardrail`, `stage`, `action`, `reason` (from a webhook, up to 200 characters), `counts` (JSON, by kind), `latency_ms`. Only acting decisions (`block`, `redact`, or `log` that matched) are stored. Pruned with `usage_retention`.
-- **Admin API** `GET /admin/v1/guardrail-events` with the usual filters, scoped like usage. The UI's Requests page shows a request's events next to its body, and the Overview counts blocks per day.
+- **Response header** `X-Gog-Guardrails` on model calls, listing the guardrails that acted, for example `deny-terms=log, no-pii=redact`.
+- **A table `guardrail_events`**: `request_id`, `ts`, `org_id`, `team_id`, `key_id`, `guardrail`, `stage`, `action`, `failed`, `reason` (from a webhook or classifier, or why the check failed, up to 200 characters), `counts` (JSON, by kind), `latency_ms`. Only guardrails that matched or failed are stored. Pruned with `usage_retention`.
+- **Admin API** `GET /admin/v1/guardrail-events` with filters `org_id`, `team_id`, `key_id`, `guardrail`, `action`, `request_id`, `from` and `to`, scoped like usage. The UI has a Guardrails page, and a logged request body shows its events.
 - **Metrics** `gog_guardrail_checks_total{guardrail, stage, result}` and `gog_guardrail_duration_seconds{guardrail, stage}`.
-- **Traces**: one span per guardrail with its result.
 - **Alerts**: no new event. Blocks are visible in metrics, where rate alerts belong.
 
 ## Security
@@ -157,4 +158,4 @@ Stream checks that release text as it arrives and cut the stream off on a match 
 - Streaming tests for each client format: a passing stream is byte-identical, a redacted stream is valid and complete, a block becomes an error.
 - A fake webhook and a fake classifier model for `allow`, `block`, `redact`, timeouts and `on_error`.
 - An MCP test where tool output with an injection marker is blocked.
-- The benchmark for the 10 ms gate runs in CI and fails above 10 ms at p50.
+- The 10 ms gate runs in CI, without the race detector, and fails above 10 ms at p50.

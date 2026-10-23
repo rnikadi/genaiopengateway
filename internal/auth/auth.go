@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"math/big"
+	"slices"
 	"time"
 
 	"github.com/rnikadi/genaiopengateway/internal/config"
@@ -68,6 +69,17 @@ func (p *Principal) LogBodies() bool {
 		}
 	}
 	return false
+}
+
+// Guardrails returns the guardrails named at any level, sorted and
+// without duplicates.
+func (p *Principal) Guardrails() []string {
+	var out []string
+	for _, pol := range p.Policies {
+		out = append(out, pol.Guardrails...)
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // Expired reports whether the key has expired at t.

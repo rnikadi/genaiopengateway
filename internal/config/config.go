@@ -23,22 +23,23 @@ import (
 
 // Config is the root of the configuration file.
 type Config struct {
-	Listen      string              `yaml:"listen"`
-	TLS         TLS                 `yaml:"tls"`
-	Admin       Admin               `yaml:"admin"`
-	Metrics     Metrics             `yaml:"metrics"`
-	Store       Store               `yaml:"store"`
-	Limiter     Limiter             `yaml:"limiter"`
-	Limits      Limits              `yaml:"limits"`
-	Providers   map[string]Provider `yaml:"providers"`
-	Models      map[string]Model    `yaml:"models"`
-	Keys        []StaticKey         `yaml:"keys"`
-	MCP         MCP                 `yaml:"mcp"`
-	SSO         SSO                 `yaml:"sso"`
-	UI          UI                  `yaml:"ui"`
-	Alerts      Alerts              `yaml:"alerts"`
-	Secrets     Secrets             `yaml:"secrets"`
-	BodyLogging BodyLogging         `yaml:"body_logging"`
+	Listen      string               `yaml:"listen"`
+	TLS         TLS                  `yaml:"tls"`
+	Admin       Admin                `yaml:"admin"`
+	Metrics     Metrics              `yaml:"metrics"`
+	Store       Store                `yaml:"store"`
+	Limiter     Limiter              `yaml:"limiter"`
+	Limits      Limits               `yaml:"limits"`
+	Providers   map[string]Provider  `yaml:"providers"`
+	Models      map[string]Model     `yaml:"models"`
+	Keys        []StaticKey          `yaml:"keys"`
+	MCP         MCP                  `yaml:"mcp"`
+	SSO         SSO                  `yaml:"sso"`
+	UI          UI                   `yaml:"ui"`
+	Alerts      Alerts               `yaml:"alerts"`
+	Secrets     Secrets              `yaml:"secrets"`
+	BodyLogging BodyLogging          `yaml:"body_logging"`
+	Guardrails  map[string]Guardrail `yaml:"guardrails"`
 }
 
 // Secrets holds the key that encrypts sensitive values in the store
@@ -69,6 +70,59 @@ const (
 	MaxBodyRetention     = 365 * 24 * time.Hour
 	DefaultMaxBodyBytes  = 64 << 10
 )
+
+// Guardrail is one named check on model and MCP calls
+// (docs/guardrails.md). Policies and virtual servers attach it by name.
+type Guardrail struct {
+	Type   string   `yaml:"type"`
+	Action string   `yaml:"action"`
+	Stages []string `yaml:"stages"`
+	// Detect names the pii detectors; nil means all of them.
+	Detect []string `yaml:"detect"`
+	// Patterns are the RE2 expressions of a regex guardrail.
+	Patterns []string `yaml:"patterns"`
+	// Model, Prompt and UnsafeIf configure a model guardrail.
+	Model    string `yaml:"model"`
+	Prompt   string `yaml:"prompt"`
+	UnsafeIf string `yaml:"unsafe_if"`
+	// URL and Secret configure a webhook guardrail.
+	URL     Secret   `yaml:"url"`
+	Secret  Secret   `yaml:"secret"`
+	Timeout Duration `yaml:"timeout"`
+	OnError string   `yaml:"on_error"`
+}
+
+// Guardrail types, actions, stages and error modes.
+const (
+	GuardrailPII     = "pii"
+	GuardrailRegex   = "regex"
+	GuardrailModel   = "model"
+	GuardrailWebhook = "webhook"
+
+	ActionBlock  = "block"
+	ActionRedact = "redact"
+	ActionLog    = "log"
+
+	StageInput      = "input"
+	StageOutput     = "output"
+	StageToolInput  = "tool_input"
+	StageToolOutput = "tool_output"
+
+	OnErrorAllow = "allow"
+	OnErrorBlock = "block"
+)
+
+// Guardrail defaults and bounds.
+const (
+	DefaultGuardrailTimeout = 2 * time.Second
+	MaxGuardrailTimeout     = 30 * time.Second
+	DefaultUnsafeIf         = `(?i)^\s*unsafe`
+)
+
+// External reports whether a guardrail calls out of process.
+func (g *Guardrail) External() bool {
+	return g.Type == GuardrailModel || g.Type == GuardrailWebhook
+}
 
 // Alerts configures budget alerts and the webhooks that receive alerts
 // (docs/alerts.md).
@@ -316,6 +370,8 @@ func (m *PinMode) UnmarshalYAML(n *yaml.Node) error {
 type VirtualServer struct {
 	Description string             `yaml:"description"`
 	Servers     []VirtualServerRef `yaml:"servers"`
+	// Guardrails apply to every tool call through the virtual server.
+	Guardrails []string `yaml:"guardrails"`
 }
 
 // VirtualServerRef exposes part of one upstream server in a virtual server.
@@ -509,6 +565,7 @@ func (c *Config) validate() error {
 	c.validateSSO(add)
 	c.validateAlerts(add)
 	c.validateBodyLogging(add)
+	c.validateGuardrails(add)
 
 	seen := map[string]bool{}
 	names := map[string]bool{}
@@ -539,6 +596,11 @@ func (c *Config) validate() error {
 		for _, v := range k.AllowedMCPServers {
 			if _, ok := c.MCP.VirtualServers[v]; !ok {
 				add("key %q: allowed MCP server %q is not configured", k.Name, v)
+			}
+		}
+		for _, g := range k.Guardrails {
+			if _, ok := c.Guardrails[g]; !ok {
+				add("key %q: guardrail %q is not configured", k.Name, g)
 			}
 		}
 	}
@@ -574,6 +636,86 @@ func (c *Config) validateBodyLogging(add func(string, ...any)) {
 	}
 	if _, err := redact.New(redact.Config{Builtin: b.Redact.Builtin, Patterns: b.Redact.Patterns}); err != nil {
 		add("body_logging.redact: %v", err)
+	}
+}
+
+func (c *Config) validateGuardrails(add func(string, ...any)) {
+	for name, g := range c.Guardrails {
+		add := func(format string, args ...any) { add("guardrail %q: "+format, append([]any{name}, args...)...) }
+		switch g.Type {
+		case GuardrailPII:
+			if _, err := redact.New(redact.Config{Builtin: g.Detect}); err != nil {
+				add("%v", err)
+			}
+		case GuardrailRegex:
+			if len(g.Patterns) == 0 {
+				add("patterns must list at least one pattern")
+			}
+			if _, err := redact.New(redact.Config{Builtin: []string{}, Patterns: g.Patterns}); err != nil {
+				add("%v", err)
+			}
+		case GuardrailModel:
+			if _, ok := c.Models[g.Model]; !ok {
+				add("model %q is not configured", g.Model)
+			}
+			if g.UnsafeIf == "" {
+				g.UnsafeIf = DefaultUnsafeIf
+			}
+			if _, err := regexp.Compile(g.UnsafeIf); err != nil {
+				add("unsafe_if: %v", err)
+			}
+		case GuardrailWebhook:
+			if !webhookURL(g.URL.Value()) {
+				add("url must be https, or http to localhost")
+			}
+		default:
+			add("type must be pii, regex, model or webhook, got %q", g.Type)
+		}
+		if g.Type == GuardrailWebhook && g.Action == "" {
+			g.Action = ActionBlock // the webhook's reply decides: block or redact
+		}
+		switch g.Action {
+		case ActionBlock, ActionLog:
+		case ActionRedact:
+			if g.Type == GuardrailModel {
+				add("a model guardrail cannot redact; use block or log")
+			}
+		default:
+			add("action must be block, redact or log, got %q", g.Action)
+		}
+		if len(g.Stages) == 0 {
+			add("stages must list at least one stage")
+		}
+		for _, st := range g.Stages {
+			switch st {
+			case StageInput, StageOutput, StageToolInput, StageToolOutput:
+			default:
+				add("unknown stage %q", st)
+			}
+		}
+		if g.External() {
+			if g.Timeout == 0 {
+				g.Timeout = Duration(DefaultGuardrailTimeout)
+			}
+			if g.Timeout < 0 || g.Timeout.Std() > MaxGuardrailTimeout {
+				add("timeout must be at most 30s")
+			}
+			switch g.OnError {
+			case "":
+				g.OnError = OnErrorAllow
+			case OnErrorAllow, OnErrorBlock:
+			default:
+				add("on_error must be allow or block, got %q", g.OnError)
+			}
+		}
+		c.Guardrails[name] = g
+	}
+	for vs, v := range c.MCP.VirtualServers {
+		for _, g := range v.Guardrails {
+			if _, ok := c.Guardrails[g]; !ok {
+				add("mcp virtual server %q: guardrail %q is not configured", vs, g)
+			}
+		}
 	}
 }
 

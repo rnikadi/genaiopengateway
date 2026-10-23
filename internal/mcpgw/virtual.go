@@ -19,6 +19,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/rnikadi/genaiopengateway/internal/config"
+	"github.com/rnikadi/genaiopengateway/internal/guardrail"
 	"github.com/rnikadi/genaiopengateway/internal/id"
 	"github.com/rnikadi/genaiopengateway/internal/limits"
 	"github.com/rnikadi/genaiopengateway/internal/store"
@@ -176,11 +177,22 @@ func (g *Gateway) forwardTool(u *upstream, name string) mcp.ToolHandler {
 	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		c := callFrom(ctx)
 		c.Server, c.Name = u.name, name
+		args := any(req.Params.Arguments)
+		if g.opts.Guard != nil {
+			var blocked string
+			if args, blocked = g.guardArguments(ctx, c, req.Params.Arguments); blocked != "" {
+				g.opts.Metrics.ObserveMCPToolCall(u.name, name, telemetry.MCPToolError)
+				return blockedResult(blocked), nil
+			}
+		}
 		var res *mcp.CallToolResult
 		err := g.forward(ctx, u, "tools/call", name, func(ctx context.Context, cs *mcp.ClientSession, meta mcp.Meta) (err error) {
-			res, err = cs.CallTool(ctx, &mcp.CallToolParams{Meta: meta, Name: name, Arguments: req.Params.Arguments})
+			res, err = cs.CallTool(ctx, &mcp.CallToolParams{Meta: meta, Name: name, Arguments: args})
 			return err
 		})
+		if err == nil && res != nil && g.opts.Guard != nil {
+			res = g.guardResult(ctx, c, res)
+		}
 		var ce *ConnectError
 		if errors.As(err, &ce) {
 			g.opts.Metrics.ObserveMCPToolCall(u.name, name, telemetry.MCPError)
@@ -199,6 +211,68 @@ func (g *Gateway) forwardTool(u *upstream, name string) mcp.ToolHandler {
 		g.opts.Metrics.ObserveMCPToolCall(u.name, name, status)
 		return res, err
 	}
+}
+
+// guardArguments runs tool_input guardrails on a call's arguments. It
+// returns the arguments to send, or a message when the call is blocked.
+func (g *Gateway) guardArguments(ctx context.Context, c *call, raw json.RawMessage) (any, string) {
+	if len(raw) == 0 {
+		return raw, ""
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return raw, ""
+	}
+	doc := guardrail.ArgumentsDoc(v)
+	texts, changed, blocked := g.opts.Guard(ctx, c.caller, c.virtualServer, config.StageToolInput, doc.Texts())
+	if blocked != "" {
+		return nil, blocked
+	}
+	if !changed {
+		return raw, ""
+	}
+	doc.SetTexts(texts)
+	return doc.Value(), ""
+}
+
+// guardResult runs tool_output guardrails on the text of a result.
+func (g *Gateway) guardResult(ctx context.Context, c *call, res *mcp.CallToolResult) *mcp.CallToolResult {
+	var texts []string
+	var refs []*mcp.TextContent
+	for _, ct := range res.Content {
+		if t, ok := ct.(*mcp.TextContent); ok && t.Text != "" {
+			texts, refs = append(texts, t.Text), append(refs, t)
+		}
+	}
+	var structured *guardrail.Doc
+	if res.StructuredContent != nil {
+		structured = guardrail.ArgumentsDoc(res.StructuredContent)
+		texts = append(texts, structured.Texts()...)
+	}
+	if len(texts) == 0 {
+		return res
+	}
+	out, changed, blocked := g.opts.Guard(ctx, c.caller, c.virtualServer, config.StageToolOutput, texts)
+	if blocked != "" {
+		return blockedResult(blocked)
+	}
+	if !changed {
+		return res
+	}
+	for i, t := range refs {
+		t.Text = out[i]
+	}
+	if structured != nil {
+		structured.SetTexts(out[len(refs):])
+		res.StructuredContent = structured.Value()
+	}
+	return res
+}
+
+// blockedResult tells the client a guardrail blocked a tool call, as a
+// tool error the model can read.
+func blockedResult(msg string) *mcp.CallToolResult {
+	return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: msg}}}
 }
 
 // connectTool serves the tool offered for a user_auth server that has not

@@ -49,6 +49,7 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	h("GET /admin/v1/mcp/tools", s.listMCPTools)
 	h("POST /admin/v1/mcp/servers/{server}/tools/{tool}/approve", s.approveMCPTool)
 	h("GET /admin/v1/mcp/calls", s.listMCPCalls)
+	h("GET /admin/v1/guardrail-events", s.listGuardrailEvents)
 	h("GET /admin/v1/mcp/virtual-servers", s.listVirtualServers)
 	h("GET /admin/v1/me", s.me)
 	h("GET /admin/v1/models", s.listConfiguredModels)
@@ -164,6 +165,7 @@ type patch struct {
 	TPM               *int64                  `json:"tpm"`
 	Budget            optional[policy.Budget] `json:"budget"`
 	LogBodies         optional[bool]          `json:"log_bodies"`
+	Guardrails        *[]string               `json:"guardrails"`
 	ExpiresAt         optional[time.Time]     `json:"expires_at"`
 	isKey             bool
 }
@@ -195,6 +197,9 @@ func (s *Server) apply(p *patch, name *string, pol *policy.Policy, expires **tim
 	if p.LogBodies.Set {
 		pol.LogBodies = p.LogBodies.Value
 	}
+	if p.Guardrails != nil {
+		pol.Guardrails = slices.Compact(slices.Sorted(slices.Values(*p.Guardrails)))
+	}
 	if p.ExpiresAt.Set {
 		if !p.isKey {
 			return badRequest("expires_at applies only to keys")
@@ -213,6 +218,11 @@ func (s *Server) apply(p *patch, name *string, pol *policy.Policy, expires **tim
 	for _, v := range pol.AllowedMCPServers {
 		if _, ok := cfg.MCP.VirtualServers[v]; !ok {
 			return badRequest("allowed MCP server %q is not configured", v)
+		}
+	}
+	for _, g := range pol.Guardrails {
+		if _, ok := cfg.Guardrails[g]; !ok {
+			return badRequest("guardrail %q is not configured", g)
 		}
 	}
 	return nil
@@ -647,6 +657,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) error {
 		"operator":     operatorFrom(r.Context()),
 		"sso":          cfg.SSO.OIDC != nil,
 		"body_logging": cfg.BodyLogging.Enabled,
+		"guardrails":   slices.Sorted(maps.Keys(cfg.Guardrails)),
 	})
 	return nil
 }

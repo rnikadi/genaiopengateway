@@ -17,6 +17,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/rnikadi/genaiopengateway/internal/config"
+	"github.com/rnikadi/genaiopengateway/internal/guardrail"
 	"github.com/rnikadi/genaiopengateway/internal/limits"
 	"github.com/rnikadi/genaiopengateway/internal/provider"
 	"github.com/rnikadi/genaiopengateway/internal/router"
@@ -106,6 +107,23 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 			return
 		}
 
+		names := p.Guardrails()
+		meta := guardMeta(rec.RequestID, p)
+		sent, in := s.guardRequest(r.Context(), rt, meta, names, raw)
+		acted := in.Decisions
+		if in.Blocked != nil {
+			setGuardrailsHeader(w, acted)
+			fail(http.StatusBadRequest, codeGuardrailBlocked, blockedMessage(in.Blocked))
+			return
+		}
+		if in.Changed {
+			raw, body = sent, nil
+			if json.Unmarshal(raw, &body) != nil {
+				fail(http.StatusInternalServerError, codeInvalidRequest, "the redacted request could not be encoded")
+				return
+			}
+		}
+
 		hdr := http.Header{}
 		for _, h := range forwardedHeaders {
 			if v := r.Header.Values(h); len(v) > 0 {
@@ -139,17 +157,48 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 		rec.Provider, rec.UpstreamModel = res.Target.Provider, res.Target.Model
 		rec.Status = resp.StatusCode
 		s.metrics.ObserveUpstream(rec.Target, res.TTFB)
-		if ct := resp.Header.Get("Content-Type"); ct != "" {
-			w.Header().Set("Content-Type", ct)
+		contentType := resp.Header.Get("Content-Type")
+		if contentType != "" {
+			w.Header().Set("Content-Type", contentType)
 		}
 		w.Header().Set("X-Gateway-Target", rec.Target)
-		w.WriteHeader(resp.StatusCode)
-		rec.UpstreamLatency = time.Since(start)
 		capture := s.newCapture(p)
+		var src io.Reader = resp.Body
 		if capture != nil {
-			copyFlush(w, io.TeeReader(resp.Body, capture))
+			src = io.TeeReader(resp.Body, capture)
+		}
+		if resp.StatusCode == http.StatusOK && rt.guards.Applies(config.StageOutput, names) {
+			// Output guardrails see the whole response before the client.
+			held, err := readChecked(src)
+			rec.UpstreamLatency = time.Since(start)
+			var out guardrail.Result
+			switch {
+			case errors.Is(err, errResponseTooLarge):
+				out.Blocked = &guardrail.Decision{Guardrail: rt.guards.Names(config.StageOutput, names)[0], Stage: config.StageOutput,
+					Action: config.ActionBlock, Reason: err.Error()}
+				out.Decisions = []guardrail.Decision{*out.Blocked}
+				s.recordGuardrails(meta, out.Decisions)
+			case err != nil:
+				_ = resp.Body.Close()
+				fail(http.StatusBadGateway, codeAllTargetsFailed, "reading the upstream response failed")
+				return
+			default:
+				held, out = s.guardResponse(r.Context(), rt, meta, names, held, contentType)
+			}
+			acted = append(acted, out.Decisions...)
+			setGuardrailsHeader(w, acted)
+			if out.Blocked != nil {
+				w.Header().Del("X-Gateway-Target")
+				fail(http.StatusBadRequest, codeGuardrailBlocked, blockedMessage(out.Blocked))
+			} else {
+				w.WriteHeader(resp.StatusCode)
+				_, _ = w.Write(held)
+			}
 		} else {
-			copyFlush(w, resp.Body)
+			setGuardrailsHeader(w, acted)
+			w.WriteHeader(resp.StatusCode)
+			rec.UpstreamLatency = time.Since(start)
+			copyFlush(w, src)
 		}
 		// Close before reading usage: adapters finalize it on close.
 		_ = resp.Body.Close()
@@ -185,6 +234,13 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 				Status: rec.Status, LatencyMS: time.Since(start).Milliseconds(), Tokens: rec.Tokens, CostUSD: rec.CostUSD,
 			})
 		}
+	}
+}
+
+// setGuardrailsHeader names the guardrails that acted.
+func setGuardrailsHeader(w http.ResponseWriter, acted []guardrail.Decision) {
+	if len(acted) > 0 {
+		w.Header().Set(guardrailsHeader, guardrailSummary(acted))
 	}
 }
 

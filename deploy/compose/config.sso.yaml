@@ -50,6 +50,12 @@ models:
       - provider: ollama
         model: ${OLLAMA_MODEL}
 
+guardrails:                       # run only where a policy or virtual server names them
+  no-pii:
+    type: pii
+    action: block
+    stages: [input, tool_input]
+
 keys:
   - name: dev
     key: ${GATEWAY_DEV_KEY}

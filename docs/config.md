@@ -60,6 +60,20 @@ body_logging:                        # see body-logging.md; needs a store and se
     builtin: [email, phone, credit_card, iban, us_ssn, secret]   # default: all
     patterns: ['EMP-\d{6}']         # extra RE2 expressions, replaced by [REDACTED:custom]
 
+guardrails:                          # see guardrails.md; each runs only where a policy or virtual server names it
+  no-pii:
+    type: pii                        # pii | regex | model | webhook
+    detect: [email, phone, credit_card, iban, us_ssn, secret]   # default: all
+    action: redact                   # block | redact | log
+    stages: [input]                  # input | output | tool_input | tool_output
+  dlp:
+    type: webhook
+    url: https://dlp.internal.example.com/check
+    secret: ${DLP_WEBHOOK_SECRET}
+    stages: [input, output]
+    timeout: 2s                      # model and webhook only; default 2s, at most 30s
+    on_error: allow                  # allow | block when the check fails
+
 metrics:
   listen: ":9090"                    # omit to serve /metrics on the main listener
 
@@ -118,6 +132,7 @@ mcp:                                 # optional; see mcp.md for every field
       user_auth: {client_id: "${LINEAR_CLIENT_ID}", client_secret: "${LINEAR_CLIENT_SECRET}"}
   virtual_servers:
     engineering:
+      guardrails: [no-pii]           # run at tool_input and tool_output
       servers:
         - server: github
           tools: [search_code, get_file_contents]
@@ -136,7 +151,7 @@ Prices in the example are placeholders; set them from your contracts.
 
 The admin API and UI are enabled when there is a `store` and either `admin.token` or `sso.oidc`. The UI is served at `/ui/`.
 
-Startup fails if a model references an unknown provider, a virtual MCP server references an unknown upstream or two of its names collide, a provider has no `base_url`, a target has no `model`, a static key is empty or duplicated, a duration or number is malformed, or `sso` is incomplete (an http(s) issuer, a client id and secret, a redirect URL ending in `/ui/auth/callback`, at least one role mapping with exactly one of `group` or `email`, `org` on every `admin`, none on `owner`).
+Startup fails if a model references an unknown provider, a virtual MCP server references an unknown upstream or two of its names collide, a provider has no `base_url`, a target has no `model`, a static key is empty or duplicated, a duration or number is malformed, a guardrail is incomplete or names an unknown model, or a virtual server names an unknown guardrail, or `sso` is incomplete (an http(s) issuer, a client id and secret, a redirect URL ending in `/ui/auth/callback`, at least one role mapping with exactly one of `group` or `email`, `org` on every `admin`, none on `owner`).
 
 ## Data model
 
@@ -144,7 +159,7 @@ All ids are prefixed, time-sortable strings (`org_`, `team_`, `key_`, `req_`). T
 
 | Table | Columns |
 | --- | --- |
-| `orgs` | `id`, `name`, `policy` (JSON: allowed models, rpm, tpm, budget), `created_at`, `updated_at` |
+| `orgs` | `id`, `name`, `policy` (JSON: allowed models and MCP servers, rpm, tpm, budget, guardrails, log_bodies), `created_at`, `updated_at` |
 | `teams` | `id`, `org_id`, `name`, `policy`, `created_at`, `updated_at` |
 | `api_keys` | `id`, `org_id`, `team_id`, `name`, `prefix`, `secret_hash`, `policy`, `expires_at`, `revoked_at`, `last_used_at`, `created_at`, `updated_at` |
 | `usage` | `request_id`, `ts`, `org_id`, `team_id`, `key_id`, `endpoint`, `model`, `provider`, `upstream_model`, `status`, `latency_ms`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `reasoning_tokens`, `cost_usd` |
@@ -155,6 +170,7 @@ All ids are prefixed, time-sortable strings (`org_`, `team_`, `key_`, `req_`). T
 | `mcp_connections` | `server`, `subject` (key), `access_token` and `refresh_token` (AES-256-GCM encrypted), `scopes`, `expires_at`, `created_at`, `updated_at`, `last_used_at` |
 | `mcp_connect_requests` | `id_hash`, `state_hash`, `server`, `subject`, `virtual_server`, `verifier`, `expires_at`. Pruned hourly. |
 | `request_bodies` | `id`, `request_id`, `ts`, `org_id`, `team_id`, `key_id`, `kind` (`model` or `mcp`), `endpoint`, `request` and `response` (redacted, then AES-256-GCM encrypted), `truncated`, `redactions` (JSON counts). Pruned after `body_logging.retention`. |
+| `guardrail_events` | `id`, `request_id`, `ts`, `org_id`, `team_id`, `key_id`, `guardrail`, `stage`, `action`, `failed`, `reason`, `counts` (JSON, by kind), `latency_ms`. Never the matched text. Pruned with `usage_retention`. |
 | `schema_migrations` | `version`, `applied_at` |
 
 Key secrets have the form `sk-gog-` followed by 40 random base62 characters (about 238 bits). Only the SHA-256 hash and the first 11 characters (the prefix, for display) are stored. Because the secret is high-entropy, a fast hash is appropriate and keeps lookups constant time.
