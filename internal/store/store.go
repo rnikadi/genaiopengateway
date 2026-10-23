@@ -536,7 +536,7 @@ func (s *Store) InsertUsage(ctx context.Context, recs []usage.Record) error {
 type UsageQuery struct {
 	OrgID, TeamID, KeyID string
 	From, To             time.Time
-	// GroupBy is "model", "team", "key" or "day".
+	// GroupBy is "model", "team", "key", "day", "provider" or "endpoint".
 	GroupBy string
 }
 
@@ -554,13 +554,15 @@ type UsageRow struct {
 // QueryUsage aggregates usage between From (inclusive) and To (exclusive).
 func (s *Store) QueryUsage(ctx context.Context, uq UsageQuery) ([]UsageRow, error) {
 	group := map[string]string{
-		"model": "model",
-		"team":  "team_id",
-		"key":   "key_id",
-		"day":   "CAST(ts / 86400000 AS TEXT)",
+		"model":    "model",
+		"team":     "team_id",
+		"key":      "key_id",
+		"day":      "CAST(ts / 86400000 AS TEXT)",
+		"provider": "provider",
+		"endpoint": "endpoint",
 	}[uq.GroupBy]
 	if group == "" {
-		return nil, fmt.Errorf("group_by must be model, team, key or day")
+		return nil, fmt.Errorf("group_by must be model, team, key, day, provider or endpoint")
 	}
 	where := []string{"ts >= ?", "ts < ?"}
 	args := []any{uq.From.UnixMilli(), uq.To.UnixMilli()}
@@ -590,6 +592,47 @@ func (s *Store) QueryUsage(ctx context.Context, uq UsageQuery) ([]UsageRow, erro
 			}
 		}
 		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// TargetHealth is how one upstream target answered since a time, from
+// the final attempt of each request.
+type TargetHealth struct {
+	Provider      string     `json:"-"`
+	UpstreamModel string     `json:"-"`
+	Requests      int64      `json:"requests"`
+	Errors        int64      `json:"errors"`
+	ErrorRate     float64    `json:"error_rate"`
+	AvgLatencyMS  int64      `json:"avg_latency_ms"`
+	LastErrorAt   *time.Time `json:"last_error_at,omitempty"`
+}
+
+// Health aggregates usage since a time by provider and upstream model.
+// An error is a status of 400 or above.
+func (s *Store) Health(ctx context.Context, since time.Time) ([]TargetHealth, error) {
+	rows, err := s.db.QueryContext(ctx, s.q(`SELECT provider, upstream_model, COUNT(*),
+		COALESCE(SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END), 0), COALESCE(AVG(latency_ms), 0),
+		MAX(CASE WHEN status >= 400 THEN ts END)
+		FROM usage WHERE ts >= ? GROUP BY provider, upstream_model`), since.UnixMilli())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []TargetHealth{}
+	for rows.Next() {
+		var h TargetHealth
+		var avg float64
+		var lastErr sql.NullInt64
+		if err := rows.Scan(&h.Provider, &h.UpstreamModel, &h.Requests, &h.Errors, &avg, &lastErr); err != nil {
+			return nil, err
+		}
+		h.AvgLatencyMS = int64(avg)
+		if h.Requests > 0 {
+			h.ErrorRate = float64(h.Errors) / float64(h.Requests)
+		}
+		h.LastErrorAt = toTimePtr(lastErr)
+		out = append(out, h)
 	}
 	return out, rows.Err()
 }

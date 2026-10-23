@@ -83,7 +83,7 @@ a.card:hover { border-color: var(--accent); text-decoration: none; }
 .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
 .card .value { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .card .muted { font-size: 12px; }
-.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; margin-bottom: 16px; }
 .grid2 .panel { margin-bottom: 0; }
 
 /* tables */
@@ -176,3 +176,14 @@ ul.alerts { list-style: none; margin: 0; padding: 0; }
 ul.alerts li { padding: 6px 0; border-bottom: 1px solid var(--line); }
 ul.alerts li:last-child { border-bottom: none; }
 ul.alerts .muted { margin-right: 8px; }
+
+/* tabs */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+.tabs button { background: none; color: var(--muted); border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 12px; margin-bottom: -1px; }
+.tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
+
+/* labelled values */
+.kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px 24px; margin: 0; }
+.kv dt { font-size: 12px; color: var(--muted); }
+.kv dd { margin: 2px 0 0; overflow-wrap: anywhere; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }

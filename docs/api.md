@@ -89,6 +89,11 @@ Base path `/admin/v1`. JSON in and out. Authenticate with `Authorization: Bearer
 | `GET /admin/v1/requests/{request_id}` | A request's logged body, decrypted: `request`, `response`, `truncated`, `redactions`. Owners and the organization's admins only; each read is audited as `request_body.read` |
 | `GET /admin/v1/guardrail-events` | Guardrails that matched or failed, newest first; filter with `org_id`, `team_id`, `key_id`, `guardrail`, `action`, `request_id`, `from`, `to`. Never the matched text ([guardrails.md](guardrails.md)) |
 | `DELETE /admin/v1/requests?org_id=&before=` | Delete an organization's bodies logged before a time, for erasure requests. Returns `{"deleted": n}` (owners only, audited) |
+| `GET /admin/v1/models` | Virtual models with the endpoints they serve; each target with `provider_type`, `endpoints`, price and last-hour `health` |
+| `GET /admin/v1/providers` | Providers with `type`, `base_url`, `region`, `project`, `location`, `auth`, `timeout`, `header_names`, the `models` using them and last-hour `health`. Never credentials |
+| `GET /admin/v1/guardrails` | Guardrail definitions: `type`, `action`, `stages`, `detect`, `patterns`, `model`, `unsafe_if`, `webhook_host`, `timeout`, `on_error`, and the `virtual_servers` that attach them |
+| `GET /admin/v1/alerts/webhooks` | Alert webhooks: `name`, `format`, `events`, `org`, `host` (no path), `signed`; and `budget_thresholds` (owners only) |
+| `GET /admin/v1/settings` | The gateway's own settings; secrets only as set or not set (owners only, [admin-ui-config.md](admin-ui-config.md)) |
 
 Organizations, teams and keys share the same policy fields, all optional:
 
@@ -121,7 +126,9 @@ Key create response:
 
 ### Usage query
 
-`GET /admin/v1/usage?org_id=&team_id=&key_id=&from=&to=&group_by=` where `group_by` is one of `model`, `team`, `key`, `day`. `from` and `to` are RFC 3339 and default to the current month. The response lists rows with `requests`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `reasoning_tokens` and `cost_usd`.
+`GET /admin/v1/usage?org_id=&team_id=&key_id=&from=&to=&group_by=` where `group_by` is one of `model`, `team`, `key`, `day`, `provider`, `endpoint`. `from` and `to` are RFC 3339 and default to the current month. The response lists rows with `requests`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `reasoning_tokens` and `cost_usd`.
+
+`health` covers the last hour across all replicas, from usage records: `requests`, `errors` (status 400 or above), `error_rate`, `avg_latency_ms` and `last_error_at`. Only the target that answered a request is counted; failovers show in `gog_fallbacks_total`.
 
 ### Lists and pagination
 

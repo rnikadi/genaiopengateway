@@ -28,14 +28,21 @@ func newAdminEnv(t *testing.T, extra string) *adminEnv {
 	t.Helper()
 	var hits int
 	up := upstream(t, 200, &hits)
-	cfg, err := config.Parse([]byte(`
-admin: {token: ` + adminToken + `}
+	return newAdminEnvConfig(t, `
+admin: {token: `+adminToken+`}
 store: {driver: sqlite, dsn: unused}
-providers: {up: {base_url: "` + up.URL + `", api_key: upstream-key}}
+providers: {up: {base_url: "`+up.URL+`", api_key: upstream-key}}
 models:
   chat: {targets: [{provider: up, model: m, price: {input_per_mtok: 1000000, output_per_mtok: 1000000}}]}
   embed: {targets: [{provider: up, model: e}]}
-` + extra))
+`+extra)
+}
+
+// newAdminEnvConfig starts a gateway with a whole config and a fresh
+// SQLite store.
+func newAdminEnvConfig(t *testing.T, yaml string) *adminEnv {
+	t.Helper()
+	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -399,3 +399,42 @@ export function JSONView({ value }) {
   }
   return html`<pre class="json">${text}</pre>`;
 }
+
+// --- configuration views (docs/admin-ui-config.md) ---
+
+export const endpointNames = {
+  'chat.completions': 'Chat completions',
+  responses: 'Responses',
+  messages: 'Anthropic Messages',
+  generate_content: 'Gemini generateContent',
+  embeddings: 'Embeddings',
+};
+
+export const providerTypes = { openai: 'OpenAI-compatible', anthropic: 'Anthropic', gemini: 'Gemini API', vertex: 'Vertex AI', bedrock: 'Amazon Bedrock' };
+
+const pct = new Intl.NumberFormat(undefined, { style: 'percent', maximumFractionDigits: 1 });
+
+// Health summarizes the last hour of a provider or target from usage
+// records: requests, error rate and average latency.
+export function Health({ h }) {
+  if (!h?.requests) return html`<span class="muted small">No requests in the last hour</span>`;
+  const cls = h.error_rate >= 0.2 ? 'bad' : h.errors ? 'warn' : 'good';
+  return html`<span class=${'badge ' + cls} title=${h.last_error_at ? `Last error ${when(h.last_error_at)}` : 'No errors'}>${pct.format(h.error_rate)} errors</span>
+    <span class="muted small"> ${num(h.requests)} requests · ${num(h.avg_latency_ms)} ms avg</span>`;
+}
+
+// Tabs switches between views of one page.
+export function Tabs({ tabs, value, onChange }) {
+  return html`<div class="tabs" role="tablist">${Object.entries(tabs).map(
+    ([key, label]) => html`<button role="tab" aria-selected=${key === value} class=${key === value ? 'active' : ''} onClick=${() => onChange(key)}>${label}</button>`,
+  )}</div>`;
+}
+
+// KV is a list of labelled values; empty values are left out.
+export function KV({ items }) {
+  return html`<dl class="kv">${items
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v]) => html`<div key=${k}><dt>${k}</dt><dd>${v}</dd></div>`)}</dl>`;
+}
+
+export const yesNo = (b) => (b ? 'Yes' : 'No');
