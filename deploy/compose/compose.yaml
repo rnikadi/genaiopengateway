@@ -1,6 +1,6 @@
-# GenAIOpenGateway for local use. From this directory:
+# GenAIOpenGateway local development setup. From this directory:
 #
-#   docker compose up -d                          gateway, Postgres, Valkey, an MCP server
+#   docker compose up -d                          gateway built from this checkout, Postgres, Valkey, an MCP server
 #   docker compose --profile ollama up -d         plus a local model, no API keys needed
 #   docker compose --profile observability up -d  plus Jaeger (traces) and Prometheus
 #
@@ -17,11 +17,13 @@ x-gateway-env: &gateway-env
 
 services:
   gateway:
+    # Always built from this checkout, never pulled.
     build:
       context: ../..
       args:
-        VERSION: local
-    image: ${GATEWAY_IMAGE:-genaiopengateway:local}
+        VERSION: dev
+    image: genaiopengateway-dev
+    pull_policy: build
     environment: *gateway-env
     volumes:
       - ./config.yaml:/etc/genaiopengateway/config.yaml:ro

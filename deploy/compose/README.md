@@ -1,6 +1,6 @@
-# Docker Compose
+# Local development with Docker Compose
 
-Runs GenAIOpenGateway on one machine with everything it can use: Postgres for tenants and usage, Valkey for shared rate limits, and the MCP reference server behind the MCP gateway. Optional profiles add a local model and observability. It is meant for trying the gateway and for development, not for production: passwords and tokens are fixed defaults.
+The local development setup. It runs GenAIOpenGateway, built from your checkout, on one machine with everything it can use: Postgres for tenants and usage, Valkey for shared rate limits, and the MCP reference server behind the MCP gateway. Optional profiles add a local model and observability. Not for production: passwords and tokens are fixed defaults.
 
 ## Start
 
@@ -8,7 +8,7 @@ From this directory:
 
 ```
 cp .env.example .env        # optional: add provider keys
-docker compose up -d        # builds the gateway from this checkout
+docker compose up -d        # builds the gateway from this checkout and starts everything
 ```
 
 | Command | Adds |
@@ -19,7 +19,7 @@ docker compose up -d        # builds the gateway from this checkout
 
 Profiles combine: `docker compose --profile ollama --profile observability up -d`. For traces, also set `OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318` in `.env`.
 
-The first start downloads images, and the MCP server downloads its package from npm, so give it a minute. The Ollama profile downloads the model once (about 400 MB) into a volume.
+The gateway image is always built locally from this checkout and never pulled; Go module and build caches keep rebuilds to seconds. The first start downloads the other images, and the MCP server downloads its package from npm, so give it a minute. The Ollama profile downloads the model once (about 400 MB) into a volume.
 
 ## Try it
 
@@ -48,7 +48,6 @@ Any MCP client can connect to `http://localhost:8080/mcp/demo` with the header `
 ## Change it
 
 - **Config:** edit [config.yaml](config.yaml) (models, providers, MCP servers; see [docs/config.md](../../docs/config.md)), then `docker compose restart gateway`.
-- **Code:** `docker compose up -d --build gateway` rebuilds from your checkout.
-- **A released image instead of a build:** set `GATEWAY_IMAGE=ghcr.io/rnikadi/genaiopengateway:0.2` in `.env` and run `docker compose up -d --no-build`.
+- **Code:** after a change, `docker compose up -d` rebuilds the gateway and restarts it.
 - **Logs:** `docker compose logs -f gateway`.
 - **Reset:** `docker compose down -v` removes containers and the Postgres and Ollama volumes.

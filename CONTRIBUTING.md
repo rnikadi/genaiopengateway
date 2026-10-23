@@ -22,6 +22,8 @@ make vet
 make run    # needs a config.yaml; start from config.example.yaml
 ```
 
+To run the gateway with everything it talks to (Postgres, Valkey, an MCP server, and optionally a local model, Jaeger and Prometheus), use the [Docker Compose setup](deploy/compose/README.md): `cd deploy/compose && docker compose up -d` builds your checkout and starts it all.
+
 Format code with `gofmt` before opening a pull request. CI runs gofmt, go vet, staticcheck, govulncheck, race-enabled tests and a build.
 
 ## Proposing larger changes
