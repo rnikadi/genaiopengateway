@@ -23,6 +23,9 @@ import (
 
 // Config is the root of the configuration file.
 type Config struct {
+	// Raw is the config file as read, for merging stored objects into.
+	Raw []byte `yaml:"-"`
+
 	Listen      string               `yaml:"listen"`
 	TLS         TLS                  `yaml:"tls"`
 	Admin       Admin                `yaml:"admin"`
@@ -452,13 +455,13 @@ func Load(path string) (*Config, error) {
 // Parse decodes and validates config bytes. ${VAR} references in values
 // are replaced from the environment; an unset variable is an error.
 func Parse(raw []byte) (*Config, error) {
-	var doc yaml.Node
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
-	}
-	if err := expandEnv(&doc); err != nil {
-		return nil, err
-	}
+	c, _, err := ParseWith(raw, nil)
+	return c, err
+}
+
+// decode applies defaults, decodes the file's root mapping over them and
+// validates the result.
+func decode(root *yaml.Node) (*Config, error) {
 	c := Config{
 		Listen:      DefaultListen,
 		Limits:      Limits{MaxRequestBytes: DefaultMaxRequestBytes},
@@ -469,11 +472,8 @@ func Parse(raw []byte) (*Config, error) {
 		Alerts:      Alerts{BudgetThresholds: DefaultBudgetThresholds},
 		BodyLogging: BodyLogging{Retention: Duration(DefaultBodyRetention), MaxBodyBytes: DefaultMaxBodyBytes},
 	}
-	if len(doc.Content) > 0 {
-		dec := doc.Content[0]
-		if err := dec.Decode(&c); err != nil {
-			return nil, fmt.Errorf("parse config: %w", err)
-		}
+	if err := root.Decode(&c); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
 	}
 	if err := c.validate(); err != nil {
 		return nil, err

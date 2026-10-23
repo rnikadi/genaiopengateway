@@ -79,13 +79,22 @@ type Server struct {
 
 	uiFiles map[string]*uiFile
 
+	// cfgMu guards the config sources: the file, the stored objects last
+	// applied and their revision (ADR 0023).
+	cfgMu    sync.Mutex
+	file     *config.Config
+	applied  []config.Object
+	shadowed []config.Object
+	cfgRev   int64
+	cfgErr   string
+
 	notifier *alerts.Notifier
 	conns    *connections
 }
 
 // New builds a server. st may be nil.
 func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error) {
-	s := &Server{log: log, client: newUpstreamClient(), store: st}
+	s := &Server{log: log, client: newUpstreamClient(), store: st, cfgRev: -1}
 	ctx, stop := context.WithCancel(context.Background())
 	s.stop = stop
 	var backend limits.Backend
@@ -119,19 +128,40 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error)
 	return s, nil
 }
 
-// Reload swaps in a new config. In-flight requests finish on the old one.
-func (s *Server) Reload(cfg *config.Config) error {
+// Reload swaps in a new config file, with the stored configuration
+// objects merged in. In-flight requests finish on the old config.
+func (s *Server) Reload(file *config.Config) error {
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
+	cfg, shadowed, err := s.merge(file, s.applied)
+	if err != nil {
+		if s.rt.Load() != nil {
+			return err
+		}
+		// Starting up: serve the file alone rather than not at all.
+		s.log.Error("stored configuration objects do not apply to the config file; serving the file alone", "err", err)
+		s.cfgErr, s.applied, cfg, shadowed = err.Error(), nil, file, nil
+	}
+	if err := s.install(cfg); err != nil {
+		return err
+	}
+	s.file, s.shadowed = file, shadowed
+	return nil
+}
+
+// build prepares the runtime for a config without installing it.
+func (s *Server) build(cfg *config.Config) (*runtime, error) {
 	r, err := router.New(cfg, s.client)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	bodies, err := newBodyLogger(cfg)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	guards, err := s.newGuardrails(cfg)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	next := &runtime{cfg: cfg, router: r, bodies: bodies, guards: guards}
 	if oc := cfg.MCP.OAuth; oc != nil {
@@ -142,6 +172,15 @@ func (s *Server) Reload(cfg *config.Config) error {
 		} else {
 			next.oauth = oauth.NewVerifier(oauth.Config{Issuer: oc.Issuer, JWKSURL: oc.JWKSURL, Scopes: oc.Scopes}, s.client)
 		}
+	}
+	return next, nil
+}
+
+// install builds and swaps in the runtime for a config.
+func (s *Server) install(cfg *config.Config) error {
+	next, err := s.build(cfg)
+	if err != nil {
+		return err
 	}
 	s.rt.Store(next)
 	s.mcp.Reload(cfg.MCP)
@@ -221,8 +260,12 @@ func (s *Server) refreshLoop(ctx context.Context) {
 	}
 }
 
-// refresh loads tenants and keys from the store into the directory.
+// refresh loads stored configuration objects, tenants and keys from the
+// store.
 func (s *Server) refresh(ctx context.Context) error {
+	if err := s.refreshConfig(ctx); err != nil {
+		return err
+	}
 	snap, err := s.store.LoadSnapshot(ctx)
 	if err != nil {
 		return err
