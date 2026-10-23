@@ -26,12 +26,13 @@ Prometheus, at `/metrics`. All names start with `gog_`. Go runtime and process m
 | `gog_fallbacks_total` | counter | `model`, `from_target`, `reason` |
 | `gog_limit_rejections_total` | counter | `scope` (org, team, key), `kind` (rpm, tpm, budget) |
 | `gog_unpriced_requests_total` | counter | `target` |
-| `gog_usage_write_errors_total` | counter | none |
+| `gog_usage_write_errors_total` | counter | none (usage and MCP call records) |
 | `gog_snapshot_age_seconds` | gauge | none |
 | `gog_mcp_requests_total` | counter | `virtual_server`, `method`, `status` (ok, tool_error, error, denied, rate_limited) |
 | `gog_mcp_request_duration_seconds` | histogram | `virtual_server`, `method` |
 | `gog_mcp_tool_calls_total` | counter | `server`, `tool`, `status` |
 | `gog_mcp_upstream_up` | gauge | `server` |
+| `gog_mcp_tools_pending_approval` | gauge | `server` |
 
 Labels never include org, team or key ids, to keep cardinality bounded. Per-tenant numbers come from the usage API.
 

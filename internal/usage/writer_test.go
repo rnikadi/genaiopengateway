@@ -39,7 +39,7 @@ var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func TestWriterFlushesOnCloseAndBatches(t *testing.T) {
 	s := &sink{}
-	w := NewWriter(s.write, quiet)
+	w := NewWriter(s.write, quiet, "usage")
 	for i := 0; i < batchSize+10; i++ {
 		w.Add(Record{RequestID: "r"})
 	}
@@ -52,7 +52,7 @@ func TestWriterFlushesOnCloseAndBatches(t *testing.T) {
 
 func TestWriterRetriesFailedBatch(t *testing.T) {
 	s := &sink{fail: 1}
-	w := NewWriter(s.write, quiet)
+	w := NewWriter(s.write, quiet, "usage")
 	w.Add(Record{RequestID: "r"})
 	deadline := time.Now().Add(5 * time.Second)
 	for s.count() == 0 && time.Now().Before(deadline) {

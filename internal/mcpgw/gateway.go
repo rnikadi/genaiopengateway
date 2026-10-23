@@ -19,6 +19,7 @@ import (
 	"github.com/rnikadi/genaiopengateway/internal/auth"
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/limits"
+	"github.com/rnikadi/genaiopengateway/internal/store"
 	"github.com/rnikadi/genaiopengateway/internal/telemetry"
 )
 
@@ -32,12 +33,19 @@ type Options struct {
 	Transport http.RoundTripper
 	Limiter   *limits.Limiter
 	Metrics   *telemetry.Metrics
+	// Pins keeps tool pins; nil keeps them in memory.
+	Pins Pins
+	// Record receives the audit record of every call; it may be nil.
+	Record func(store.MCPCall)
+	// Audit appends to the admin audit log; it may be nil.
+	Audit func(context.Context, *store.AuditEntry) error
 }
 
 // Gateway serves every virtual server in the config.
 type Gateway struct {
 	opts Options
 	ctx  context.Context
+	pins Pins
 
 	// mu guards cfg, upstreams and loops, and serializes rebuilds.
 	mu        sync.Mutex
@@ -52,7 +60,10 @@ type Gateway struct {
 // New starts the gateway. Upstreams are listed in the background until
 // ctx is done.
 func New(ctx context.Context, cfg config.MCP, opts Options) *Gateway {
-	g := &Gateway{opts: opts, ctx: ctx, upstreams: map[string]*upstream{}, loops: map[string]context.CancelFunc{}}
+	g := &Gateway{opts: opts, ctx: ctx, pins: opts.Pins, upstreams: map[string]*upstream{}, loops: map[string]context.CancelFunc{}}
+	if g.pins == nil {
+		g.pins = newMemPins()
+	}
 	g.servers.Store(&map[string]*mcp.Server{})
 	sdk := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		return (*g.servers.Load())[r.PathValue("name")]
@@ -81,6 +92,8 @@ func New(ctx context.Context, cfg config.MCP, opts Options) *Gateway {
 // Caller is who is calling, as authenticated by the server.
 type Caller struct {
 	Principal *auth.Principal
+	// Subject is the OAuth subject, when the caller used a token.
+	Subject   string
 	RequestID string
 }
 
@@ -194,6 +207,15 @@ func (g *Gateway) refresh(ctx context.Context, u *upstream) (changed, ok bool) {
 		}
 		return false, false
 	}
+	pctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := g.applyPins(pctx, u, c); err != nil {
+		// Without pins the catalog cannot be trusted; keep the last one.
+		g.opts.Log.Error("checking MCP tool pins failed; keeping the last catalog", "server", u.name, "err", err)
+		return false, true
+	}
+	c.seal()
+	g.opts.Metrics.SetMCPPendingTools(u.name, len(c.hidden))
 	prev := u.catalog.Swap(c)
 	if !wasUp {
 		g.opts.Log.Info("MCP server listed", "server", u.name, "protocol_version", c.protocolVersion,

@@ -65,7 +65,9 @@ With `pin_tools: true` on an upstream (the default), the gateway hashes each too
 - **First sight:** the tool is approved automatically and its hash recorded (trust on first use). Set `pin_tools: strict` to require approval for new tools too.
 - **Definition changed:** the tool is hidden from every virtual server, an audit entry and a warning are logged, and `gog_mcp_tools_pending_approval` rises. An admin reviews the new definition and approves it, or leaves it hidden.
 
-Pins live in the store. Without a store they live in memory, so every restart is a new first sight.
+Pins live in the store, shared by every replica. Without a store they live in memory, so every restart is a new first sight, and `strict` is not allowed. An approval shows the tool at once on the replica that took it, and on the others after their next refresh. Changes and approvals are written to the admin audit log (`mcp_tool.changed` by `gateway`, `mcp_tool.approve` by the admin).
+
+The hash covers the whole definition except `_meta`, which carries nothing for the model and may change on every listing.
 
 ## Upstream sessions
 
@@ -73,9 +75,9 @@ The gateway keeps one client session per upstream server per replica, shared by 
 
 ## Audit records
 
-One row per `tools/call`, `prompts/get` and `resources/read`, written asynchronously like usage records:
+One row per `tools/call`, `prompts/get` and `resources/read`, and per request refused with `403`, written asynchronously like usage records (lost records count in `gog_usage_write_errors_total`):
 
-`id`, `time`, `org_id`, `team_id`, `key_id`, `subject` (the OAuth `sub`, when present), `virtual_server`, `server`, `method`, `name` (tool, prompt or resource URI), `status` (`ok`, `tool_error`, `error`, `denied`, `rate_limited`), `error_code`, `latency_ms`, `request_id`.
+`id`, `ts`, `org_id`, `team_id`, `key_id`, `subject` (the OAuth `sub`, when present), `virtual_server`, `server`, `method`, `name` (tool, prompt or resource URI), `status` (`ok`, `tool_error`, `error`, `denied`, `rate_limited`), `error_code`, `latency_ms`, `request_id`.
 
 Arguments and results are not stored. Opt-in body capture arrives with redaction in v0.3.
 
@@ -134,7 +136,7 @@ Key, team and org policies gain `allowed_mcp_servers`, a list of virtual server 
 | `GET /.well-known/oauth-protected-resource/mcp/{virtual_server}` | RFC 9728 protected resource metadata, when OAuth is configured |
 | `GET /admin/v1/mcp/servers` | Upstream status: up or down, protocol version, counts, last refresh |
 | `GET /admin/v1/mcp/tools?server=&status=` | Tools with pin status: `approved`, `pending`, `changed` |
-| `POST /admin/v1/mcp/servers/{server}/tools/{tool}/approve` | Approve the current definition (the request carries the hash shown, so an admin approves what they saw) |
+| `POST /admin/v1/mcp/servers/{server}/tools/{tool}/approve` | Approve the current definition. The body, `{"hash": "…"}`, carries the hash shown, so an admin approves what they saw; a definition that changed since answers `409`. |
 | `GET /admin/v1/mcp/calls?org_id=&team_id=&key_id=&server=&from=&to=` | Audit records, newest first, paginated |
 
 ## Errors

@@ -8,11 +8,13 @@ import (
 	"time"
 )
 
-// Writer batches usage records and writes them off the request path.
-type Writer struct {
-	sink      func(context.Context, []Record) error
+// Writer batches records, such as usage records, and writes them off the
+// request path.
+type Writer[T any] struct {
+	sink      func(context.Context, []T) error
 	log       *slog.Logger
-	queue     chan Record
+	what      string
+	queue     chan T
 	batchSize int
 	interval  time.Duration
 	dropped   atomic.Int64
@@ -30,10 +32,11 @@ const (
 )
 
 // NewWriter starts a writer that calls sink with batches of records.
-func NewWriter(sink func(context.Context, []Record) error, log *slog.Logger) *Writer {
-	w := &Writer{
-		sink: sink, log: log,
-		queue:     make(chan Record, queueSize),
+// what names the records in log messages.
+func NewWriter[T any](sink func(context.Context, []T) error, log *slog.Logger, what string) *Writer[T] {
+	w := &Writer[T]{
+		sink: sink, log: log, what: what,
+		queue:     make(chan T, queueSize),
 		batchSize: batchSize, interval: interval,
 		done: make(chan struct{}),
 	}
@@ -43,7 +46,7 @@ func NewWriter(sink func(context.Context, []Record) error, log *slog.Logger) *Wr
 
 // Add queues a record without blocking. When the queue is full the
 // record is dropped and counted.
-func (w *Writer) Add(r Record) {
+func (w *Writer[T]) Add(r T) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	if w.closed {
@@ -59,11 +62,11 @@ func (w *Writer) Add(r Record) {
 
 // Dropped returns how many records were dropped because the queue was
 // full or a batch could not be written.
-func (w *Writer) Dropped() int64 { return w.dropped.Load() + w.failed.Load() }
+func (w *Writer[T]) Dropped() int64 { return w.dropped.Load() + w.failed.Load() }
 
 // Close stops accepting records and flushes what is queued, waiting at
 // most until ctx is done.
-func (w *Writer) Close(ctx context.Context) {
+func (w *Writer[T]) Close(ctx context.Context) {
 	w.mu.Lock()
 	if !w.closed {
 		w.closed = true
@@ -73,15 +76,15 @@ func (w *Writer) Close(ctx context.Context) {
 	select {
 	case <-w.done:
 	case <-ctx.Done():
-		w.log.Warn("usage writer did not flush before shutdown")
+		w.log.Warn("writer did not flush before shutdown", "records", w.what)
 	}
 }
 
-func (w *Writer) run() {
+func (w *Writer[T]) run() {
 	defer close(w.done)
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
-	var batch []Record
+	var batch []T
 	for {
 		select {
 		case r, ok := <-w.queue:
@@ -102,14 +105,14 @@ func (w *Writer) run() {
 // flush writes a batch and returns what is left to retry. A failed batch
 // is retried on the next tick; when it grows past ten batches the oldest
 // records are dropped so memory stays bounded.
-func (w *Writer) flush(batch []Record, final bool) []Record {
+func (w *Writer[T]) flush(batch []T, final bool) []T {
 	if len(batch) == 0 {
 		return batch
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := w.sink(ctx, batch); err != nil {
-		w.log.Error("writing usage records failed", "records", len(batch), "err", err)
+		w.log.Error("writing records failed", "records", w.what, "count", len(batch), "err", err)
 		if final {
 			w.failed.Add(int64(len(batch)))
 			return nil

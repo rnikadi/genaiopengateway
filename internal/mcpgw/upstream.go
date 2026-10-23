@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -40,7 +42,18 @@ type catalog struct {
 
 	protocolVersion string
 	refreshedAt     time.Time
-	hash            [32]byte
+	// hidden holds the names of tools that await approval.
+	hidden map[string]bool
+	// hash identifies the content and hidden set, to detect changes.
+	hash [32]byte
+}
+
+// seal computes the catalog's hash once its hidden set is known.
+func (c *catalog) seal() {
+	raw, _ := json.Marshal(c)
+	hidden := slices.Sorted(maps.Keys(c.hidden))
+	extra, _ := json.Marshal(hidden)
+	c.hash = sha256.Sum256(append(raw, extra...))
 }
 
 func newUpstream(name string, cfg config.MCPServer, base http.RoundTripper) *upstream {
@@ -177,11 +190,6 @@ func (u *upstream) list(ctx context.Context) (*catalog, error) {
 	if err != nil {
 		return nil, err
 	}
-	raw, err := json.Marshal(c)
-	if err != nil {
-		return nil, err
-	}
-	c.hash = sha256.Sum256(raw)
 	c.refreshedAt = time.Now()
 	return c, nil
 }

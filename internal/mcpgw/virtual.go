@@ -18,7 +18,9 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/rnikadi/genaiopengateway/internal/config"
+	"github.com/rnikadi/genaiopengateway/internal/id"
 	"github.com/rnikadi/genaiopengateway/internal/limits"
+	"github.com/rnikadi/genaiopengateway/internal/store"
 	"github.com/rnikadi/genaiopengateway/internal/telemetry"
 )
 
@@ -53,7 +55,7 @@ func (g *Gateway) buildServer(name string, vs config.VirtualServer) *mcp.Server 
 			allowed[t] = true
 		}
 		for _, t := range c.Tools {
-			if ref.Tools != nil && !allowed[t.Name] {
+			if (ref.Tools != nil && !allowed[t.Name]) || c.hidden[t.Name] {
 				continue
 			}
 			exposed := prefix + t.Name
@@ -385,6 +387,22 @@ func (g *Gateway) logCall(ctx context.Context, caller *Caller, vs, method string
 		attrs = append(attrs, "trace_id", sc.TraceID().String())
 	}
 	g.opts.Log.Info("mcp request", attrs...)
+	if caller != nil {
+		g.Record(caller, vs, method, c.Server, c.Name, status, c.ErrorCode, d)
+	}
+}
+
+// Record writes the audit record of a call, when records are kept.
+func (g *Gateway) Record(caller *Caller, vs, method, server, name, status string, errorCode int64, d time.Duration) {
+	if g.opts.Record == nil {
+		return
+	}
+	p := caller.Principal
+	g.opts.Record(store.MCPCall{
+		ID: id.New("mcpcall"), Time: time.Now().UTC(), OrgID: p.OrgID, TeamID: p.TeamID, KeyID: p.KeyID, Subject: caller.Subject,
+		VirtualServer: vs, Server: server, Method: method, Name: name, Status: status, ErrorCode: errorCode,
+		LatencyMS: d.Milliseconds(), RequestID: caller.RequestID,
+	})
 }
 
 func callerOf(req mcp.Request) *Caller {
