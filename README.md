@@ -42,6 +42,14 @@ cd deploy/compose && docker compose up -d
 
 See [deploy/compose](deploy/compose/README.md).
 
+On Kubernetes, install the Helm chart with your config; it runs two hardened replicas against your own Postgres and Valkey:
+
+```
+helm install gateway oci://ghcr.io/rnikadi/charts/genaiopengateway -f values.yaml
+```
+
+See [Deploying to Kubernetes](docs/deploy-kubernetes.md).
+
 Send `SIGHUP` to reload the config without dropping requests.
 
 ## Organizations, teams and keys

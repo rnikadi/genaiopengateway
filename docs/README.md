@@ -16,7 +16,8 @@
 | [Alerts](alerts.md) | Budget thresholds and other events, webhooks and Slack |
 | [Guardrails](guardrails.md) | PII, pattern, classifier and webhook checks on model and MCP calls |
 | [Gemini, Vertex AI and Bedrock](cloud-providers.md) | Cloud adapters, credentials and translation rules |
-| [Helm chart](helm.md) | Kubernetes deployment |
+| [Deploying to Kubernetes](deploy-kubernetes.md) | Installing and running the Helm chart |
+| [Helm chart](helm.md) | Kubernetes deployment design |
 | [Observability](observability.md) | Logs, metrics, traces, usage records |
 | [Releases](releasing.md) | Versioning, artifacts, support |
 | [Roadmap](roadmap.md) | Phases and gates |

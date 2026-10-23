@@ -93,3 +93,32 @@ jobs:
         if: failure()
         working-directory: deploy/compose
         run: docker compose -f compose.yaml -f compose.sso.yaml logs
+
+  helm:
+    # Template checks, then the chart installed with 2 replicas into kind.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: Install kubeconform
+        run: |
+          curl -sSfL https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz | tar xz -C /usr/local/bin kubeconform
+      - name: Chart checks
+        run: deploy/helm/genaiopengateway/ci/test.sh
+      - uses: helm/kind-action@v1
+        with:
+          node_image: kindest/node:v1.33.4
+      - name: Build and load the image
+        run: |
+          docker build -t genaiopengateway:ci .
+          kind load docker-image genaiopengateway:ci --name chart-testing
+      - name: Install with 2 replicas and send traffic
+        run: deploy/helm/genaiopengateway/ci/kind.sh
+      - name: Logs
+        if: failure()
+        run: |
+          kubectl get pods -o wide
+          kubectl describe pods -l app.kubernetes.io/name=genaiopengateway
+          kubectl logs -l app.kubernetes.io/name=genaiopengateway --all-containers --prefix --tail=200

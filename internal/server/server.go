@@ -42,11 +42,14 @@ type runtime struct {
 
 // Server holds the live runtime and serves requests against it.
 type Server struct {
-	rt     atomic.Pointer[runtime]
-	keys   atomic.Pointer[auth.Directory]
-	ready  atomic.Bool
-	log    *slog.Logger
-	client *http.Client
+	rt    atomic.Pointer[runtime]
+	keys  atomic.Pointer[auth.Directory]
+	ready atomic.Bool
+	// draining is set when shutdown starts, so load balancers stop
+	// sending requests before the listener closes.
+	draining atomic.Bool
+	log      *slog.Logger
+	client   *http.Client
 
 	// store and usage are nil when no database is configured.
 	store *store.Store
@@ -334,7 +337,14 @@ func (s *Server) Handler() http.Handler {
 	return s.recoverer(withRequestID(mux))
 }
 
+// Drain makes /readyz fail, before a graceful shutdown.
+func (s *Server) Drain() { s.draining.Store(true) }
+
 func (s *Server) readyz(w http.ResponseWriter, _ *http.Request) {
+	if s.draining.Load() {
+		http.Error(w, "shutting down", http.StatusServiceUnavailable)
+		return
+	}
 	if !s.ready.Load() {
 		http.Error(w, "loading keys", http.StatusServiceUnavailable)
 		return

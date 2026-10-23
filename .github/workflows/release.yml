@@ -120,3 +120,28 @@ jobs:
       - uses: sigstore/cosign-installer@v3
       - name: Sign
         run: cosign sign --yes "ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}"
+
+  chart:
+    # After the image, so the chart never points at a missing tag.
+    needs: [tag, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push to ghcr.io
+      id-token: write # keyless signing
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - uses: sigstore/cosign-installer@v3
+      - name: Package, push and sign
+        run: |
+          version="${TAG#v}"
+          helm package deploy/helm/genaiopengateway --version "$version" --app-version "$version" -d dist
+          echo "${{ github.token }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          helm push "dist/genaiopengateway-$version.tgz" "oci://ghcr.io/${{ github.repository_owner }}/charts" 2>&1 | tee push.log
+          digest=$(sed -n 's/^Digest: //p' push.log)
+          cosign sign --yes "ghcr.io/${{ github.repository_owner }}/charts/genaiopengateway@$digest"

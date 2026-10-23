@@ -1,0 +1,112 @@
+# Values for the GenAIOpenGateway chart. See docs/helm.md.
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/rnikadi/genaiopengateway
+  tag: ""        # defaults to the chart's appVersion
+  digest: ""     # set to pin the signed image by digest, such as sha256:...
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# The gateway's config.yaml (docs/config.md), mounted verbatim. Refer to
+# secrets as ${VAR} and give the pod the variables through envFrom.
+# Several replicas need Postgres and Valkey; the chart refuses to render
+# a config that would split keys, limits and budgets between replicas.
+config: |
+  listen: ":8080"
+  metrics:
+    listen: ":9090"
+  admin:
+    token: ${GATEWAY_ADMIN_TOKEN}
+  store:
+    driver: postgres
+    dsn: ${DATABASE_URL}
+  limiter:
+    driver: valkey
+    address: ${VALKEY_ADDRESS}
+    password: ${VALKEY_PASSWORD}
+  providers:
+    openai:
+      type: openai
+      base_url: https://api.openai.com/v1
+      api_key: ${OPENAI_API_KEY}
+  models:
+    chat-default:
+      targets:
+        - provider: openai
+          model: gpt-4.1-mini
+
+# Secrets referenced from config as ${VAR}.
+envFrom:
+  - secretRef:
+      name: genaiopengateway
+env: []
+
+# Set to the port of metrics.listen in config, such as 9090, to expose it
+# on the Service and for a ServiceMonitor. Leave null when /metrics is on
+# the main port.
+metricsPort: 9090
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+
+serviceAccount:
+  create: true
+  name: ""
+  # For workload identity: GKE, EKS IRSA or Pod Identity, Azure.
+  annotations: {}
+
+service:
+  type: ClusterIP
+  port: 8080
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: gateway.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true   # created when there are 2 or more replicas
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  labels: {}
+
+networkPolicy:
+  enabled: false
+  # Namespaces allowed to reach port 8080, by label. Empty allows only the
+  # release's own namespace. Egress stays open: providers and MCP servers
+  # are on the internet.
+  ingressNamespaceSelectors: []
+  #  - matchLabels: {kubernetes.io/metadata.name: ingress-nginx}
+
+# Long streams get time to finish on shutdown.
+terminationGracePeriodSeconds: 60
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+# Defaults spread pods across nodes and zones; set to replace them.
+topologySpreadConstraints: []
+priorityClassName: ""

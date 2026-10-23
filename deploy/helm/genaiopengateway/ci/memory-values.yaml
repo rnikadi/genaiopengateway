@@ -1,0 +1,2 @@
+config: |
+  store: {driver: postgres, dsn: postgres://x}

@@ -1,0 +1,32 @@
+image:
+  repository: genaiopengateway
+  tag: ci
+  pullPolicy: Never
+resources:
+  requests: {cpu: 50m, memory: 64Mi}
+config: |
+  listen: ":8080"
+  metrics:
+    listen: ":9090"
+  admin:
+    token: ${GATEWAY_ADMIN_TOKEN}
+  store:
+    driver: postgres
+    dsn: ${DATABASE_URL}
+  limiter:
+    driver: valkey
+    address: valkey:6379
+  providers:
+    fake:
+      type: openai
+      base_url: http://fake-provider/v1
+      api_key: unused
+  models:
+    chat:
+      targets:
+        - provider: fake
+          model: fake-model
+          price: {input_per_mtok: 1, output_per_mtok: 2}
+  keys:
+    - name: dev
+      key: ${GATEWAY_DEV_KEY}
