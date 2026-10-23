@@ -3,6 +3,7 @@
 #   docker compose up -d                          gateway built from this checkout, Postgres, Valkey, an MCP server
 #   docker compose --profile ollama up -d         plus a local model, no API keys needed
 #   docker compose --profile observability up -d  plus Jaeger (traces) and Prometheus
+#   docker compose -f compose.yaml -f compose.sso.yaml up -d   plus Dex, for single sign-on to the admin UI
 #
 # See README.md here. The defaults below are for a laptop, not for production.
 name: genaiopengateway

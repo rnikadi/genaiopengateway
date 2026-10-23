@@ -66,3 +66,27 @@ jobs:
           check-latest: true
       - name: Binaries build for every platform
         run: scripts/build-binaries.sh ci
+
+  e2e:
+    # The Docker Compose setup with Dex, driven by a browser.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Start the Compose setup with sign-in
+        working-directory: deploy/compose
+        run: |
+          docker compose -f compose.yaml -f compose.sso.yaml up -d --build --wait --wait-timeout 300
+          timeout 60 sh -c 'until curl -sf localhost:8080/readyz && curl -sf localhost:5556/dex/.well-known/openid-configuration >/dev/null; do sleep 1; done'
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Admin UI browser test
+        working-directory: test/e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          node admin-ui.mjs
+      - name: Logs
+        if: failure()
+        working-directory: deploy/compose
+        run: docker compose -f compose.yaml -f compose.sso.yaml logs

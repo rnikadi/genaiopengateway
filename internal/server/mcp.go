@@ -3,7 +3,9 @@ package server
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -202,6 +204,9 @@ func (s *Server) approveMCPTool(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("hash is required: approve the definition you reviewed")
 	}
 	server, tool := r.PathValue("server"), r.PathValue("tool")
+	if err := requireOwner(r); err != nil {
+		return err
+	}
 	pin, err := s.mcp.Approve(r.Context(), server, tool, body.Hash)
 	if err != nil {
 		return err
@@ -219,6 +224,9 @@ func (s *Server) listMCPCalls(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	q := r.URL.Query()
+	if err := s.readScope(r, q.Get("org_id"), q.Get("team_id"), q.Get("key_id")); err != nil {
+		return err
+	}
 	cq := store.MCPCallQuery{OrgID: q.Get("org_id"), TeamID: q.Get("team_id"), KeyID: q.Get("key_id"), Server: q.Get("server")}
 	for name, dst := range map[string]*time.Time{"from": &cq.From, "to": &cq.To} {
 		if v := q.Get(name); v != "" {
@@ -234,4 +242,31 @@ func (s *Server) listMCPCalls(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	return writeList(w, items, more)
+}
+
+// virtualServer is a virtual MCP server as configured.
+type virtualServer struct {
+	Name        string                  `json:"name"`
+	Description string                  `json:"description,omitempty"`
+	Servers     []virtualServerUpstream `json:"servers"`
+}
+
+type virtualServerUpstream struct {
+	Server string   `json:"server"`
+	Prefix string   `json:"prefix"`
+	Tools  []string `json:"tools"` // empty means every tool
+}
+
+func (s *Server) listVirtualServers(w http.ResponseWriter, _ *http.Request) error {
+	vs := s.rt.Load().cfg.MCP.VirtualServers
+	out := []virtualServer{}
+	for _, name := range slices.Sorted(maps.Keys(vs)) {
+		v := virtualServer{Name: name, Description: vs[name].Description}
+		for _, ref := range vs[name].Servers {
+			v.Servers = append(v.Servers, virtualServerUpstream{Server: ref.Server, Prefix: ref.NamePrefix(), Tools: ref.Tools})
+		}
+		out = append(out, v)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+	return nil
 }

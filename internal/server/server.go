@@ -61,6 +61,12 @@ type Server struct {
 	// mu serializes rebuilding the key directory from its two sources.
 	mu        sync.Mutex
 	storeKeys map[string]*auth.Principal
+
+	// ssoMu guards sso, the identity provider operators sign in with.
+	ssoMu sync.Mutex
+	sso   *oidcClient
+
+	uiFiles map[string]*uiFile
 }
 
 // New builds a server. st may be nil.
@@ -136,6 +142,7 @@ func (s *Server) Start(ctx context.Context) {
 	}
 	go s.seedBudgets(ctx)
 	go s.refreshLoop(ctx)
+	go s.sessionPruneLoop(ctx)
 	if retention := s.rt.Load().cfg.Store.UsageRetention.Std(); retention > 0 {
 		go s.pruneLoop(ctx, retention)
 	}
@@ -282,6 +289,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/mcp/{name}", s.serveMCP)
 	mux.HandleFunc("/.well-known/oauth-protected-resource/mcp/{name}", s.mcpResourceMetadata)
 	s.adminRoutes(mux)
+	s.uiRoutes(mux)
 	return s.recoverer(withRequestID(mux))
 }
 

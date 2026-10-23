@@ -1,0 +1,26 @@
+# Operator sign-in with a local identity provider. From this directory:
+#
+#   docker compose -f compose.yaml -f compose.sso.yaml up -d
+#
+# Then open http://localhost:8080/ui/ and sign in as owner@example.com,
+# admin@example.com or viewer@example.com, password "password".
+services:
+  gateway:
+    volumes:
+      - ./config.sso.yaml:/etc/genaiopengateway/config.yaml:ro
+    depends_on:
+      dex: {condition: service_started}
+
+  dex:
+    image: dexidp/dex:v2.41.1
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    volumes:
+      - ./dex.yaml:/etc/dex/config.yaml:ro
+    ports:
+      - "5556:5556"
+    networks:
+      default:
+        # Browsers resolve *.localhost to this machine, and the gateway
+        # resolves it to this container, so one issuer URL works for both.
+        aliases: [dex.localhost]
+    restart: unless-stopped

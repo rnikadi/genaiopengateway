@@ -31,6 +31,8 @@ type Config struct {
 	Models    map[string]Model    `yaml:"models"`
 	Keys      []StaticKey         `yaml:"keys"`
 	MCP       MCP                 `yaml:"mcp"`
+	SSO       SSO                 `yaml:"sso"`
+	UI        UI                  `yaml:"ui"`
 }
 
 // TLS enables HTTPS on the main listener when both files are set.
@@ -42,6 +44,55 @@ type TLS struct {
 // Admin configures the admin API.
 type Admin struct {
 	Token Secret `yaml:"token"`
+}
+
+// SSO configures operator sign-in to the admin UI and API (ADR 0016).
+type SSO struct {
+	OIDC       *OIDC         `yaml:"oidc"`
+	SessionTTL Duration      `yaml:"session_ttl"`
+	Roles      []RoleMapping `yaml:"roles"`
+}
+
+// OIDC is the identity provider operators sign in with.
+type OIDC struct {
+	Issuer       string   `yaml:"issuer"`
+	ClientID     string   `yaml:"client_id"`
+	ClientSecret Secret   `yaml:"client_secret"`
+	RedirectURL  string   `yaml:"redirect_url"`
+	GroupsClaim  string   `yaml:"groups_claim"`
+	Scopes       []string `yaml:"scopes"`
+}
+
+// Operator roles.
+const (
+	RoleOwner  = "owner"
+	RoleAdmin  = "admin"
+	RoleViewer = "viewer"
+)
+
+// RoleMapping grants a role to the members of a group, or to one email,
+// gateway-wide or for one organization (named or by id).
+type RoleMapping struct {
+	Group string `yaml:"group"`
+	Email string `yaml:"email"`
+	Role  string `yaml:"role"`
+	Org   string `yaml:"org"`
+}
+
+// UI configures the admin UI. It is on whenever the admin API is.
+type UI struct {
+	Enabled *bool `yaml:"enabled"`
+}
+
+// AdminEnabled reports whether the admin API, and with it the UI, is on:
+// it needs a store and a way to sign in.
+func (c *Config) AdminEnabled() bool {
+	return c.Store.Driver != "" && (c.Admin.Token.Value() != "" || c.SSO.OIDC != nil)
+}
+
+// UIEnabled reports whether the admin UI is served.
+func (c *Config) UIEnabled() bool {
+	return c.AdminEnabled() && (c.UI.Enabled == nil || *c.UI.Enabled)
 }
 
 // Metrics configures the Prometheus endpoint.
@@ -93,9 +144,9 @@ type Model struct {
 
 // Target maps a virtual model onto one provider's model.
 type Target struct {
-	Provider string `yaml:"provider"`
-	Model    string `yaml:"model"`
-	Price    Price  `yaml:"price"`
+	Provider string `yaml:"provider" json:"provider"`
+	Model    string `yaml:"model" json:"model"`
+	Price    Price  `yaml:"price" json:"price"`
 }
 
 // String identifies the target as provider/model.
@@ -103,9 +154,9 @@ func (t Target) String() string { return t.Provider + "/" + t.Model }
 
 // Price is the cost of a target in USD per million tokens.
 type Price struct {
-	InputPerMTok       float64 `yaml:"input_per_mtok"`
-	OutputPerMTok      float64 `yaml:"output_per_mtok"`
-	CachedInputPerMTok float64 `yaml:"cached_input_per_mtok"`
+	InputPerMTok       float64 `yaml:"input_per_mtok" json:"input_per_mtok"`
+	OutputPerMTok      float64 `yaml:"output_per_mtok" json:"output_per_mtok"`
+	CachedInputPerMTok float64 `yaml:"cached_input_per_mtok" json:"cached_input_per_mtok"`
 }
 
 // IsZero reports whether no price is configured.
@@ -225,6 +276,7 @@ const (
 	DefaultRefreshInterval = 5 * time.Second
 	DefaultMCPRefresh      = time.Minute
 	DefaultMCPTimeout      = time.Minute
+	DefaultSessionTTL      = 8 * time.Hour
 	MinAdminTokenLength    = 32
 	MinStaticKeyLength     = 16
 )
@@ -254,6 +306,7 @@ func Parse(raw []byte) (*Config, error) {
 		Limiter: Limiter{Driver: "memory", FailOpenRateLimits: true},
 		Store:   Store{RefreshInterval: Duration(DefaultRefreshInterval)},
 		MCP:     MCP{RefreshInterval: Duration(DefaultMCPRefresh)},
+		SSO:     SSO{SessionTTL: Duration(DefaultSessionTTL)},
 	}
 	if len(doc.Content) > 0 {
 		dec := doc.Content[0]
@@ -362,6 +415,7 @@ func (c *Config) validate() error {
 	}
 
 	c.validateMCP(add)
+	c.validateSSO(add)
 
 	seen := map[string]bool{}
 	names := map[string]bool{}
@@ -396,6 +450,49 @@ func (c *Config) validate() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (c *Config) validateSSO(add func(string, ...any)) {
+	s := &c.SSO
+	if o := s.OIDC; o != nil {
+		if !httpURL(o.Issuer) {
+			add("sso.oidc.issuer must be an http or https URL")
+		}
+		if o.ClientID == "" || o.ClientSecret.Value() == "" {
+			add("sso.oidc.client_id and sso.oidc.client_secret are required")
+		}
+		if u, err := url.Parse(o.RedirectURL); err != nil || !httpURL(o.RedirectURL) || u.Path != "/ui/auth/callback" {
+			add("sso.oidc.redirect_url must be the gateway's URL ending in /ui/auth/callback")
+		}
+		if o.GroupsClaim == "" {
+			o.GroupsClaim = "groups"
+		}
+		if len(o.Scopes) == 0 {
+			o.Scopes = []string{"openid", "email", "profile"}
+		}
+		if len(s.Roles) == 0 {
+			add("sso.roles is required with sso.oidc: without roles nobody can sign in")
+		}
+		if c.Store.Driver == "" {
+			add("sso.oidc needs a store, where sessions are kept")
+		}
+	}
+	if s.SessionTTL < Duration(time.Minute) {
+		add("sso.session_ttl must be at least 1m")
+	}
+	for i, r := range s.Roles {
+		if (r.Group == "") == (r.Email == "") {
+			add("sso.roles[%d]: set exactly one of group and email", i)
+		}
+		switch {
+		case r.Role == RoleOwner && r.Org != "":
+			add("sso.roles[%d]: owner is gateway-wide and takes no org", i)
+		case r.Role == RoleAdmin && r.Org == "":
+			add("sso.roles[%d]: admin needs an org", i)
+		case r.Role != RoleOwner && r.Role != RoleAdmin && r.Role != RoleViewer:
+			add("sso.roles[%d]: role must be owner, admin or viewer, got %q", i, r.Role)
+		}
+	}
 }
 
 var (

@@ -45,6 +45,28 @@ curl -s localhost:8080/admin/v1/mcp/calls -H "$ADMIN"
 
 Any MCP client can connect to `http://localhost:8080/mcp/demo` with the header `Authorization: Bearer gog-local-dev-key`.
 
+## Admin UI and sign-in
+
+Open `http://localhost:8080/ui/` and sign in with the admin token (`local-admin-token-change-me-0000000000` by default).
+
+To try single sign-on and roles, add Dex, a local OpenID Connect provider:
+
+```
+docker compose -f compose.yaml -f compose.sso.yaml up -d
+```
+
+The gateway then uses [config.sso.yaml](config.sso.yaml), which is `config.yaml` plus an `sso` section, so copy any change to `config.yaml` there too. Sign in at `http://localhost:8080/ui/` as one of these users, all with the password `password`:
+
+| User | Role |
+|---|---|
+| `owner@example.com` | owner: everything |
+| `admin@example.com` | admin of the organization `acme`; create `acme` first, as owner |
+| `viewer@example.com` | viewer of every organization |
+
+Dex is at `http://dex.localhost:5556/dex`; browsers resolve `*.localhost` to your machine. The sign-in redirect uses port 8080, so keep `GATEWAY_PORT` at its default with this file.
+
+The browser test in [test/e2e](../../test/e2e) runs against this setup.
+
 ## Change it
 
 - **Config:** edit [config.yaml](config.yaml) (models, providers, MCP servers; see [docs/config.md](../../docs/config.md)), then `docker compose restart gateway`.
