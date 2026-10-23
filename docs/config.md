@@ -12,7 +12,28 @@ tls:                                 # optional; usually TLS ends at the load ba
   key_file: /etc/genaiopengateway/tls.key
 
 admin:
-  token: ${GATEWAY_ADMIN_TOKEN}      # omit to disable the admin API
+  token: ${GATEWAY_ADMIN_TOKEN}      # acts as owner; omit to rely on SSO alone
+
+sso:                                 # operator sign-in to the admin UI; see admin-ui.md
+  oidc:
+    issuer: https://login.example.com
+    client_id: genaiopengateway
+    client_secret: ${OIDC_CLIENT_SECRET}
+    redirect_url: https://gateway.example.com/ui/auth/callback
+    groups_claim: groups             # default
+    scopes: [openid, email, profile] # default
+  session_ttl: 8h                    # default
+  roles:                             # matched at every sign-in, by group or email
+    - group: platform-admins
+      role: owner                    # everything
+    - group: acme-leads
+      role: admin                    # one organization: its teams, keys and policies
+      org: acme
+    - group: finance
+      role: viewer                   # read only; omit org for every organization
+
+ui:
+  enabled: true                      # default when the admin API is enabled
 
 metrics:
   listen: ":9090"                    # omit to serve /metrics on the main listener
@@ -85,7 +106,9 @@ Prices in the example are placeholders; set them from your contracts.
 
 ### Validation
 
-Startup fails if a model references an unknown provider, a virtual MCP server references an unknown upstream or two of its names collide, a provider has no `base_url`, a target has no `model`, a static key is empty or duplicated, or a duration or number is malformed.
+The admin API and UI are enabled when there is a `store` and either `admin.token` or `sso.oidc`. The UI is served at `/ui/`.
+
+Startup fails if a model references an unknown provider, a virtual MCP server references an unknown upstream or two of its names collide, a provider has no `base_url`, a target has no `model`, a static key is empty or duplicated, a duration or number is malformed, or `sso` is incomplete (an http(s) issuer, a client id and secret, a redirect URL ending in `/ui/auth/callback`, at least one role mapping with exactly one of `group` or `email`, `org` on every `admin`, none on `owner`).
 
 ## Data model
 

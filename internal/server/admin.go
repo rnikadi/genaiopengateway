@@ -3,20 +3,22 @@ package server
 import (
 	"bytes"
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
 	"github.com/rnikadi/genaiopengateway/internal/auth"
+	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/policy"
 	"github.com/rnikadi/genaiopengateway/internal/store"
 )
 
-// adminActor names the caller in the audit log until SSO adds users.
+// adminActor names the admin token in the audit log.
 const adminActor = "admin-token"
 
 // maxAdminBody bounds admin request bodies.
@@ -47,6 +49,9 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	h("GET /admin/v1/mcp/tools", s.listMCPTools)
 	h("POST /admin/v1/mcp/servers/{server}/tools/{tool}/approve", s.approveMCPTool)
 	h("GET /admin/v1/mcp/calls", s.listMCPCalls)
+	h("GET /admin/v1/mcp/virtual-servers", s.listVirtualServers)
+	h("GET /admin/v1/me", s.me)
+	h("GET /admin/v1/models", s.listConfiguredModels)
 }
 
 // apiError is an admin error with an HTTP status.
@@ -62,20 +67,22 @@ func badRequest(format string, args ...any) error {
 	return &apiError{http.StatusBadRequest, "invalid_request", fmt.Sprintf(format, args...)}
 }
 
-// adminAuth checks the admin token and turns handler errors into
-// responses. The admin API answers 404 when it is disabled.
+// adminAuth authenticates the operator and turns handler errors into
+// responses. Handlers check roles themselves. The admin API answers 404
+// when it is disabled.
 func (s *Server) adminAuth(fn func(http.ResponseWriter, *http.Request) error) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := s.rt.Load().cfg.Admin.Token.Value()
-		if s.store == nil || token == "" {
+		if s.store == nil || !s.rt.Load().cfg.AdminEnabled() {
 			http.NotFound(w, r)
 			return
 		}
-		presented := presentedKey(r)
-		if subtle.ConstantTimeCompare([]byte(presented), []byte(token)) != 1 {
-			writeAdminError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid admin token")
+		op, denied := s.adminOperator(r)
+		if denied != nil {
+			writeAdminError(w, denied.status, denied.code, denied.msg)
 			return
 		}
+		r = r.WithContext(withOperator(r.Context(), op))
+		w.Header().Set("Cache-Control", "no-store")
 		err := fn(w, r)
 		var ae *apiError
 		switch {
@@ -205,7 +212,7 @@ func (s *Server) apply(p *patch, name *string, pol *policy.Policy, expires **tim
 func (s *Server) audit(ctx context.Context, action, resourceType, resourceID, orgID string, details any) error {
 	raw, _ := json.Marshal(details)
 	if err := s.store.AppendAudit(ctx, &store.AuditEntry{
-		Actor: adminActor, Action: action, ResourceType: resourceType, ResourceID: resourceID, OrgID: orgID, Details: raw,
+		Actor: operatorFrom(ctx).actor(), Action: action, ResourceType: resourceType, ResourceID: resourceID, OrgID: orgID, Details: raw,
 	}); err != nil {
 		return err
 	}
@@ -218,6 +225,9 @@ func (s *Server) audit(ctx context.Context, action, resourceType, resourceID, or
 // --- organizations ---
 
 func (s *Server) createOrg(w http.ResponseWriter, r *http.Request) error {
+	if err := requireOwner(r); err != nil {
+		return err
+	}
 	var p patch
 	if err := decode(r, &p); err != nil {
 		return err
@@ -241,6 +251,22 @@ func (s *Server) listOrgs(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	op := operatorFrom(r.Context())
+	if !op.readsAll() {
+		// Operators with roles in a few organizations see just those.
+		items := []*store.Org{}
+		for _, id := range op.orgIDs() {
+			o, err := s.store.GetOrg(r.Context(), id)
+			if errors.Is(err, store.ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			items = append(items, o)
+		}
+		return writeList(w, items, false)
+	}
 	items, more, err := s.store.ListOrgs(r.Context(), pg)
 	if err != nil {
 		return err
@@ -249,6 +275,9 @@ func (s *Server) listOrgs(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) getOrg(w http.ResponseWriter, r *http.Request) error {
+	if err := read(r, r.PathValue("org_id")); err != nil {
+		return err
+	}
 	o, err := s.store.GetOrg(r.Context(), r.PathValue("org_id"))
 	if err != nil {
 		return err
@@ -258,6 +287,9 @@ func (s *Server) getOrg(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) updateOrg(w http.ResponseWriter, r *http.Request) error {
+	if err := write(r, r.PathValue("org_id")); err != nil {
+		return err
+	}
 	var p patch
 	if err := decode(r, &p); err != nil {
 		return err
@@ -281,6 +313,9 @@ func (s *Server) updateOrg(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) deleteOrg(w http.ResponseWriter, r *http.Request) error {
+	if err := requireOwner(r); err != nil {
+		return err
+	}
 	orgID := r.PathValue("org_id")
 	if err := s.store.DeleteOrg(r.Context(), orgID); err != nil {
 		return err
@@ -295,6 +330,9 @@ func (s *Server) deleteOrg(w http.ResponseWriter, r *http.Request) error {
 // --- teams ---
 
 func (s *Server) createTeam(w http.ResponseWriter, r *http.Request) error {
+	if err := write(r, r.PathValue("org_id")); err != nil {
+		return err
+	}
 	var p patch
 	if err := decode(r, &p); err != nil {
 		return err
@@ -318,6 +356,9 @@ func (s *Server) listTeams(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	if err := read(r, r.PathValue("org_id")); err != nil {
+		return err
+	}
 	if _, err := s.store.GetOrg(r.Context(), r.PathValue("org_id")); err != nil {
 		return err
 	}
@@ -333,6 +374,9 @@ func (s *Server) getTeam(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	if err := read(r, t.OrgID); err != nil {
+		return err
+	}
 	writeJSON(w, http.StatusOK, t)
 	return nil
 }
@@ -344,6 +388,9 @@ func (s *Server) updateTeam(w http.ResponseWriter, r *http.Request) error {
 	}
 	t, err := s.store.GetTeam(r.Context(), r.PathValue("team_id"))
 	if err != nil {
+		return err
+	}
+	if err := write(r, t.OrgID); err != nil {
 		return err
 	}
 	before := *t
@@ -365,6 +412,9 @@ func (s *Server) deleteTeam(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	if err := write(r, t.OrgID); err != nil {
+		return err
+	}
 	if err := s.store.DeleteTeam(r.Context(), t.ID); err != nil {
 		return err
 	}
@@ -382,7 +432,14 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(r, &p); err != nil {
 		return err
 	}
-	k := &store.Key{TeamID: r.PathValue("team_id")}
+	t, err := s.store.GetTeam(r.Context(), r.PathValue("team_id"))
+	if err != nil {
+		return err
+	}
+	if err := write(r, t.OrgID); err != nil {
+		return err
+	}
+	k := &store.Key{TeamID: t.ID}
 	if err := s.apply(&p, &k.Name, &k.Policy, &k.ExpiresAt); err != nil {
 		return err
 	}
@@ -409,7 +466,11 @@ func (s *Server) listKeys(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if _, err := s.store.GetTeam(r.Context(), r.PathValue("team_id")); err != nil {
+	t, err := s.store.GetTeam(r.Context(), r.PathValue("team_id"))
+	if err != nil {
+		return err
+	}
+	if err := read(r, t.OrgID); err != nil {
 		return err
 	}
 	items, more, err := s.store.ListKeys(r.Context(), r.PathValue("team_id"), pg)
@@ -424,6 +485,9 @@ func (s *Server) getKey(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	if err := read(r, k.OrgID); err != nil {
+		return err
+	}
 	writeJSON(w, http.StatusOK, k)
 	return nil
 }
@@ -435,6 +499,9 @@ func (s *Server) updateKey(w http.ResponseWriter, r *http.Request) error {
 	}
 	k, err := s.store.GetKey(r.Context(), r.PathValue("key_id"))
 	if err != nil {
+		return err
+	}
+	if err := write(r, k.OrgID); err != nil {
 		return err
 	}
 	if k.RevokedAt != nil {
@@ -459,6 +526,9 @@ func (s *Server) revokeKey(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	if err := write(r, k.OrgID); err != nil {
+		return err
+	}
 	if err := s.store.RevokeKey(r.Context(), k.ID); err != nil {
 		return err
 	}
@@ -477,6 +547,9 @@ func (s *Server) revokeKey(w http.ResponseWriter, r *http.Request) error {
 
 func (s *Server) queryUsage(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
+	if err := s.readScope(r, q.Get("org_id"), q.Get("team_id"), q.Get("key_id")); err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	uq := store.UsageQuery{
 		OrgID: q.Get("org_id"), TeamID: q.Get("team_id"), KeyID: q.Get("key_id"),
@@ -516,9 +589,69 @@ func (s *Server) listAudit(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	items, more, err := s.store.ListAudit(r.Context(), r.URL.Query().Get("org_id"), pg)
+	orgID := r.URL.Query().Get("org_id")
+	if err := read(r, orgID); err != nil {
+		return err
+	}
+	items, more, err := s.store.ListAudit(r.Context(), orgID, pg)
 	if err != nil {
 		return err
 	}
 	return writeList(w, items, more)
+}
+
+// readScope checks that the caller may read data filtered by organization,
+// team or key. Without any filter it is data across all organizations.
+func (s *Server) readScope(r *http.Request, orgID, teamID, keyID string) error {
+	op := operatorFrom(r.Context())
+	if op.readsAll() {
+		return nil
+	}
+	ctx := r.Context()
+	if keyID != "" {
+		k, err := s.store.GetKey(ctx, keyID)
+		if err != nil {
+			return err
+		}
+		return read(r, k.OrgID)
+	}
+	if teamID != "" {
+		t, err := s.store.GetTeam(ctx, teamID)
+		if err != nil {
+			return err
+		}
+		return read(r, t.OrgID)
+	}
+	if orgID == "" {
+		return &apiError{http.StatusForbidden, "forbidden", "org_id is required: your roles are limited to some organizations"}
+	}
+	return read(r, orgID)
+}
+
+// --- operator and configuration ---
+
+func (s *Server) me(w http.ResponseWriter, r *http.Request) error {
+	cfg := s.rt.Load().cfg
+	writeJSON(w, http.StatusOK, map[string]any{
+		"operator": operatorFrom(r.Context()),
+		"sso":      cfg.SSO.OIDC != nil,
+	})
+	return nil
+}
+
+// configuredModel is a virtual model as the admin UI shows it: targets
+// and prices, never credentials.
+type configuredModel struct {
+	Name    string          `json:"name"`
+	Targets []config.Target `json:"targets"`
+}
+
+func (s *Server) listConfiguredModels(w http.ResponseWriter, _ *http.Request) error {
+	cfg := s.rt.Load().cfg
+	out := []configuredModel{}
+	for _, name := range slices.Sorted(maps.Keys(cfg.Models)) {
+		out = append(out, configuredModel{Name: name, Targets: cfg.Models[name].Targets})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+	return nil
 }

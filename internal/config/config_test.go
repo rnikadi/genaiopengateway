@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"regexp"
@@ -79,11 +80,39 @@ func TestParseRejectsBadConfig(t *testing.T) {
 		"mcp oauth bad issuer":    `{store: {driver: sqlite, dsn: x}, mcp: {public_url: "https://gw", oauth: {issuer: "id", organization: o, team_claim: g}}}`,
 		"mcp fast refresh":        `mcp: {refresh_interval: 10ms}`,
 		"key allows unknown mcp":  `keys: [{name: a, key: aaaaaaaaaaaaaaaaaa, allowed_mcp_servers: [nope]}]`,
+		"sso no roles":            `{store: {driver: sqlite, dsn: x}, sso: {oidc: {issuer: "https://id", client_id: c, client_secret: s, redirect_url: "https://gw/ui/auth/callback"}}}`,
+		"sso no store":            `{sso: {oidc: {issuer: "https://id", client_id: c, client_secret: s, redirect_url: "https://gw/ui/auth/callback"}, roles: [{group: g, role: owner}]}}`,
+		"sso no secret":           `{store: {driver: sqlite, dsn: x}, sso: {oidc: {issuer: "https://id", client_id: c, redirect_url: "https://gw/ui/auth/callback"}, roles: [{group: g, role: owner}]}}`,
+		"sso bad redirect":        `{store: {driver: sqlite, dsn: x}, sso: {oidc: {issuer: "https://id", client_id: c, client_secret: s, redirect_url: "https://gw/callback"}, roles: [{group: g, role: owner}]}}`,
+		"sso bad role":            `sso: {roles: [{group: g, role: god}]}`,
+		"sso owner with org":      `sso: {roles: [{group: g, role: owner, org: acme}]}`,
+		"sso admin without org":   `sso: {roles: [{group: g, role: admin}]}`,
+		"sso group and email":     `sso: {roles: [{group: g, email: a@b.c, role: viewer}]}`,
+		"sso short session":       `sso: {session_ttl: 10s}`,
 	}
 	for name, raw := range cases {
 		if _, err := Parse([]byte(raw)); err == nil {
 			t.Errorf("%s: expected an error", name)
 		}
+	}
+}
+
+func TestSSOConfig(t *testing.T) {
+	c, err := Parse([]byte(`
+store: {driver: sqlite, dsn: x}
+sso:
+  oidc: {issuer: "https://id", client_id: c, client_secret: s, redirect_url: "https://gw/ui/auth/callback"}
+  roles: [{group: platform, role: owner}, {email: a@example.com, role: viewer, org: acme}]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.AdminEnabled() || !c.UIEnabled() || c.SSO.OIDC.GroupsClaim != "groups" || len(c.SSO.OIDC.Scopes) != 3 || c.SSO.SessionTTL.Std() != DefaultSessionTTL {
+		t.Fatalf("defaults: %+v %+v", c.SSO, c.SSO.OIDC)
+	}
+	c, _ = Parse([]byte(`{store: {driver: sqlite, dsn: x}}`))
+	if c.AdminEnabled() {
+		t.Fatal("the admin API needs a token or SSO")
 	}
 }
 
@@ -158,5 +187,21 @@ func TestComposeConfigIsValid(t *testing.T) {
 	}
 	if _, err := Parse(raw); err != nil {
 		t.Fatal(err)
+	}
+	// The SSO variant is config.yaml plus an sso section, so the two
+	// cannot drift apart.
+	sso, err := os.ReadFile("../../deploy/compose/config.sso.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(sso, raw) {
+		t.Fatal("config.sso.yaml must start with the whole of config.yaml; regenerate it")
+	}
+	c, err := Parse(sso)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.SSO.OIDC == nil || len(c.SSO.Roles) != 3 {
+		t.Fatalf("config.sso.yaml does not configure sign-in: %+v", c.SSO)
 	}
 }
