@@ -1,0 +1,108 @@
+# GenAIOpenGateway for local use. From this directory:
+#
+#   docker compose up -d                          gateway, Postgres, Valkey, an MCP server
+#   docker compose --profile ollama up -d         plus a local model, no API keys needed
+#   docker compose --profile observability up -d  plus Jaeger (traces) and Prometheus
+#
+# See README.md here. The defaults below are for a laptop, not for production.
+name: genaiopengateway
+
+x-gateway-env: &gateway-env
+  GATEWAY_ADMIN_TOKEN: ${GATEWAY_ADMIN_TOKEN:-local-admin-token-change-me-0000000000}
+  GATEWAY_DEV_KEY: ${GATEWAY_DEV_KEY:-gog-local-dev-key}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:0.5b}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+
+services:
+  gateway:
+    build:
+      context: ../..
+      args:
+        VERSION: local
+    image: ${GATEWAY_IMAGE:-genaiopengateway:local}
+    environment: *gateway-env
+    volumes:
+      - ./config.yaml:/etc/genaiopengateway/config.yaml:ro
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    depends_on:
+      postgres: {condition: service_healthy}
+      valkey: {condition: service_healthy}
+      mcp-everything: {condition: service_healthy}
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: gateway
+      POSTGRES_PASSWORD: gateway
+      POSTGRES_DB: gateway
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "gateway", "-d", "gateway"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  valkey:
+    image: valkey/valkey:8.1-alpine
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  # The MCP reference server, behind the gateway at /mcp/demo.
+  mcp-everything:
+    image: node:22-alpine
+    command: ["npx", "-y", "@modelcontextprotocol/server-everything@2026.8.31", "streamableHttp"]
+    environment:
+      PORT: "3001"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "3001"]
+      interval: 2s
+      timeout: 5s
+      retries: 90
+    restart: unless-stopped
+
+  ollama:
+    profiles: [ollama]
+    image: ollama/ollama:0.12.3
+    volumes:
+      - ollama:/root/.ollama
+    restart: unless-stopped
+
+  # Downloads the model once, then exits.
+  ollama-pull:
+    profiles: [ollama]
+    image: ollama/ollama:0.12.3
+    environment:
+      OLLAMA_HOST: ollama:11434
+    entrypoint: ["ollama", "pull", "${OLLAMA_MODEL:-qwen2.5:0.5b}"]
+    depends_on: [ollama]
+    restart: on-failure
+
+  jaeger:
+    profiles: [observability]
+    image: jaegertracing/jaeger:2.10.0
+    ports:
+      - "16686:16686"             # UI
+    restart: unless-stopped
+
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v3.5.0
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+volumes:
+  postgres:
+  ollama:

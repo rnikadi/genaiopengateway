@@ -1,0 +1,66 @@
+# Gateway config for the Docker Compose setup. Edit it freely; see
+# docs/config.md for every option. ${VAR} values come from compose.yaml,
+# which takes them from .env or your shell.
+listen: ":8080"
+
+admin:
+  token: ${GATEWAY_ADMIN_TOKEN}
+
+metrics:
+  listen: ":9090"                 # scraped by Prometheus; not published to the host
+
+store:
+  driver: postgres
+  dsn: postgres://gateway:gateway@postgres:5432/gateway?sslmode=disable
+  usage_retention: 30d
+
+limiter:
+  driver: valkey
+  address: valkey:6379
+
+providers:
+  openai:
+    type: openai
+    base_url: https://api.openai.com/v1
+    api_key: ${OPENAI_API_KEY}
+  anthropic:
+    type: anthropic
+    base_url: https://api.anthropic.com
+    api_key: ${ANTHROPIC_API_KEY}
+  ollama:
+    type: openai                  # started with: docker compose --profile ollama up
+    base_url: http://ollama:11434/v1
+
+models:
+  chat-default:
+    targets:
+      - provider: openai
+        model: gpt-4.1-mini
+        price: {input_per_mtok: 0.40, output_per_mtok: 1.60, cached_input_per_mtok: 0.10}
+      - provider: anthropic
+        model: claude-haiku-4-5
+        price: {input_per_mtok: 1.00, output_per_mtok: 5.00}
+  embed-default:
+    targets:
+      - provider: openai
+        model: text-embedding-3-small
+        price: {input_per_mtok: 0.02}
+  local-chat:
+    targets:
+      - provider: ollama
+        model: ${OLLAMA_MODEL}
+
+keys:
+  - name: dev
+    key: ${GATEWAY_DEV_KEY}
+
+mcp:
+  servers:
+    everything:                   # the MCP reference server, for trying the MCP gateway
+      url: http://mcp-everything:3001/mcp
+  virtual_servers:
+    demo:
+      description: Tools from the MCP reference server
+      servers:
+        - server: everything
+          tools: [echo, get-sum, get-tiny-image]

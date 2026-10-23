@@ -1,0 +1,54 @@
+# Docker Compose
+
+Runs GenAIOpenGateway on one machine with everything it can use: Postgres for tenants and usage, Valkey for shared rate limits, and the MCP reference server behind the MCP gateway. Optional profiles add a local model and observability. It is meant for trying the gateway and for development, not for production: passwords and tokens are fixed defaults.
+
+## Start
+
+From this directory:
+
+```
+cp .env.example .env        # optional: add provider keys
+docker compose up -d        # builds the gateway from this checkout
+```
+
+| Command | Adds |
+|---|---|
+| `docker compose up -d` | gateway on `localhost:8080`, Postgres, Valkey, MCP reference server |
+| `docker compose --profile ollama up -d` | Ollama with a small model (`qwen2.5:0.5b`), served as `local-chat`, so no provider keys are needed |
+| `docker compose --profile observability up -d` | Jaeger at `localhost:16686` and Prometheus at `localhost:9090` |
+
+Profiles combine: `docker compose --profile ollama --profile observability up -d`. For traces, also set `OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318` in `.env`.
+
+The first start downloads images, and the MCP server downloads its package from npm, so give it a minute. The Ollama profile downloads the model once (about 400 MB) into a volume.
+
+## Try it
+
+The defaults below match `.env.example`.
+
+```
+KEY="Authorization: Bearer gog-local-dev-key"
+
+# A model: chat-default needs OPENAI_API_KEY or ANTHROPIC_API_KEY; local-chat needs the ollama profile.
+curl -s localhost:8080/v1/chat/completions -H "$KEY" -H "Content-Type: application/json" \
+  -d '{"model":"local-chat","messages":[{"role":"user","content":"Hello"}]}'
+
+# The MCP gateway: the virtual server "demo" exposes three tools of the reference server.
+curl -s localhost:8080/mcp/demo -H "$KEY" -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" -H "Mcp-Protocol-Version: 2025-06-18" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"everything_get-sum","arguments":{"a":2,"b":3}}}'
+
+# The admin API.
+ADMIN="Authorization: Bearer local-admin-token-change-me-0000000000"
+curl -s localhost:8080/admin/v1/orgs -H "$ADMIN" -d '{"name":"acme"}'
+curl -s localhost:8080/admin/v1/mcp/calls -H "$ADMIN"
+```
+
+Any MCP client can connect to `http://localhost:8080/mcp/demo` with the header `Authorization: Bearer gog-local-dev-key`.
+
+## Change it
+
+- **Config:** edit [config.yaml](config.yaml) (models, providers, MCP servers; see [docs/config.md](../../docs/config.md)), then `docker compose restart gateway`.
+- **Code:** `docker compose up -d --build gateway` rebuilds from your checkout.
+- **A released image instead of a build:** set `GATEWAY_IMAGE=ghcr.io/rnikadi/genaiopengateway:0.2` in `.env` and run `docker compose up -d --no-build`.
+- **Logs:** `docker compose logs -f gateway`.
+- **Reset:** `docker compose down -v` removes containers and the Postgres and Ollama volumes.
