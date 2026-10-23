@@ -37,6 +37,7 @@ v0.3 adds a web UI for operators, sign-in through the company's identity provide
 | Playground | Call a model as a team with the team's policies; metered and audited (owners and organization admins, [playground.md](playground.md)) | `playground/chat/completions` |
 | Providers | Upstream providers with type, endpoint, auth, the models using them and last-hour health | `providers` |
 | Alerts | Alerts raised, filterable; webhooks with a test button (owners) | `alerts`, `alerts/webhooks`, `alerts/test` |
+| Configuration | Add, change and delete providers, models, guardrails, MCP servers and alert webhooks stored in the database; objects from the file are read-only (owners, [admin-ui-config-editing.md](admin-ui-config-editing.md)) | `config` |
 | Settings | The gateway's own configuration, secrets shown only as set (owners) | `settings` |
 
 Forms for allowed models and MCP servers offer the configured names, so a typo cannot create a policy that silently allows nothing.

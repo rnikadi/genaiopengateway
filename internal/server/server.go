@@ -80,13 +80,12 @@ type Server struct {
 	uiFiles map[string]*uiFile
 
 	// cfgMu guards the config sources: the file, the stored objects last
-	// applied and their revision (ADR 0023).
-	cfgMu    sync.Mutex
-	file     *config.Config
-	applied  []config.Object
-	shadowed []config.Object
-	cfgRev   int64
-	cfgErr   string
+	// applied, the revision last read and why it did not apply (ADR 0023).
+	cfgMu   sync.Mutex
+	file    *config.Config
+	applied []config.Object
+	cfgRev  int64
+	cfgErr  string
 
 	notifier *alerts.Notifier
 	conns    *connections
@@ -133,19 +132,16 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error)
 func (s *Server) Reload(file *config.Config) error {
 	s.cfgMu.Lock()
 	defer s.cfgMu.Unlock()
-	cfg, shadowed, err := s.merge(file, s.applied)
+	cfg, err := s.merge(file, s.applied)
 	if err != nil {
-		if s.rt.Load() != nil {
-			return err
-		}
-		// Starting up: serve the file alone rather than not at all.
-		s.log.Error("stored configuration objects do not apply to the config file; serving the file alone", "err", err)
-		s.cfgErr, s.applied, cfg, shadowed = err.Error(), nil, file, nil
+		return err
 	}
 	if err := s.install(cfg); err != nil {
 		return err
 	}
-	s.file, s.shadowed = file, shadowed
+	// Read the stored objects again on the next refresh: a set that did
+	// not apply to the old file may apply to this one.
+	s.file, s.cfgRev = file, -1
 	return nil
 }
 

@@ -31,11 +31,12 @@ func configAD(kind, name string) []byte { return []byte("config/" + kind + "/" +
 
 // merge adds stored objects to the config file. Without the file's bytes
 // (a config built in code) there is nothing to merge into.
-func (s *Server) merge(file *config.Config, objects []config.Object) (*config.Config, []config.Object, error) {
+func (s *Server) merge(file *config.Config, objects []config.Object) (*config.Config, error) {
 	if len(objects) == 0 || file.Raw == nil {
-		return file, nil, nil
+		return file, nil
 	}
-	return config.ParseWith(file.Raw, objects)
+	cfg, _, err := config.ParseWith(file.Raw, objects)
+	return cfg, err
 }
 
 // refreshConfig applies stored objects when their revision has moved. A
@@ -71,14 +72,14 @@ func (s *Server) refreshConfig(ctx context.Context) error {
 // applyObjects merges objects into the file and installs the result.
 // The caller holds cfgMu.
 func (s *Server) applyObjects(objects []config.Object) error {
-	cfg, shadowed, err := s.merge(s.file, objects)
+	cfg, err := s.merge(s.file, objects)
 	if err != nil {
 		return err
 	}
 	if err := s.install(cfg); err != nil {
 		return err
 	}
-	s.applied, s.shadowed = objects, shadowed
+	s.applied = objects
 	return nil
 }
 
@@ -338,7 +339,7 @@ func (s *Server) validateObjects(ctx context.Context, file *config.Config, o con
 	if !remove {
 		objects = append(objects, o)
 	}
-	cfg, _, err := s.merge(file, objects)
+	cfg, err := s.merge(file, objects)
 	if err == nil {
 		_, err = s.build(cfg)
 	}

@@ -187,6 +187,43 @@ await step('owner sees everything the gateway is configured with', async () => {
   await ctx.close();
 });
 
+await step('owner adds a provider and a model from the UI', async () => {
+  const { ctx, page } = await signIn('owner@example.com');
+  const provider = `e2e-${run}`;
+  const model = `e2e-chat-${run}`;
+  await page.click('nav >> text=Configuration');
+  await page.waitForSelector('td code:has-text("openai")');
+  assert.ok(await page.locator('.badge:has-text("From config file")').count(), 'file objects are labelled');
+  await page.click('button:has-text("New provider")');
+  await page.fill('.modal label:has-text("Name") input', provider);
+  await page.fill('.modal label:has-text("Base URL") input', 'http://127.0.0.1:9/v1');
+  await page.click('.modal button[type=submit]');
+  await page.waitForSelector(`td code:has-text("${provider}")`);
+  await page.click('[role=tab]:has-text("Models")');
+  await page.click('button:has-text("New model")');
+  await page.fill('.modal label:has-text("Name") input', model);
+  await page.selectOption('.modal label:has-text("provider") select', provider);
+  await page.fill('.modal label:has-text("Upstream model") input', 'm');
+  await page.click('.modal button[type=submit]');
+  await page.waitForSelector(`td code:has-text("${model}")`);
+  // A model on a provider that does not exist is refused, with the reason.
+  await page.click('button:has-text("New model")');
+  await page.fill('.modal label:has-text("Name") input', `broken-${run}`);
+  await page.click('.modal [role=tab]:has-text("Edit as JSON")');
+  await page.fill('.modal textarea', '{"targets": [{"provider": "missing", "model": "m"}]}');
+  await page.click('.modal button[type=submit]');
+  await page.waitForSelector('.modal .notice.error:has-text("missing")');
+  await page.click('.modal button:has-text("Cancel")');
+  // The new model is live on this replica.
+  await page.click('nav >> text=Models');
+  await page.waitForSelector(`td strong:has-text("${model}")`);
+  await adminAPI('DELETE', `/admin/v1/config/models/${model}`);
+  await adminAPI('DELETE', `/admin/v1/config/providers/${provider}`);
+  const audit = await adminAPI('GET', '/admin/v1/audit?limit=4');
+  assert.deepEqual(audit.data.map((a) => a.action), ['config.delete', 'config.delete', 'config.create', 'config.create']);
+  await ctx.close();
+});
+
 await step('viewer reads but cannot change anything', async () => {
   const { ctx, page } = await signIn('viewer@example.com');
   await page.click('text=Organizations');
@@ -199,6 +236,7 @@ await step('viewer reads but cannot change anything', async () => {
   assert.equal(await pageFetch(page, 'GET', '/admin/v1/usage'), 200);
   assert.equal(await page.locator('nav >> text=Settings').count(), 0, 'settings are for owners');
   assert.equal(await pageFetch(page, 'GET', '/admin/v1/settings'), 403);
+  assert.equal(await pageFetch(page, 'GET', '/admin/v1/config'), 403);
   assert.equal(await pageFetch(page, 'GET', '/admin/v1/providers'), 200);
   await ctx.close();
 });

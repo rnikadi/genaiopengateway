@@ -19,7 +19,13 @@ The running config is the file with the stored objects added. Because the merge 
 
 ## Secrets
 
-Secret fields (`api_key`, webhook `url` and `secret`, MCP server `headers` values, `user_auth.client_secret`) are encrypted with `secrets.encryption_key` in the store, like users' MCP tokens; storing an object with a secret needs that key. A response lists secret fields as `"set"`, never the value. An update that omits a secret field, or sends `"set"`, keeps the stored value. Stored values are not expanded as `${VAR}`.
+Secret fields (`api_key`, guardrail and webhook `url` and `secret`, MCP server `headers` values, `user_auth.client_secret`) are encrypted with `secrets.encryption_key` in the store, like users' MCP tokens; storing an object with a secret needs that key. The spec is stored with `"set"` in place of each secret, and a response shows exactly that, never the value. In an update:
+
+- `"set"` keeps the stored value;
+- leaving a field out keeps it too, except a header left out of a `headers` map that is sent, which is removed;
+- `""` removes it.
+
+Stored values are not expanded as `${VAR}`, so the admin API cannot read the gateway's environment.
 
 ## Admin API
 
@@ -27,17 +33,17 @@ All writes need the owner role and are audited as `config.create`, `config.updat
 
 | Method and path | Purpose |
 | --- | --- |
-| `GET /admin/v1/config` | Every object of every kind with `kind`, `name`, `source` (`file` or `store`), `shadowed`, `spec` (secrets as `"set"`), `updated_at`, `updated_by`; and `error` when the stored objects could not be applied |
+| `GET /admin/v1/config` | Every object of every kind with `kind`, `name` and `source` (`file` or `store`); stored objects also have `shadowed`, `spec` (secrets as `"set"`), `updated_at` and `updated_by`. Also the store's `revision`, and `error` when the stored objects do not apply. Objects from the file are shown in full on their own pages |
 | `PUT /admin/v1/config/{kind}/{name}` | Create or replace a stored object. `400` with the validation errors when the merged config would be invalid; `409` when the file defines that name |
 | `DELETE /admin/v1/config/{kind}/{name}` | Delete a stored object. Refused when something still refers to it, as the file would be, such as a model whose targets use the provider |
 
 ## Propagation
 
-The replica that takes a write applies it at once. A revision number in the store changes with every write; the other replicas compare it on their regular refresh and rebuild their runtime config when it moves, within `store.refresh_interval`. A config file reload (SIGHUP) merges the stored objects again.
+Before a write is stored, the merged config is built as the gateway would run it, so a write that would break the config is refused with the same message the file would get. The replica that takes a write applies it at once. A revision number in the store changes with every write; the other replicas compare it on their regular refresh and rebuild their runtime config when it moves, within `store.refresh_interval`. A config file reload (SIGHUP) merges the stored objects again. If stored objects stop applying (for example the file dropped a provider a stored model uses), a running replica keeps its config, a starting one serves the file alone, and both report the problem in `error` and on the Configuration page.
 
 ## UI
 
-The Providers, Models, Guardrails, MCP and Alerts pages get **New** and **Edit** buttons for owners. Each kind has a form for its common fields and an **Edit as JSON** view of the whole spec, for fields the form does not cover. Objects from the file show a "From config file" label and no edit button. Validation errors from the API are shown on the form.
+A **Configuration** page for owners has a tab per kind listing objects from the file (labelled "From config file", read-only) and from the store, with **New**, **Edit** and **Delete**. Providers and models have a form for their common fields; every kind has **Edit as JSON** for the whole spec. Validation errors from the API are shown on the form. The Providers and Models pages link to it for owners.
 
 ## Not in this phase
 
