@@ -157,6 +157,7 @@ func TestAdminValidation(t *testing.T) {
 		{"POST", "/admin/v1/orgs", `{"name":"a","unknown":1}`},
 		{"POST", "/admin/v1/orgs", `{"name":"a","rpm":-1}`},
 		{"POST", "/admin/v1/orgs", `{"name":"a","allowed_models":["nope"]}`},
+		{"POST", "/admin/v1/orgs", `{"name":"a","allowed_mcp_servers":["nope"]}`},
 		{"POST", "/admin/v1/orgs", `{"name":"a","budget":{"amount_usd":1,"period":"weekly"}}`},
 		{"POST", "/admin/v1/orgs", `{"name":"a","expires_at":"2030-01-01T00:00:00Z"}`},
 		{"POST", "/admin/v1/orgs", `not json`},

@@ -17,6 +17,7 @@ import (
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/id"
 	"github.com/rnikadi/genaiopengateway/internal/limits"
+	"github.com/rnikadi/genaiopengateway/internal/mcpgw"
 	"github.com/rnikadi/genaiopengateway/internal/policy"
 	"github.com/rnikadi/genaiopengateway/internal/provider"
 	"github.com/rnikadi/genaiopengateway/internal/router"
@@ -49,6 +50,7 @@ type Server struct {
 	stop    context.CancelFunc
 
 	metrics     *telemetry.Metrics
+	mcp         *mcpgw.Gateway
 	lastRefresh atomic.Int64 // unix nanoseconds of the last store load
 
 	// mu serializes rebuilding the key directory from its two sources.
@@ -75,6 +77,7 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error)
 		s.ready.Store(true)
 	}
 	s.metrics = telemetry.NewMetrics(s.usageWriteErrors, s.snapshotAge)
+	s.mcp = mcpgw.New(ctx, cfg.MCP, mcpgw.Options{Log: log, Transport: s.client.Transport, Limiter: s.limiter, Metrics: s.metrics})
 	if err := s.Reload(cfg); err != nil {
 		return nil, err
 	}
@@ -88,6 +91,7 @@ func (s *Server) Reload(cfg *config.Config) error {
 		return err
 	}
 	s.rt.Store(&runtime{cfg: cfg, router: r})
+	s.mcp.Reload(cfg.MCP)
 	s.rebuildKeys()
 	return nil
 }
@@ -123,6 +127,7 @@ func (s *Server) Close(ctx context.Context) {
 		s.usage.Close(ctx)
 	}
 	s.stop()
+	s.mcp.Close()
 	if s.valkey != nil {
 		_ = s.valkey.Close()
 	}
@@ -237,6 +242,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/embeddings", s.model(provider.Embeddings))
 	mux.HandleFunc("POST /v1/responses", s.model(provider.Responses))
 	mux.HandleFunc("POST /v1/messages", s.model(provider.Messages))
+	mux.HandleFunc("/mcp/{name}", s.serveMCP)
 	s.adminRoutes(mux)
 	return s.recoverer(withRequestID(mux))
 }

@@ -6,7 +6,9 @@ Structured JSON to stdout, one line per request at `info`:
 
 `time`, `level`, `msg="request"`, `request_id`, `trace_id` (when tracing is on), `org_id`, `team_id`, `key_id`, `key_prefix`, `endpoint`, `model`, `target`, `status`, `latency_ms`, `upstream_latency_ms`, `input_tokens`, `output_tokens`, `cost_usd`, `fallbacks`, `error_code`.
 
-Request and response bodies are never logged in v0.1. Secrets are never logged.
+MCP calls (`tools/call`, `prompts/get`, `resources/read`) log `msg="mcp request"` with `request_id`, `trace_id`, `org_id`, `team_id`, `key_id`, `virtual_server`, `method`, `server`, `name`, `status`, `latency_ms` and `error_code`.
+
+Request and response bodies, tool arguments and tool results are never logged. Secrets are never logged.
 
 ## Metrics
 
@@ -26,6 +28,10 @@ Prometheus, at `/metrics`. All names start with `gog_`. Go runtime and process m
 | `gog_unpriced_requests_total` | counter | `target` |
 | `gog_usage_write_errors_total` | counter | none |
 | `gog_snapshot_age_seconds` | gauge | none |
+| `gog_mcp_requests_total` | counter | `virtual_server`, `method`, `status` (ok, tool_error, error, denied, rate_limited) |
+| `gog_mcp_request_duration_seconds` | histogram | `virtual_server`, `method` |
+| `gog_mcp_tool_calls_total` | counter | `server`, `tool`, `status` |
+| `gog_mcp_upstream_up` | gauge | `server` |
 
 Labels never include org, team or key ids, to keep cardinality bounded. Per-tenant numbers come from the usage API.
 
@@ -34,6 +40,8 @@ Labels never include org, team or key ids, to keep cardinality bounded. Per-tena
 OpenTelemetry, exported over OTLP/HTTP (`http/protobuf`) when `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set. The standard OTel environment variables apply, including `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_SERVICE_NAME` (default `genaiopengateway`), `OTEL_RESOURCE_ATTRIBUTES`, `OTEL_TRACES_SAMPLER` and `OTEL_SDK_DISABLED`. Incoming W3C `traceparent` is honoured. For gRPC-only backends, run an OpenTelemetry Collector in between.
 
 Spans: `gateway.request` (server), with one `gateway.upstream` (client) child per target tried. An upstream span ends when response headers arrive; the request span ends when the response has been streamed to the client. Attributes follow the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/): `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, plus `gog.virtual_model`, `gog.org_id`, `gog.team_id`.
+
+MCP requests have an `mcp.request` (server) span, with an `mcp.upstream` (client) child when the request goes to an upstream. They carry `mcp.method.name`, `mcp.protocol.version` (upstream span), `gen_ai.tool.name`, `gog.virtual_server`, `gog.mcp_server`, `gog.org_id` and `gog.team_id`. Trace context is read from the request's `_meta` or its HTTP headers, and passed upstream in `_meta`.
 
 ## Usage records
 

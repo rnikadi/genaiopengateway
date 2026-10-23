@@ -139,13 +139,14 @@ func (o *optional[T]) UnmarshalJSON(b []byte) error {
 // patch is the body of create and update requests for orgs, teams and
 // keys. On create, absent fields take their zero values.
 type patch struct {
-	Name          *string                 `json:"name"`
-	AllowedModels *[]string               `json:"allowed_models"`
-	RPM           *int64                  `json:"rpm"`
-	TPM           *int64                  `json:"tpm"`
-	Budget        optional[policy.Budget] `json:"budget"`
-	ExpiresAt     optional[time.Time]     `json:"expires_at"`
-	isKey         bool
+	Name              *string                 `json:"name"`
+	AllowedModels     *[]string               `json:"allowed_models"`
+	AllowedMCPServers *[]string               `json:"allowed_mcp_servers"`
+	RPM               *int64                  `json:"rpm"`
+	TPM               *int64                  `json:"tpm"`
+	Budget            optional[policy.Budget] `json:"budget"`
+	ExpiresAt         optional[time.Time]     `json:"expires_at"`
+	isKey             bool
 }
 
 // apply updates name and policy in place and validates the result
@@ -159,6 +160,9 @@ func (s *Server) apply(p *patch, name *string, pol *policy.Policy, expires **tim
 	}
 	if p.AllowedModels != nil {
 		pol.AllowedModels = *p.AllowedModels
+	}
+	if p.AllowedMCPServers != nil {
+		pol.AllowedMCPServers = *p.AllowedMCPServers
 	}
 	if p.RPM != nil {
 		pol.RPM = *p.RPM
@@ -178,10 +182,15 @@ func (s *Server) apply(p *patch, name *string, pol *policy.Policy, expires **tim
 	if err := pol.Validate(); err != nil {
 		return badRequest("%v", err)
 	}
-	models := s.rt.Load().cfg.Models
+	cfg := s.rt.Load().cfg
 	for _, m := range pol.AllowedModels {
-		if _, ok := models[m]; !ok {
+		if _, ok := cfg.Models[m]; !ok {
 			return badRequest("allowed model %q is not configured", m)
+		}
+	}
+	for _, v := range pol.AllowedMCPServers {
+		if _, ok := cfg.MCP.VirtualServers[v]; !ok {
+			return badRequest("allowed MCP server %q is not configured", v)
 		}
 	}
 	return nil

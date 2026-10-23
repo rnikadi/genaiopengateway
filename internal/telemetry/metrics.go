@@ -27,6 +27,11 @@ type Metrics struct {
 	fallbacks      *prometheus.CounterVec
 	limitRejection *prometheus.CounterVec
 	unpriced       *prometheus.CounterVec
+
+	mcpRequests  *prometheus.CounterVec
+	mcpDuration  *prometheus.HistogramVec
+	mcpToolCalls *prometheus.CounterVec
+	mcpUp        *prometheus.GaugeVec
 }
 
 // Model request latencies span milliseconds (embeddings) to minutes
@@ -62,9 +67,22 @@ func NewMetrics(usageErrors func() float64, snapshotAge func() float64) *Metrics
 		unpriced: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "gog_unpriced_requests_total", Help: "Successful requests to targets with no price configured.",
 		}, []string{"target"}),
+		mcpRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "gog_mcp_requests_total", Help: "MCP requests served.",
+		}, []string{"virtual_server", "method", "status"}),
+		mcpDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name: "gog_mcp_request_duration_seconds", Help: "Time to serve an MCP request.", Buckets: latencyBuckets,
+		}, []string{"virtual_server", "method"}),
+		mcpToolCalls: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "gog_mcp_tool_calls_total", Help: "Tool calls forwarded to upstream MCP servers.",
+		}, []string{"server", "tool", "status"}),
+		mcpUp: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "gog_mcp_upstream_up", Help: "Whether the last catalog refresh of an upstream MCP server succeeded.",
+		}, []string{"server"}),
 	}
 	m.reg.MustRegister(
 		m.requests, m.duration, m.ttfb, m.tokens, m.cost, m.fallbacks, m.limitRejection, m.unpriced,
+		m.mcpRequests, m.mcpDuration, m.mcpToolCalls, m.mcpUp,
 		prometheus.NewCounterFunc(prometheus.CounterOpts{
 			Name: "gog_usage_write_errors_total", Help: "Usage records that could not be written to the store.",
 		}, usageErrors),
@@ -138,6 +156,40 @@ func (m *Metrics) ObserveFallback(model, target string, status int) {
 // ObserveLimitRejection records a request rejected by a limit.
 func (m *Metrics) ObserveLimitRejection(scope, kind string) {
 	m.limitRejection.WithLabelValues(scope, kind).Inc()
+}
+
+// MCP outcomes, used as the status label and in audit records.
+const (
+	MCPOk          = "ok"
+	MCPToolError   = "tool_error"
+	MCPError       = "error"
+	MCPDenied      = "denied"
+	MCPRateLimited = "rate_limited"
+)
+
+// ObserveMCPRequest records a finished MCP request.
+func (m *Metrics) ObserveMCPRequest(virtualServer, method, status string, d time.Duration) {
+	m.mcpRequests.WithLabelValues(virtualServer, method, status).Inc()
+	m.mcpDuration.WithLabelValues(virtualServer, method).Observe(d.Seconds())
+}
+
+// ObserveMCPToolCall records a tool call forwarded upstream.
+func (m *Metrics) ObserveMCPToolCall(server, tool, status string) {
+	m.mcpToolCalls.WithLabelValues(server, tool, status).Inc()
+}
+
+// SetMCPUpstreamUp records whether an upstream server is reachable.
+func (m *Metrics) SetMCPUpstreamUp(server string, up bool) {
+	v := 0.0
+	if up {
+		v = 1
+	}
+	m.mcpUp.WithLabelValues(server).Set(v)
+}
+
+// ForgetMCPUpstream removes a server that is no longer configured.
+func (m *Metrics) ForgetMCPUpstream(server string) {
+	m.mcpUp.DeleteLabelValues(server)
 }
 
 func statusClass(status int) string {
