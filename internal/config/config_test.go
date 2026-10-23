@@ -70,6 +70,8 @@ func TestParseRejectsBadConfig(t *testing.T) {
 		"mcp same prefix":        `mcp: {servers: {a: {url: "http://x"}, b: {url: "http://y"}}, virtual_servers: {v: {servers: [{server: a, prefix: p}, {server: b, prefix: p}]}}}`,
 		"mcp shared no prefix":   `mcp: {servers: {a: {url: "http://x"}, b: {url: "http://y"}}, virtual_servers: {v: {servers: [{server: a, prefix: ""}, {server: b}]}}}`,
 		"mcp bad prefix":         `mcp: {servers: {a: {url: "http://x"}}, virtual_servers: {v: {servers: [{server: a, prefix: "a b"}]}}}`,
+		"mcp bad pin mode":       `mcp: {servers: {a: {url: "http://x", pin_tools: maybe}}}`,
+		"mcp strict no store":    `mcp: {servers: {a: {url: "http://x", pin_tools: strict}}}`,
 		"mcp fast refresh":       `mcp: {refresh_interval: 10ms}`,
 		"key allows unknown mcp": `keys: [{name: a, key: aaaaaaaaaaaaaaaaaa, allowed_mcp_servers: [nope]}]`,
 	}

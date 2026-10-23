@@ -43,6 +43,10 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	h("POST /admin/v1/keys/{key_id}/revoke", s.revokeKey)
 	h("GET /admin/v1/usage", s.queryUsage)
 	h("GET /admin/v1/audit", s.listAudit)
+	h("GET /admin/v1/mcp/servers", s.listMCPServers)
+	h("GET /admin/v1/mcp/tools", s.listMCPTools)
+	h("POST /admin/v1/mcp/servers/{server}/tools/{tool}/approve", s.approveMCPTool)
+	h("GET /admin/v1/mcp/calls", s.listMCPCalls)
 }
 
 // apiError is an admin error with an HTTP status.

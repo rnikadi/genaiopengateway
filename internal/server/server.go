@@ -43,7 +43,8 @@ type Server struct {
 
 	// store and usage are nil when no database is configured.
 	store *store.Store
-	usage *usage.Writer
+	usage *usage.Writer[usage.Record]
+	calls *usage.Writer[store.MCPCall]
 
 	limiter *limits.Limiter
 	valkey  *limits.Valkey // nil unless the valkey driver is used
@@ -72,12 +73,17 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error)
 	}
 	s.limiter = limits.New(backend, cfg.Limiter.FailOpenRateLimits, cfg.Limiter.FailOpenBudgets)
 	if st != nil {
-		s.usage = usage.NewWriter(st.InsertUsage, log)
+		s.usage = usage.NewWriter(st.InsertUsage, log, "usage")
+		s.calls = usage.NewWriter(st.InsertMCPCalls, log, "mcp_calls")
 	} else {
 		s.ready.Store(true)
 	}
 	s.metrics = telemetry.NewMetrics(s.usageWriteErrors, s.snapshotAge)
-	s.mcp = mcpgw.New(ctx, cfg.MCP, mcpgw.Options{Log: log, Transport: s.client.Transport, Limiter: s.limiter, Metrics: s.metrics})
+	mo := mcpgw.Options{Log: log, Transport: s.client.Transport, Limiter: s.limiter, Metrics: s.metrics}
+	if st != nil {
+		mo.Pins, mo.Record, mo.Audit = st, s.calls.Add, st.AppendAudit
+	}
+	s.mcp = mcpgw.New(ctx, cfg.MCP, mo)
 	if err := s.Reload(cfg); err != nil {
 		return nil, err
 	}
@@ -125,6 +131,7 @@ func (s *Server) Start(ctx context.Context) {
 func (s *Server) Close(ctx context.Context) {
 	if s.usage != nil {
 		s.usage.Close(ctx)
+		s.calls.Close(ctx)
 	}
 	s.stop()
 	s.mcp.Close()
@@ -191,7 +198,7 @@ func (s *Server) usageWriteErrors() float64 {
 	if s.usage == nil {
 		return 0
 	}
-	return float64(s.usage.Dropped())
+	return float64(s.usage.Dropped() + s.calls.Dropped())
 }
 
 // snapshotAge is zero without a store or before the first load, which
@@ -211,11 +218,18 @@ func (s *Server) pruneLoop(ctx context.Context, retention time.Duration) {
 	t := time.NewTicker(24 * time.Hour)
 	defer t.Stop()
 	for {
-		n, err := s.store.PruneUsage(ctx, time.Now().Add(-retention))
+		before := time.Now().Add(-retention)
+		n, err := s.store.PruneUsage(ctx, before)
 		if err != nil {
 			s.log.Error("pruning usage failed", "err", err)
 		} else if n > 0 {
 			s.log.Info("pruned usage records", "rows", n)
+		}
+		n, err = s.store.PruneMCPCalls(ctx, before)
+		if err != nil {
+			s.log.Error("pruning MCP call records failed", "err", err)
+		} else if n > 0 {
+			s.log.Info("pruned MCP call records", "rows", n)
 		}
 		select {
 		case <-ctx.Done():

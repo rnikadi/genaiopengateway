@@ -32,6 +32,7 @@ type Metrics struct {
 	mcpDuration  *prometheus.HistogramVec
 	mcpToolCalls *prometheus.CounterVec
 	mcpUp        *prometheus.GaugeVec
+	mcpPending   *prometheus.GaugeVec
 }
 
 // Model request latencies span milliseconds (embeddings) to minutes
@@ -79,10 +80,13 @@ func NewMetrics(usageErrors func() float64, snapshotAge func() float64) *Metrics
 		mcpUp: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "gog_mcp_upstream_up", Help: "Whether the last catalog refresh of an upstream MCP server succeeded.",
 		}, []string{"server"}),
+		mcpPending: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "gog_mcp_tools_pending_approval", Help: "Upstream MCP tools hidden until an admin approves their definition.",
+		}, []string{"server"}),
 	}
 	m.reg.MustRegister(
 		m.requests, m.duration, m.ttfb, m.tokens, m.cost, m.fallbacks, m.limitRejection, m.unpriced,
-		m.mcpRequests, m.mcpDuration, m.mcpToolCalls, m.mcpUp,
+		m.mcpRequests, m.mcpDuration, m.mcpToolCalls, m.mcpUp, m.mcpPending,
 		prometheus.NewCounterFunc(prometheus.CounterOpts{
 			Name: "gog_usage_write_errors_total", Help: "Usage records that could not be written to the store.",
 		}, usageErrors),
@@ -187,9 +191,15 @@ func (m *Metrics) SetMCPUpstreamUp(server string, up bool) {
 	m.mcpUp.WithLabelValues(server).Set(v)
 }
 
+// SetMCPPendingTools records how many of a server's tools await approval.
+func (m *Metrics) SetMCPPendingTools(server string, n int) {
+	m.mcpPending.WithLabelValues(server).Set(float64(n))
+}
+
 // ForgetMCPUpstream removes a server that is no longer configured.
 func (m *Metrics) ForgetMCPUpstream(server string) {
 	m.mcpUp.DeleteLabelValues(server)
+	m.mcpPending.DeleteLabelValues(server)
 }
 
 func statusClass(status int) string {

@@ -120,9 +120,38 @@ type MCP struct {
 
 // MCPServer is an upstream MCP server reached over Streamable HTTP.
 type MCPServer struct {
-	URL     string            `yaml:"url"`
-	Headers map[string]Secret `yaml:"headers"`
-	Timeout Duration          `yaml:"timeout"`
+	URL      string            `yaml:"url"`
+	Headers  map[string]Secret `yaml:"headers"`
+	Timeout  Duration          `yaml:"timeout"`
+	PinTools PinMode           `yaml:"pin_tools"`
+}
+
+// PinMode says how an upstream's tool definitions are pinned.
+type PinMode string
+
+// Pin modes. In YAML, true is PinOn and false is PinOff.
+const (
+	// PinOn approves a tool when first seen and hides it when its
+	// definition changes, until approved again.
+	PinOn PinMode = "on"
+	// PinStrict also requires approval for tools seen for the first time.
+	PinStrict PinMode = "strict"
+	PinOff    PinMode = "off"
+)
+
+// UnmarshalYAML accepts true, false or strict.
+func (m *PinMode) UnmarshalYAML(n *yaml.Node) error {
+	switch n.Value {
+	case "true":
+		*m = PinOn
+	case "false":
+		*m = PinOff
+	case "strict":
+		*m = PinStrict
+	default:
+		return fmt.Errorf("line %d: pin_tools must be true, false or strict", n.Line)
+	}
+	return nil
 }
 
 // VirtualServer is what clients connect to at /mcp/{name}.
@@ -372,6 +401,12 @@ func (c *Config) validateMCP(add func(string, ...any)) {
 		}
 		if s.Timeout <= 0 {
 			s.Timeout = Duration(DefaultMCPTimeout)
+		}
+		if s.PinTools == "" {
+			s.PinTools = PinOn
+		}
+		if s.PinTools == PinStrict && c.Store.Driver == "" {
+			add("mcp server %q: pin_tools: strict needs a store, where approvals are kept", name)
 		}
 		m.Servers[name] = s
 	}

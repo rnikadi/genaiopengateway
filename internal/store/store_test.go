@@ -31,7 +31,7 @@ func backends(t *testing.T) map[string]*Store {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, table := range []string{"usage", "audit_log", "api_keys", "teams", "orgs"} {
+		for _, table := range []string{"usage", "audit_log", "mcp_calls", "mcp_tool_pins", "api_keys", "teams", "orgs"} {
 			if _, err := pg.db.ExecContext(ctx, "DELETE FROM "+table); err != nil {
 				t.Fatal(err)
 			}
