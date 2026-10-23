@@ -144,8 +144,8 @@ await step('owner sees everything the gateway is configured with', async () => {
   await page.waitForSelector('td:has-text("openai")');
   assert.ok(await page.locator('td:has-text("Anthropic")').count(), 'provider types are shown');
   await page.click('nav >> text=Models');
-  await page.waitForSelector('text=chat-default');
-  assert.ok(await page.locator('.badge:has-text("Chat completions")').count(), 'endpoints are shown');
+  // chat-default is on the Providers page too, so wait for what only Models shows.
+  await page.waitForSelector('td strong:has-text("chat-default") + .chips .badge:has-text("Chat completions")');
   await page.click('nav >> text=Guardrails');
   await page.click('[role=tab]:has-text("Definitions")');
   await page.waitForSelector('td code:has-text("no-pii")');
