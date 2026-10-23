@@ -42,6 +42,9 @@ type Options struct {
 	// OnPending, which may be nil, is told when a tool is hidden until
 	// approval: new in strict mode, or changed since it was approved.
 	OnPending func(server, tool, hash string, changed bool)
+	// LogBody, which may be nil, receives the params and result of each
+	// call, for body logging. It decides whether to log.
+	LogBody func(caller *Caller, virtualServer, method string, params any, res mcp.Result, err error)
 }
 
 // Gateway serves every virtual server in the config.

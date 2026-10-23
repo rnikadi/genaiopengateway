@@ -97,6 +97,14 @@ func TestParseRejectsBadConfig(t *testing.T) {
 		"sso admin without org":   `sso: {roles: [{group: g, role: admin}]}`,
 		"sso group and email":     `sso: {roles: [{group: g, email: a@b.c, role: viewer}]}`,
 		"sso short session":       `sso: {session_ttl: 10s}`,
+		"short encryption key":    `secrets: {encryption_key: c2hvcnQ=}`,
+		"previous key alone":      `secrets: {previous_keys: ["` + testKey + `"]}`,
+		"bodies no key":           `{store: {driver: sqlite, dsn: x}, body_logging: {enabled: true}}`,
+		"bodies no store":         `{secrets: {encryption_key: "` + testKey + `"}, body_logging: {enabled: true}}`,
+		"bodies long retention":   `{store: {driver: sqlite, dsn: x}, secrets: {encryption_key: "` + testKey + `"}, body_logging: {enabled: true, retention: 400d}}`,
+		"bodies tiny max":         `{store: {driver: sqlite, dsn: x}, secrets: {encryption_key: "` + testKey + `"}, body_logging: {enabled: true, max_body_bytes: 10}}`,
+		"bodies bad redaction":    `{store: {driver: sqlite, dsn: x}, secrets: {encryption_key: "` + testKey + `"}, body_logging: {enabled: true, redact: {builtin: [names]}}}`,
+		"bodies bad pattern":      `{store: {driver: sqlite, dsn: x}, secrets: {encryption_key: "` + testKey + `"}, body_logging: {enabled: true, redact: {patterns: ["("]}}}`,
 	}
 	for name, raw := range cases {
 		if _, err := Parse([]byte(raw)); err == nil {
@@ -138,6 +146,20 @@ alerts:
 	a := c.Alerts
 	if len(a.BudgetThresholds) != 3 || a.Webhooks[0].Format != FormatJSON || !a.Webhooks[1].Wants(EventMCPToolPending) || a.Webhooks[1].Wants(EventBudgetThreshold) {
 		t.Fatalf("alerts = %+v", a)
+	}
+}
+
+func TestBodyLoggingConfig(t *testing.T) {
+	c, err := Parse([]byte(`
+store: {driver: sqlite, dsn: x}
+secrets: {encryption_key: "XU4XYQMExW1ZlJ4E3eXfwgVLht06HQRhJRewoweY2YI="}
+body_logging: {enabled: true, redact: {builtin: [email], patterns: ['EMP-\d{6}']}}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := c.BodyLogging; b.Retention.Std() != DefaultBodyRetention || b.MaxBodyBytes != DefaultMaxBodyBytes || len(b.Redact.Patterns) != 1 {
+		t.Fatalf("body_logging = %+v", b)
 	}
 }
 
@@ -230,3 +252,5 @@ func TestComposeConfigIsValid(t *testing.T) {
 		t.Fatalf("config.sso.yaml does not configure sign-in: %+v", c.SSO)
 	}
 }
+
+const testKey = "XU4XYQMExW1ZlJ4E3eXfwgVLht06HQRhJRewoweY2YI="

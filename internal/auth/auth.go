@@ -59,6 +59,17 @@ type Principal struct {
 	ExpiresAt *time.Time
 }
 
+// LogBodies reports whether bodies of this principal's requests are
+// logged: the most specific level that sets log_bodies decides.
+func (p *Principal) LogBodies() bool {
+	for i := len(p.Policies) - 1; i >= 0; i-- {
+		if v := p.Policies[i].LogBodies; v != nil {
+			return *v
+		}
+	}
+	return false
+}
+
 // Expired reports whether the key has expired at t.
 func (p *Principal) Expired(t time.Time) bool {
 	return p.ExpiresAt != nil && !t.Before(*p.ExpiresAt)

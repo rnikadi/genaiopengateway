@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,7 @@ import (
 	"github.com/rnikadi/genaiopengateway/internal/limits"
 	"github.com/rnikadi/genaiopengateway/internal/provider"
 	"github.com/rnikadi/genaiopengateway/internal/router"
+	"github.com/rnikadi/genaiopengateway/internal/store"
 	"github.com/rnikadi/genaiopengateway/internal/telemetry"
 	"github.com/rnikadi/genaiopengateway/internal/usage"
 )
@@ -143,9 +145,26 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 		w.Header().Set("X-Gateway-Target", rec.Target)
 		w.WriteHeader(resp.StatusCode)
 		rec.UpstreamLatency = time.Since(start)
-		copyFlush(w, resp.Body)
+		capture := s.newCapture(p)
+		if capture != nil {
+			copyFlush(w, io.TeeReader(resp.Body, capture))
+		} else {
+			copyFlush(w, resp.Body)
+		}
 		// Close before reading usage: adapters finalize it on close.
 		_ = resp.Body.Close()
+		if capture != nil {
+			// Copy only what redaction reads, so the queue does not hold
+			// whole large requests.
+			req := bytes.Clone(raw[:min(len(raw), capture.max)])
+			s.bodies.Add(capturedBody{
+				RequestBody: store.RequestBody{
+					RequestID: rec.RequestID, Time: start.UTC(), OrgID: p.OrgID, TeamID: p.TeamID, KeyID: p.KeyID,
+					Kind: "model", Endpoint: string(ep), Truncated: capture.truncated || len(req) < len(raw),
+				},
+				request: req, response: capture.Bytes(), responseContentType: resp.Header.Get("Content-Type"),
+			})
+		}
 
 		if resp.StatusCode == http.StatusOK {
 			rec.Tokens = *resp.Usage

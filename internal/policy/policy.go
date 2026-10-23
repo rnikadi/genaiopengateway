@@ -31,6 +31,9 @@ type Policy struct {
 	RPM               int64    `yaml:"rpm" json:"rpm,omitempty"`
 	TPM               int64    `yaml:"tpm" json:"tpm,omitempty"`
 	Budget            *Budget  `yaml:"budget" json:"budget,omitempty"`
+	// LogBodies turns body logging on or off at this level; nil inherits
+	// from the level above (docs/body-logging.md).
+	LogBodies *bool `yaml:"log_bodies" json:"log_bodies,omitempty"`
 }
 
 // AllowsModel reports whether the policy permits a virtual model.

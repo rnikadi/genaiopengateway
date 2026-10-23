@@ -48,6 +48,18 @@ alerts:                              # see alerts.md; needs a store
       events: [budget.threshold, mcp.tool_pending, key.expiring]
       org: acme                              # only this organization's alerts; omit for all
 
+secrets:
+  encryption_key: ${GOG_ENCRYPTION_KEY}  # 32 random bytes, base64 (openssl rand -base64 32)
+  previous_keys: []                      # old keys, still used to decrypt after rotation
+
+body_logging:                        # see body-logging.md; needs a store and secrets.encryption_key
+  enabled: false                     # master switch; policies (log_bodies) choose what is logged
+  retention: 30d                     # default 30d, at most 365d
+  max_body_bytes: 65536              # each of request and response, after redaction
+  redact:
+    builtin: [email, phone, credit_card, iban, us_ssn, secret]   # default: all
+    patterns: ['EMP-\d{6}']         # extra RE2 expressions, replaced by [REDACTED:custom]
+
 metrics:
   listen: ":9090"                    # omit to serve /metrics on the main listener
 
@@ -136,6 +148,8 @@ All ids are prefixed, time-sortable strings (`org_`, `team_`, `key_`, `req_`). T
 | `audit_log` | `id`, `ts`, `actor`, `action`, `resource_type`, `resource_id`, `org_id`, `details` (JSON) |
 | `mcp_tool_pins` | `server`, `tool`, `hash` (of the definition last seen), `definition` (JSON), `approved_hash` (empty until approved), `updated_at`. Status is derived: `approved` when the hashes match, `pending` when nothing was approved, `changed` otherwise. |
 | `mcp_calls` | `id`, `ts`, `org_id`, `team_id`, `key_id`, `subject`, `virtual_server`, `server`, `method`, `name`, `status`, `error_code`, `latency_ms`, `request_id`. Pruned with `usage_retention`. |
+| `alerts_sent` | `id`, `ts`, `event`, `dedupe_key` (unique), `org_id`, `data` (JSON) |
+| `request_bodies` | `id`, `request_id`, `ts`, `org_id`, `team_id`, `key_id`, `kind` (`model` or `mcp`), `endpoint`, `request` and `response` (redacted, then AES-256-GCM encrypted), `truncated`, `redactions` (JSON counts). Pruned after `body_logging.retention`. |
 | `schema_migrations` | `version`, `applied_at` |
 
 Key secrets have the form `sk-gog-` followed by 40 random base62 characters (about 238 bits). Only the SHA-256 hash and the first 11 characters (the prefix, for display) are stored. Because the secret is high-entropy, a fast hash is appropriate and keeps lookups constant time.

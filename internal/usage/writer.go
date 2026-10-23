@@ -34,9 +34,15 @@ const (
 // NewWriter starts a writer that calls sink with batches of records.
 // what names the records in log messages.
 func NewWriter[T any](sink func(context.Context, []T) error, log *slog.Logger, what string) *Writer[T] {
+	return NewWriterSize(sink, log, what, queueSize)
+}
+
+// NewWriterSize is NewWriter with a queue of the given size, for records
+// too large to queue 100,000 of.
+func NewWriterSize[T any](sink func(context.Context, []T) error, log *slog.Logger, what string, queue int) *Writer[T] {
 	w := &Writer[T]{
 		sink: sink, log: log, what: what,
-		queue:     make(chan T, queueSize),
+		queue:     make(chan T, queue),
 		batchSize: batchSize, interval: interval,
 		done: make(chan struct{}),
 	}

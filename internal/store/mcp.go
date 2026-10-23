@@ -129,6 +129,8 @@ type MCPCall struct {
 	ErrorCode     int64     `json:"error_code,omitempty"`
 	LatencyMS     int64     `json:"latency_ms"`
 	RequestID     string    `json:"request_id"`
+	// HasBody is set by ListMCPCalls when the call's body is logged.
+	HasBody bool `json:"has_body"`
 }
 
 // InsertMCPCalls writes a batch of call records.
@@ -178,7 +180,8 @@ func (s *Store) ListMCPCalls(ctx context.Context, cq MCPCallQuery, p Page) ([]*M
 	if p.After != "" {
 		where, args = append(where, "id < ?"), append(args, p.After)
 	}
-	query := `SELECT id, ts, org_id, team_id, key_id, subject, virtual_server, server, method, name, status, error_code, latency_ms, request_id FROM mcp_calls`
+	query := `SELECT id, ts, org_id, team_id, key_id, subject, virtual_server, server, method, name, status, error_code, latency_ms, request_id,
+		EXISTS (SELECT 1 FROM request_bodies b WHERE b.request_id = mcp_calls.request_id AND b.org_id = mcp_calls.org_id AND b.kind = 'mcp') FROM mcp_calls`
 	if len(where) > 0 {
 		query += ` WHERE ` + strings.Join(where, " AND ")
 	}
@@ -191,7 +194,7 @@ func (s *Store) ListMCPCalls(ctx context.Context, cq MCPCallQuery, p Page) ([]*M
 		var c MCPCall
 		var ts int64
 		if err := row.Scan(&c.ID, &ts, &c.OrgID, &c.TeamID, &c.KeyID, &c.Subject, &c.VirtualServer, &c.Server, &c.Method,
-			&c.Name, &c.Status, &c.ErrorCode, &c.LatencyMS, &c.RequestID); err != nil {
+			&c.Name, &c.Status, &c.ErrorCode, &c.LatencyMS, &c.RequestID, &c.HasBody); err != nil {
 			return nil, err
 		}
 		c.Time = toTime(ts)

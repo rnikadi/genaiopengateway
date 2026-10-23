@@ -54,6 +54,9 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	h("GET /admin/v1/models", s.listConfiguredModels)
 	h("GET /admin/v1/alerts", s.listAlerts)
 	h("POST /admin/v1/alerts/test", s.testAlert)
+	h("GET /admin/v1/requests", s.listRequests)
+	h("GET /admin/v1/requests/{request_id}", s.getRequestBody)
+	h("DELETE /admin/v1/requests", s.deleteRequestBodies)
 }
 
 // apiError is an admin error with an HTTP status.
@@ -158,6 +161,7 @@ type patch struct {
 	RPM               *int64                  `json:"rpm"`
 	TPM               *int64                  `json:"tpm"`
 	Budget            optional[policy.Budget] `json:"budget"`
+	LogBodies         optional[bool]          `json:"log_bodies"`
 	ExpiresAt         optional[time.Time]     `json:"expires_at"`
 	isKey             bool
 }
@@ -185,6 +189,9 @@ func (s *Server) apply(p *patch, name *string, pol *policy.Policy, expires **tim
 	}
 	if p.Budget.Set {
 		pol.Budget = p.Budget.Value
+	}
+	if p.LogBodies.Set {
+		pol.LogBodies = p.LogBodies.Value
 	}
 	if p.ExpiresAt.Set {
 		if !p.isKey {
@@ -635,8 +642,9 @@ func (s *Server) readScope(r *http.Request, orgID, teamID, keyID string) error {
 func (s *Server) me(w http.ResponseWriter, r *http.Request) error {
 	cfg := s.rt.Load().cfg
 	writeJSON(w, http.StatusOK, map[string]any{
-		"operator": operatorFrom(r.Context()),
-		"sso":      cfg.SSO.OIDC != nil,
+		"operator":     operatorFrom(r.Context()),
+		"sso":          cfg.SSO.OIDC != nil,
+		"body_logging": cfg.BodyLogging.Enabled,
 	})
 	return nil
 }
