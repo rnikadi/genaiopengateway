@@ -3,6 +3,8 @@
 | Version | Scope | Gate to move on |
 | --- | --- | --- |
 | v0.1 | OpenAI-compatible chat, embeddings, responses; Anthropic translation and passthrough; orgs, teams, keys; RPM, TPM, budgets; usage and cost; metrics and traces; SQLite and Postgres; Valkey | OpenAI SDKs work unchanged; limits hold across replicas; five-minute quick start |
-| v0.5 | SSO (OIDC, SAML), SCIM, roles, admin UI; MCP gateway; guardrail pipeline with Wasm plugins; opt-in body logging with redaction; Cedar policies | One organization running it in production |
+| v0.2 | MCP gateway: virtual servers over remote MCP servers, tool allow lists and pinning, gateway keys and OAuth 2.1 for clients, rate limits, audit, metrics and traces | Official MCP SDK clients on 2025-06-18 and 2026-07-28 work through the gateway against real servers |
+| v0.3 | SSO (OIDC, SAML), SCIM, roles, admin UI; per-user upstream MCP credentials; opt-in body logging with redaction | One organization running it in production |
+| v0.5 | Guardrail pipeline with Wasm plugins, including tool output; Cedar policies; native Gemini, Bedrock and Vertex adapters; budget alerts | Guardrails add under 10 ms at p50 |
 | v0.8 | Text to speech, speech to text, images, batch, realtime audio over WebSocket and WebRTC, async video jobs, semantic cache | Every modality passes conformance tests |
 | v1.0 | Separate control plane with gRPC snapshot streaming, Helm chart and operator, Kubernetes CRDs, A2A, third-party security audit | Stable APIs and a published support policy |
