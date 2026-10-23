@@ -129,6 +129,19 @@ await step('owner calls a model as a team in the playground', async () => {
   const org = (await adminAPI('GET', '/admin/v1/orgs?limit=500')).data.find((o) => o.name === orgName);
   await page.click('nav >> text=Playground');
   await page.selectOption('label:has-text("Organization") select', org.id);
+  try {
+    await page.waitForSelector('label:has-text("Team") option:has-text("guarded")', { state: 'attached', timeout: 10000 });
+  } catch (err) {
+    // Say what the page shows instead, so a failure in CI can be diagnosed.
+    const shown = await page.evaluate(() => ({
+      org: document.querySelector('label.inline select')?.value,
+      teams: [...document.querySelectorAll('label.inline')].map((l) => l.textContent),
+      errors: [...document.querySelectorAll('.notice.error, .error')].map((e) => e.textContent),
+      text: document.querySelector('main')?.innerText.slice(0, 600),
+    }));
+    console.log('playground shows', JSON.stringify(shown), 'expected org', org.id);
+    throw err;
+  }
   await page.selectOption('label:has-text("Team") select', { label: 'guarded' });
   await page.fill('textarea[placeholder=Message]', 'Mail jane@example.com');
   await page.click('button:has-text("Send")');
