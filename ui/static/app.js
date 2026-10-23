@@ -13,6 +13,7 @@ import { Guardrails } from './pages/guardrails.js';
 import { Providers } from './pages/providers.js';
 import { Alerts } from './pages/alerts.js';
 import { Settings } from './pages/settings.js';
+import { Playground } from './pages/playground.js';
 
 const routes = [
   [/^\/$/, Overview, 'overview'],
@@ -28,6 +29,7 @@ const routes = [
   [/^\/providers$/, Providers, 'providers'],
   [/^\/alerts$/, Alerts, 'alerts'],
   [/^\/settings$/, Settings, 'settings'],
+  [/^\/playground$/, Playground, 'playground'],
   [/^\/audit$/, Audit, 'audit'],
 ];
 
@@ -39,6 +41,7 @@ const nav = [
   ['guardrails', '#/guardrails', 'Guardrails'],
   ['mcp', '#/mcp', 'MCP'],
   ['models', '#/models', 'Models'],
+  ['playground', '#/playground', 'Playground'],
   ['providers', '#/providers', 'Providers'],
   ['alerts', '#/alerts', 'Alerts'],
   ['audit', '#/audit', 'Audit log'],

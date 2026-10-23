@@ -53,7 +53,10 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 			writeError(w, ep, status, code, msg)
 		}
 
-		p, ok := s.authenticate(r)
+		p, ok := principalFrom(r.Context())
+		if !ok {
+			p, ok = s.authenticate(r)
+		}
 		if !ok {
 			fail(http.StatusUnauthorized, codeInvalidKey, "missing or invalid API key")
 			return

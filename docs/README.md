@@ -12,6 +12,7 @@
 | [MCP gateway](mcp.md) | Virtual servers, tool pinning, auth, audit, MCP configuration |
 | [Admin UI and SSO](admin-ui.md) | Pages, roles, OIDC sign-in, sessions, admin API changes |
 | [Admin UI: configuration views](admin-ui-config.md) | Providers, models, guardrails, alerts and settings in the UI |
+| [Playground](playground.md) | Calling a model as a team from the admin UI |
 | [Per-user MCP credentials](mcp-user-credentials.md) | Connecting each user's upstream account, token storage and refresh |
 | [Body logging](body-logging.md) | Opt-in request and response logging, redaction, retention, access |
 | [Alerts](alerts.md) | Budget thresholds and other events, webhooks and Slack |

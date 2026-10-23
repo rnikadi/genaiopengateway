@@ -124,6 +124,21 @@ await step('owner turns on a guardrail and sees it block', async () => {
   await ctx.close();
 });
 
+await step('owner calls a model as a team in the playground', async () => {
+  const { ctx, page } = await signIn('owner@example.com');
+  const org = (await adminAPI('GET', '/admin/v1/orgs?limit=500')).data.find((o) => o.name === orgName);
+  await page.click('nav >> text=Playground');
+  await page.selectOption('label:has-text("Organization") select', org.id);
+  await page.selectOption('label:has-text("Team") select', { label: 'guarded' });
+  await page.fill('textarea[placeholder=Message]', 'Mail jane@example.com');
+  await page.click('button:has-text("Send")');
+  // The team's guardrails apply in the playground as they do for its keys.
+  await page.waitForSelector('.notice.error:has-text("no-pii")');
+  const audit = await adminAPI('GET', `/admin/v1/audit?org_id=${org.id}`);
+  assert.equal(audit.data[0].action, 'playground.chat');
+  await ctx.close();
+});
+
 await step('owner approves an MCP tool', async () => {
   const { ctx, page } = await signIn('owner@example.com');
   await page.click('text=MCP');
