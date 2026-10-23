@@ -1,0 +1,28 @@
+{{- if .Values.networkPolicy.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "gog.fullname" . }}
+  labels:
+    {{- include "gog.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "gog.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - port: http
+      from:
+        - podSelector: {}
+        {{- range .Values.networkPolicy.ingressNamespaceSelectors }}
+        - namespaceSelector:
+            {{- toYaml . | nindent 12 }}
+        {{- end }}
+    {{- if .Values.metricsPort }}
+    # Prometheus usually runs in another namespace; metrics carry no
+    # tenant data (docs/observability.md).
+    - ports:
+        - port: metrics
+    {{- end }}
+{{- end }}

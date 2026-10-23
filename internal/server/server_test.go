@@ -322,3 +322,27 @@ keys: [{name: dev, key: `+devKey+`}]
 		t.Fatal("usage not logged")
 	}
 }
+
+// Once shutdown starts, /readyz fails so load balancers stop sending
+// requests, while requests still in flight are served.
+func TestDrainFailsReadiness(t *testing.T) {
+	cfg, err := config.Parse([]byte(`keys: [{name: dev, key: ` + devKey + `}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(cfg, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	if rec := do(h, "GET", "/readyz", "", ""); rec.Code != 200 {
+		t.Fatalf("readyz = %d", rec.Code)
+	}
+	s.Drain()
+	if rec := do(h, "GET", "/readyz", "", ""); rec.Code != 503 || !strings.Contains(rec.Body.String(), "shutting down") {
+		t.Fatalf("readyz while draining = %d %s", rec.Code, rec.Body)
+	}
+	if rec := do(h, "GET", "/healthz", "", ""); rec.Code != 200 {
+		t.Fatalf("healthz while draining = %d", rec.Code)
+	}
+}

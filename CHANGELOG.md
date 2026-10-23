@@ -11,10 +11,13 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 - Gemini and Vertex AI providers ([docs/cloud-providers.md](docs/cloud-providers.md)). `gemini` calls the Gemini API with an API key; `vertex` calls Vertex AI with Application Default Credentials or a `credentials_file`, picking the global, multi-region or regional endpoint from `location`. Chat completions are translated natively to generateContent, with streaming, tools (thought signatures kept in `extra_content`), data URL images, JSON schemas, `reasoning_effort` and usage that counts thinking tokens as output. Claude models on Vertex AI (`anthropic/claude-…`) reuse the Anthropic adapter for chat completions and `/v1/messages`.
 - Amazon Bedrock provider (`bedrock`): chat completions for every Bedrock model through the Converse API, with streaming, tools and images; `/v1/messages` for Claude through InvokeModel, streamed as Anthropic events; and embeddings for Titan Text Embeddings V2 and Cohere Embed. Requests use a Bedrock API key, or SigV4 with the AWS default credential chain (environment, shared config and SSO, EKS web identity, ECS and EC2 roles). Throttling and quota errors become `429` and capacity errors `5xx`, so fallback works.
+- Helm chart ([docs/deploy-kubernetes.md](docs/deploy-kubernetes.md)), published with each release to `oci://ghcr.io/rnikadi/charts/genaiopengateway` and signed with cosign. It runs 2 replicas by default as non-root with a read-only root filesystem, no capabilities and no service account token, spreads them across nodes and zones, and adds a PodDisruptionBudget, with optional Ingress, HorizontalPodAutoscaler, ServiceMonitor and NetworkPolicy. It refuses to render a config that would run several replicas on SQLite or the in-memory limiter. Postgres, Valkey and secrets stay outside the chart.
 - `POST /v1beta/models/{model}:generateContent` and `:streamGenerateContent`, so the Google GenAI SDK and Gemini CLI can use the gateway; keys are also accepted in `x-goog-api-key`.
 
 ### Changed
 
+- On Postgres, migrations run under an advisory lock, so replicas that start together no longer race on the same migration.
+- On shutdown, `/readyz` fails before the listener closes, so load balancers stop sending requests to a stopping gateway. The shutdown grace period is 50 seconds.
 - When an output guardrail applies to a stream the gateway cannot read, the response is blocked instead of passed on unchecked.
 - The redaction detectors run their regular expressions only around the characters a match must contain, which makes body logging faster on long text.
 

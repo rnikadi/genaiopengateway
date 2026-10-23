@@ -39,7 +39,7 @@ GenAIOpenGateway is a single Apache-2.0 gateway for every GenAI modality and for
 - Added latency under 5 ms at p50 for non-streaming requests, excluding upstream time.
 - First streamed byte forwarded without buffering.
 - No request-path dependency on the database: keys and limits are served from memory or Valkey.
-- A gateway restart or rolling upgrade drops no in-flight request that finishes within the 30 second shutdown grace period.
+- A gateway restart or rolling upgrade drops no in-flight request that finishes within the 50 second shutdown grace period.
 - Every exported package has tests; CI runs gofmt, vet, staticcheck and race-enabled tests.
 
 ## Success for v0.1

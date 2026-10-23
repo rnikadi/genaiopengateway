@@ -1,0 +1,13 @@
+ingress:
+  enabled: true
+  className: nginx
+  tls: [{hosts: [gateway.example.com], secretName: gateway-tls}]
+autoscaling: {enabled: true}
+serviceMonitor: {enabled: true}
+networkPolicy:
+  enabled: true
+  ingressNamespaceSelectors:
+    - matchLabels: {kubernetes.io/metadata.name: ingress-nginx}
+serviceAccount:
+  annotations: {iam.gke.io/gcp-service-account: gateway@project.iam.gserviceaccount.com}
+image: {digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"}

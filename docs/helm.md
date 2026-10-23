@@ -53,7 +53,7 @@ serviceAccount:
 ingress: {enabled: false}
 autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 10, targetCPUUtilizationPercentage: 70}
 serviceMonitor: {enabled: false}
-metricsPort: null              # set when config has metrics.listen, such as 9090
+metricsPort: 9090              # matches metrics.listen in config; null when it has none
 networkPolicy: {enabled: false}
 podAnnotations: {}
 nodeSelector: {}

@@ -22,7 +22,7 @@ import (
 // version is set at build time with -ldflags "-X main.version=...".
 var version = "dev"
 
-const shutdownGrace = 30 * time.Second
+const shutdownGrace = 50 * time.Second
 
 func main() {
 	path := flag.String("config", "config.yaml", "path to the config file")
@@ -118,6 +118,7 @@ func run(path string, log *slog.Logger) error {
 				continue
 			}
 			log.Info("shutting down", "signal", sig.String())
+			srv.Drain()
 			ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 			defer cancel()
 			err := httpSrv.Shutdown(ctx)

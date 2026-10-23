@@ -132,7 +132,26 @@ func (s *Store) q(query string) string {
 	return b.String()
 }
 
+// migrationLock is the Postgres advisory lock key that serializes
+// migrations across replicas starting together.
+const migrationLock = 0x676f675f6d6967 // "gog_mig"
+
 func (s *Store) migrate(ctx context.Context) error {
+	if s.postgres {
+		// One replica migrates; the others wait here, then find nothing
+		// left to do. The lock belongs to this connection and ends with it.
+		conn, err := s.db.Conn(ctx)
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+		if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock($1)`, migrationLock); err != nil {
+			return fmt.Errorf("migration lock: %w", err)
+		}
+		defer func() {
+			_, _ = conn.ExecContext(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, migrationLock)
+		}()
+	}
 	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at BIGINT NOT NULL)`); err != nil {
 		return fmt.Errorf("create schema_migrations: %w", err)
 	}

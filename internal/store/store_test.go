@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -218,5 +220,49 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 			t.Fatalf("open %d: %v", i, err)
 		}
 		s.Close()
+	}
+}
+
+// Replicas starting together migrate once: the others wait on the
+// migration lock and find nothing left to do.
+func TestConcurrentMigrations(t *testing.T) {
+	dsn := os.Getenv("GOG_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("needs GOG_TEST_POSTGRES_DSN")
+	}
+	ctx := context.Background()
+	admin, err := Open(ctx, "postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	schema := "migrate_" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	if _, err := admin.db.ExecContext(ctx, "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.db.ExecContext(ctx, "DROP SCHEMA "+schema+" CASCADE")
+
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	errs := make(chan error, 4)
+	for range 4 {
+		go func() {
+			s, err := Open(ctx, "postgres", dsn+sep+"search_path="+schema)
+			if err == nil {
+				s.Close()
+			}
+			errs <- err
+		}()
+	}
+	for range 4 {
+		if err := <-errs; err != nil {
+			t.Error(err)
+		}
+	}
+	var n int
+	if err := admin.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+schema+".schema_migrations").Scan(&n); err != nil || n == 0 {
+		t.Fatalf("migrations recorded: %d, %v", n, err)
 	}
 }

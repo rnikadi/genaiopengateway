@@ -1,0 +1,11 @@
+apiVersion: v2
+name: genaiopengateway
+description: An open-source enterprise gateway for model and MCP traffic.
+type: application
+# The release workflow sets both to the release version.
+version: 0.5.0
+appVersion: "0.5.0"
+home: https://github.com/rnikadi/genaiopengateway
+sources:
+  - https://github.com/rnikadi/genaiopengateway
+kubeVersion: ">=1.30.0-0"
