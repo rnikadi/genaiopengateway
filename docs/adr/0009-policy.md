@@ -1,6 +1,6 @@
 # 0009. Built-in RBAC plus Cedar for attribute-based policy
 
-- Status: accepted (implementation in v0.5)
+- Status: accepted (roles refined by [0016](0016-operator-auth.md) for v0.3; Cedar in v0.5)
 - Date: 2026-10-22
 
 ## Decision

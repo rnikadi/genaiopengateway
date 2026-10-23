@@ -10,6 +10,7 @@
 | [Security and threat model](security.md) | Assets, trust boundaries, STRIDE, defaults |
 | [Provider adapters](providers.md) | Adapter interface, translation rules, conformance tests |
 | [MCP gateway](mcp.md) | Virtual servers, tool pinning, auth, audit, MCP configuration |
+| [Admin UI and SSO](admin-ui.md) | Pages, roles, OIDC sign-in, sessions, admin API changes |
 | [Observability](observability.md) | Logs, metrics, traces, usage records |
 | [Releases](releasing.md) | Versioning, artifacts, support |
 | [Roadmap](roadmap.md) | Phases and gates |

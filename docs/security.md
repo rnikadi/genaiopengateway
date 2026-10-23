@@ -13,7 +13,7 @@ This is the threat model as of v0.2. It is reviewed at every minor release.
 ## Trust boundaries
 
 - **Client to gateway:** untrusted. Every request is authenticated with a gateway key.
-- **Operator to gateway:** trusted, authenticated with the admin token (SSO in v0.3).
+- **Operator to gateway:** authenticated with the admin token or, from v0.3, an OIDC sign-in with roles. Admin UI threats and controls are in [admin-ui.md](admin-ui.md#security).
 - **Gateway to provider:** the provider is trusted with the request content it receives, but its responses are treated as untrusted input.
 - **Gateway to store and Valkey:** trusted network; credentials from environment.
 

@@ -16,5 +16,7 @@
 | [0012](0012-governance.md) | Governance |
 | [0013](0013-mcp-termination.md) | Terminate MCP at the gateway with the official Go SDK |
 | [0014](0014-mcp-auth.md) | MCP authentication: gateway keys and OAuth 2.1 resource server |
+| [0015](0015-admin-ui.md) | Admin UI: a single-page client of the admin API, embedded in the binary |
+| [0016](0016-operator-auth.md) | Operator sign-in with OIDC, server-side sessions and fixed roles |
 
 New ADRs copy [0000-template.md](0000-template.md).
