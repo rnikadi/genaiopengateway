@@ -7,7 +7,7 @@ Model calls (and MCP calls from v0.2, see [mcp.md](mcp.md)) pass through the sam
 1. **Ingress:** HTTP and SSE today; WebSocket and WebRTC with realtime audio in v0.8.
 2. **Authentication:** gateway key to org, team and key policy, from the in-memory snapshot.
 3. **Policy and limits:** model allow lists, RPM, TPM and budgets at every level.
-4. **Guardrails:** request size limits in v0.1; PII, injection and moderation in v0.5.
+4. **Guardrails:** request size limits in v0.1; PII, patterns, classifier models and webhooks in v0.5 ([guardrails.md](guardrails.md)).
 5. **Router:** virtual model to ordered targets, fallback on 429, 5xx and connection errors.
 6. **Adapters:** passthrough or translation to the provider API.
 7. **Metering:** usage extracted from the response or stream, cost computed, record queued.

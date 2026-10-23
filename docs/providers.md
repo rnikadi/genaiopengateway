@@ -1,6 +1,6 @@
 # Provider adapters
 
-An adapter connects one provider API to the gateway. v0.1 ships two: `openai` and `anthropic`.
+An adapter connects one provider API to the gateway. v0.1 ships two: `openai` and `anthropic`. The cloud adapters planned for v0.5 are in [cloud-providers.md](cloud-providers.md).
 
 ## Interface
 

@@ -21,5 +21,8 @@
 | [0017](0017-user-credentials.md) | Per-user upstream MCP credentials through a gateway-run OAuth flow |
 | [0018](0018-body-logging.md) | Opt-in body logging, redacted and encrypted in the store |
 | [0019](0019-alerts.md) | Budget alerts detected on charge, delivered by signed webhooks |
+| [0020](0020-guardrails.md) | Guardrails: built-in checks plus model and webhook checks, no WebAssembly yet |
+| [0021](0021-cloud-providers.md) | Native Gemini, Vertex AI and Bedrock adapters with cloud credentials |
+| [0022](0022-helm-chart.md) | A basic Helm chart without bundled databases |
 
 New ADRs copy [0000-template.md](0000-template.md).
