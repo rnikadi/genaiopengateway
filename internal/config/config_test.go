@@ -55,6 +55,7 @@ func TestParseRejectsBadConfig(t *testing.T) {
 		"bad type":                `providers: {p: {type: magic, base_url: "http://x"}}`,
 		"vertex without project":  `providers: {p: {type: vertex, location: global}}`,
 		"vertex bad location":     `providers: {p: {type: vertex, project: acme, location: "us/../x"}}`,
+		"bedrock without region":  `providers: {p: {type: bedrock}}`,
 		"short key":               `keys: [{name: a, key: short}]`,
 		"duplicate key name":      `keys: [{name: a, key: aaaaaaaaaaaaaaaaaa}, {name: a, key: bbbbbbbbbbbbbbbbbb}]`,
 		"duplicate key value":     `keys: [{name: a, key: aaaaaaaaaaaaaaaaaa}, {name: b, key: aaaaaaaaaaaaaaaaaa}]`,
@@ -124,6 +125,7 @@ func TestCloudProviders(t *testing.T) {
 	c, err := Parse([]byte(`providers:
   g: {type: gemini, api_key: k}
   v: {type: vertex, project: acme-ai, location: europe-west4}
+  b: {type: bedrock, region: us-gov-west-1}
 `))
 	if err != nil {
 		t.Fatal(err)

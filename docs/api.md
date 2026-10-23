@@ -12,7 +12,7 @@ Request and response bodies follow the [OpenAI API reference](https://platform.o
 | `POST /v1/chat/completions` | OpenAI chat completions, streaming and non-streaming | v0.1 |
 | `POST /v1/embeddings` | OpenAI embeddings | v0.1 |
 | `POST /v1/responses` | OpenAI Responses; served only by `openai` providers | v0.1 |
-| `POST /v1/messages` | Anthropic Messages passthrough; served by `anthropic` providers and by Claude models on `vertex` | v0.1 |
+| `POST /v1/messages` | Anthropic Messages passthrough; served by `anthropic` providers and by Claude models on `vertex` and `bedrock` | v0.1 |
 | `POST /v1beta/models/{model}:generateContent`, `:streamGenerateContent` | Google's generateContent, for the Google GenAI SDK and Gemini CLI; served by `gemini` and `vertex` providers. `{model}` is a virtual model, the key may come in `x-goog-api-key`, streams are always server-sent events, and errors use Google's shape ([cloud-providers.md](cloud-providers.md)) | v0.5 |
 | `/v1/audio/*`, `/v1/images/*`, `/v1/realtime`, `/v1/videos` | OpenAI contracts | v0.8 |
 

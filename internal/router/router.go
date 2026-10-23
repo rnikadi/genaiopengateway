@@ -18,6 +18,7 @@ import (
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/provider"
 	"github.com/rnikadi/genaiopengateway/internal/provider/anthropic"
+	"github.com/rnikadi/genaiopengateway/internal/provider/bedrock"
 	"github.com/rnikadi/genaiopengateway/internal/provider/gemini"
 	"github.com/rnikadi/genaiopengateway/internal/provider/openai"
 	"github.com/rnikadi/genaiopengateway/internal/provider/vertex"
@@ -37,6 +38,7 @@ var factories = map[string]func(config.Provider, *http.Client) provider.Provider
 	config.ProviderAnthropic: func(c config.Provider, h *http.Client) provider.Provider { return anthropic.New(c, h) },
 	config.ProviderGemini:    func(c config.Provider, h *http.Client) provider.Provider { return gemini.New(c, h) },
 	config.ProviderVertex:    func(c config.Provider, h *http.Client) provider.Provider { return vertex.New(c, h) },
+	config.ProviderBedrock:   func(c config.Provider, h *http.Client) provider.Provider { return bedrock.New(c, h) },
 }
 
 // Router dispatches requests to the targets of a virtual model.

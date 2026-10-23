@@ -253,6 +253,7 @@ const (
 	ProviderAnthropic = "anthropic"
 	ProviderGemini    = "gemini"
 	ProviderVertex    = "vertex"
+	ProviderBedrock   = "bedrock"
 
 	// DefaultGeminiBaseURL is the Gemini API.
 	DefaultGeminiBaseURL = "https://generativelanguage.googleapis.com"
@@ -270,6 +271,9 @@ type Provider struct {
 	Project         string `yaml:"project"`
 	Location        string `yaml:"location"`
 	CredentialsFile string `yaml:"credentials_file"`
+	// Region configures a bedrock provider. Without APIKey, requests are
+	// signed with credentials from the AWS default chain.
+	Region string `yaml:"region"`
 }
 
 // Model is a virtual model. Targets are tried in order.
@@ -549,11 +553,15 @@ func (c *Config) validate() error {
 			} else if !vertexLocation.MatchString(p.Location) || !vertexProject.MatchString(p.Project) {
 				add("provider %q: project or location has characters a Google Cloud name cannot have", name)
 			}
+		case ProviderBedrock:
+			if !awsRegion.MatchString(p.Region) {
+				add("provider %q: bedrock needs a region such as us-east-1", name)
+			}
 		default:
-			add("provider %q: type must be openai, anthropic, gemini or vertex, got %q", name, p.Type)
+			add("provider %q: type must be openai, anthropic, gemini, vertex or bedrock, got %q", name, p.Type)
 		}
 		if p.BaseURL == "" {
-			if p.Type != ProviderVertex {
+			if p.Type != ProviderVertex && p.Type != ProviderBedrock {
 				add("provider %q: base_url is required", name)
 			}
 		} else if u, err := url.Parse(p.BaseURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
@@ -859,6 +867,7 @@ var (
 	// vertexProject and vertexLocation go into Vertex AI URLs.
 	vertexProject  = regexp.MustCompile(`^[a-z][a-z0-9:.-]{1,62}$`)
 	vertexLocation = regexp.MustCompile(`^[a-z][a-z0-9-]{1,30}$`)
+	awsRegion      = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-[0-9]+$`)
 )
 
 func (c *Config) validateMCP(add func(string, ...any)) {
