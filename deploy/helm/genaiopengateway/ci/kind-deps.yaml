@@ -5,7 +5,7 @@ kind: Secret
 metadata: {name: genaiopengateway}
 stringData:
   GATEWAY_ADMIN_TOKEN: ci-admin-token-0000000000000000000000
-  GATEWAY_DEV_KEY: ci-dev-key
+  GATEWAY_DEV_KEY: ci-dev-key-0000000000
   DATABASE_URL: postgres://gateway:gateway@postgres:5432/gateway?sslmode=disable
 ---
 apiVersion: apps/v1

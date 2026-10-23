@@ -17,7 +17,7 @@ timeout 30 sh -c 'until curl -sf localhost:18080/readyz >/dev/null; do sleep 1; 
 
 # Several calls, so the Service spreads them over both pods.
 for i in 1 2 3 4 5 6; do
-  curl -sf localhost:18080/v1/chat/completions -H 'Authorization: Bearer ci-dev-key' \
+  curl -sf localhost:18080/v1/chat/completions -H 'Authorization: Bearer ci-dev-key-0000000000' \
     -H 'Content-Type: application/json' -d '{"model":"chat","messages":[{"role":"user","content":"hi"}]}' |
     grep -q 'hello from kind'
 done
