@@ -78,7 +78,7 @@ func TestTokensPerMinute(t *testing.T) {
 			if d := l.Admit(ctx, p); !d.Allowed || d.Tokens.Remaining != 100 {
 				t.Fatalf("first = %+v", d)
 			}
-			if err := l.Charge(ctx, p, 100, 0); err != nil {
+			if _, err := l.Charge(ctx, p, 100, 0); err != nil {
 				t.Fatal(err)
 			}
 			if d := l.Admit(ctx, p); d.Allowed || d.Code != CodeRateLimited {
@@ -103,11 +103,11 @@ func TestBudgets(t *testing.T) {
 			if d := l.Admit(ctx, p); !d.Allowed {
 				t.Fatal("rejected before spending")
 			}
-			_ = l.Charge(ctx, p, 10, 0.6)
+			_, _ = l.Charge(ctx, p, 10, 0.6)
 			if d := l.Admit(ctx, p); !d.Allowed {
 				t.Fatal("rejected under budget")
 			}
-			_ = l.Charge(ctx, p, 10, 0.6)
+			_, _ = l.Charge(ctx, p, 10, 0.6)
 			d := l.Admit(ctx, p)
 			if d.Allowed || d.Code != CodeBudget || d.Scope != "org" || d.Kind != "budget" {
 				t.Fatalf("over budget = %+v", d)
@@ -118,6 +118,35 @@ func TestBudgets(t *testing.T) {
 				t.Fatal("budget did not reset in a new month")
 			}
 		})
+	}
+}
+
+func TestChargeReportsSpend(t *testing.T) {
+	l := New(NewMemory(context.Background()), true, false)
+	fixedClock(l)
+	p := principal(
+		policy.Policy{Budget: &policy.Budget{AmountUSD: 10, Period: policy.PeriodMonthly}},
+		policy.Policy{},
+		policy.Policy{Budget: &policy.Budget{AmountUSD: 2, Period: policy.PeriodDaily}},
+	)
+	ctx := context.Background()
+	if spent, _ := l.Charge(ctx, p, 10, 0); len(spent) != 0 {
+		t.Fatalf("a free request reported spend: %+v", spent)
+	}
+	_, _ = l.Charge(ctx, p, 10, 1.5)
+	spent, err := l.Charge(ctx, p, 10, 0.75)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spent) != 2 {
+		t.Fatalf("spent = %+v, want the org and key budgets", spent)
+	}
+	org, key := spent[0], spent[1]
+	if org.Level != 0 || org.ScopeID != p.OrgID || org.Before != 1.5 || org.After != 2.25 || !org.PeriodStart.Equal(PeriodStart(policy.PeriodMonthly, l.now())) {
+		t.Fatalf("org spend = %+v", org)
+	}
+	if key.Level != 2 || key.ScopeID != p.KeyID || key.Budget.AmountUSD != 2 || key.After != 2.25 {
+		t.Fatalf("key spend = %+v", key)
 	}
 }
 

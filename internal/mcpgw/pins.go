@@ -65,11 +65,13 @@ func (g *Gateway) applyPins(ctx context.Context, u *upstream, c *catalog) error 
 			p = &store.MCPToolPin{Server: u.name, Tool: t.Name, Hash: hash, Definition: def}
 			if mode == config.PinOn {
 				p.ApprovedHash = hash
-			} else {
-				g.opts.Log.Warn("new MCP tool hidden until approved", "server", u.name, "tool", t.Name, "hash", hash)
 			}
 			if err := g.pins.InsertPin(ctx, p); err != nil {
 				return err
+			}
+			if mode != config.PinOn {
+				g.opts.Log.Warn("new MCP tool hidden until approved", "server", u.name, "tool", t.Name, "hash", hash)
+				g.pending(u.name, t.Name, hash, false)
 			}
 		case p.Hash != hash:
 			approved := p.ApprovedHash == hash
@@ -80,6 +82,7 @@ func (g *Gateway) applyPins(ctx context.Context, u *upstream, c *catalog) error 
 			if !approved {
 				g.opts.Log.Warn("MCP tool definition changed; hidden until approved", "server", u.name, "tool", t.Name, "hash", hash)
 				g.audit(ctx, "mcp_tool.changed", u.name+"/"+t.Name, map[string]string{"hash": hash, "approved_hash": p.ApprovedHash})
+				g.pending(u.name, t.Name, hash, true)
 			}
 		}
 		if p.ApprovedHash != hash {
@@ -87,6 +90,12 @@ func (g *Gateway) applyPins(ctx context.Context, u *upstream, c *catalog) error 
 		}
 	}
 	return nil
+}
+
+func (g *Gateway) pending(server, tool, hash string, changed bool) {
+	if g.opts.OnPending != nil {
+		go g.opts.OnPending(server, tool, hash, changed)
+	}
 }
 
 func (g *Gateway) audit(ctx context.Context, action, resource string, details any) {

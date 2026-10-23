@@ -18,6 +18,9 @@ const (
 type Budget struct {
 	AmountUSD float64 `yaml:"amount_usd" json:"amount_usd"`
 	Period    string  `yaml:"period" json:"period"`
+	// AlertAt overrides the gateway's alert thresholds, as shares of
+	// AmountUSD. Nil uses the defaults; empty turns alerts off.
+	AlertAt []float64 `yaml:"alert_at" json:"alert_at,omitzero"`
 }
 
 // Policy is the set of rules at one level of the tenancy hierarchy. Zero
@@ -53,6 +56,11 @@ func (p Policy) Validate() error {
 		case PeriodDaily, PeriodMonthly, PeriodTotal:
 		default:
 			return fmt.Errorf("budget period must be daily, monthly or total, got %q", b.Period)
+		}
+		for _, t := range b.AlertAt {
+			if t <= 0 || t > 1 {
+				return fmt.Errorf("budget alert_at values must be above 0 and at most 1, got %v", t)
+			}
 		}
 	}
 	return nil

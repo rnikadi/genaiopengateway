@@ -136,26 +136,44 @@ func (l *Limiter) Admit(ctx context.Context, p *auth.Principal) Decision {
 	return d
 }
 
-// Charge records tokens and cost after a request completes. Errors are
-// returned for logging; the request has already been served.
-func (l *Limiter) Charge(ctx context.Context, p *auth.Principal, tokens int64, costUSD float64) error {
+// Spend is a budget's spend just before and after a charge, which is
+// what budget alerts compare with their thresholds.
+type Spend struct {
+	// Level is 0, 1 or 2 for the org, team or key budget.
+	Level         int
+	ScopeID       string
+	Budget        policy.Budget
+	Before, After float64
+	PeriodStart   time.Time
+}
+
+// Charge records tokens and cost after a request completes, and returns
+// the spend of every budget it charged. Errors are returned for logging;
+// the request has already been served.
+func (l *Limiter) Charge(ctx context.Context, p *auth.Principal, tokens int64, costUSD float64) ([]Spend, error) {
 	now := l.now()
 	window := now.Truncate(time.Minute)
 	ids := scopes(p)
+	var spent []Spend
 	for i, pol := range p.Policies {
 		if pol.TPM > 0 && tokens > 0 {
 			if _, err := l.b.Add(ctx, minuteKey("tpm", ids[i], window), float64(tokens), 2*time.Minute); err != nil {
-				return err
+				return spent, err
 			}
 		}
 		if pol.Budget != nil && costUSD > 0 {
 			key, ttl := spendKey(ids[i], pol.Budget.Period, now)
-			if _, err := l.b.Add(ctx, key, costUSD, ttl); err != nil {
-				return err
+			after, err := l.b.Add(ctx, key, costUSD, ttl)
+			if err != nil {
+				return spent, err
 			}
+			spent = append(spent, Spend{
+				Level: i, ScopeID: ids[i], Budget: *pol.Budget,
+				Before: after - costUSD, After: after, PeriodStart: PeriodStart(pol.Budget.Period, now),
+			})
 		}
 	}
-	return nil
+	return spent, nil
 }
 
 // Seed raises spend counters to recorded spend so a restarted memory

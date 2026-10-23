@@ -79,6 +79,8 @@ Base path `/admin/v1`. JSON in and out. Authenticate with `Authorization: Bearer
 | `POST /admin/v1/keys/{key_id}/revoke` | Revoke; takes effect on every replica within the refresh interval |
 | `GET /admin/v1/usage` | Aggregated usage and cost |
 | `GET /admin/v1/audit` | Admin audit log |
+| `GET /admin/v1/alerts` | Alerts raised, newest first; filter with `org_id` and `event` ([alerts.md](alerts.md)) |
+| `POST /admin/v1/alerts/test` | Send a test alert to a configured webhook: `{"webhook": "name"}`. Returns `{"ok", "status"}` (owners only) |
 
 Organizations, teams and keys share the same policy fields, all optional:
 
@@ -89,9 +91,11 @@ Organizations, teams and keys share the same policy fields, all optional:
   "allowed_mcp_servers": ["engineering"],
   "rpm": 600,
   "tpm": 200000,
-  "budget": {"amount_usd": 500, "period": "monthly"}
+  "budget": {"amount_usd": 500, "period": "monthly", "alert_at": [0.8, 1]}
 }
 ```
+
+`alert_at` is optional: it overrides the gateway's alert thresholds for this budget, and `[]` turns its alerts off.
 
 `allowed_models` and `allowed_mcp_servers` empty or absent mean all models and all MCP virtual servers. `period` is `daily`, `monthly` (calendar month, UTC) or `total`. Keys also accept `expires_at` (RFC 3339).
 
@@ -111,7 +115,7 @@ List endpoints accept `limit` (default 50, max 500) and `after` (an id from the 
 
 ### Admin errors
 
-`{"error": {"message": "...", "code": "..."}}` with codes `unauthorized` (401), `not_found` (404), `conflict` (409), `invalid_request` (400).
+`{"error": {"message": "...", "code": "..."}}` with codes `unauthorized` (401), `forbidden` (403), `not_found` (404), `conflict` (409), `invalid_request` (400).
 
 ## MCP
 

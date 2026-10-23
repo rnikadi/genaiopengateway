@@ -33,6 +33,8 @@ Prometheus, at `/metrics`. All names start with `gog_`. Go runtime and process m
 | `gog_mcp_tool_calls_total` | counter | `server`, `tool`, `status` |
 | `gog_mcp_upstream_up` | gauge | `server` |
 | `gog_mcp_tools_pending_approval` | gauge | `server` |
+| `gog_alerts_total` | counter | `event` |
+| `gog_alert_deliveries_total` | counter | `webhook`, `result` (ok, retried, failed, dropped) |
 
 Labels never include org, team or key ids, to keep cardinality bounded. Per-tenant numbers come from the usage API.
 

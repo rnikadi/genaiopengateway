@@ -76,7 +76,7 @@ A Slack incoming-webhook body with a one-line `text` and a section block. For ex
 
 - `GET /admin/v1/alerts?org_id=&event=` lists sent alerts from `alerts_sent`, so they can be seen without a receiver.
 - `POST /admin/v1/alerts/test` (owners only) sends a test event to a named webhook and returns the receiver's status code. This catches a wrong URL or secret during setup.
-- The UI's overview shows recent alerts. Organization and team pages show spend against the budget, with the thresholds marked.
+- The UI's overview lists recent alerts, and the budget form takes `alert_at` as percentages.
 - Every alert also writes an audit entry (`alert.sent`), so it shows up in the audit log next to the changes that followed it.
 
 ## Security

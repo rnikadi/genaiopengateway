@@ -152,9 +152,12 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 			rec.CostUSD = usage.Cost(rec.Tokens, res.Target.Price)
 			rec.Unpriced = res.Target.Price == (config.Price{}) && rec.Tokens.Total() > 0
 			// The client may be gone; charging must still happen.
-			if err := s.limiter.Charge(context.WithoutCancel(r.Context()), p, rec.Tokens.Total(), rec.CostUSD); err != nil {
+			ctx := context.WithoutCancel(r.Context())
+			spent, err := s.limiter.Charge(ctx, p, rec.Tokens.Total(), rec.CostUSD)
+			if err != nil {
 				s.log.Error("charging limits failed", "request_id", rec.RequestID, "err", err)
 			}
+			s.budgetAlerts(ctx, p, spent)
 		}
 		if s.usage != nil {
 			s.usage.Add(usage.Record{

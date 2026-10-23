@@ -80,6 +80,14 @@ func TestParseRejectsBadConfig(t *testing.T) {
 		"mcp oauth bad issuer":    `{store: {driver: sqlite, dsn: x}, mcp: {public_url: "https://gw", oauth: {issuer: "id", organization: o, team_claim: g}}}`,
 		"mcp fast refresh":        `mcp: {refresh_interval: 10ms}`,
 		"key allows unknown mcp":  `keys: [{name: a, key: aaaaaaaaaaaaaaaaaa, allowed_mcp_servers: [nope]}]`,
+		"alert threshold over 1":  `alerts: {budget_thresholds: [0.5, 1.5]}`,
+		"alert webhook http":      `{store: {driver: sqlite, dsn: x}, alerts: {webhooks: [{name: a, url: "http://hooks.example.com/x", events: [budget.threshold]}]}}`,
+		"alert webhook no events": `{store: {driver: sqlite, dsn: x}, alerts: {webhooks: [{name: a, url: "https://h/x"}]}}`,
+		"alert unknown event":     `{store: {driver: sqlite, dsn: x}, alerts: {webhooks: [{name: a, url: "https://h/x", events: [cpu.high]}]}}`,
+		"alert bad format":        `{store: {driver: sqlite, dsn: x}, alerts: {webhooks: [{name: a, url: "https://h/x", format: xml, events: [key.expiring]}]}}`,
+		"alert duplicate webhook": `{store: {driver: sqlite, dsn: x}, alerts: {webhooks: [{name: a, url: "https://h/x", events: [key.expiring]}, {name: a, url: "https://h/y", events: [key.expiring]}]}}`,
+		"alert webhooks no store": `alerts: {webhooks: [{name: a, url: "https://h/x", events: [key.expiring]}]}`,
+		"budget alert_at over 1":  `keys: [{name: a, key: aaaaaaaaaaaaaaaaaa, budget: {amount_usd: 5, period: daily, alert_at: [2]}}]`,
 		"sso no roles":            `{store: {driver: sqlite, dsn: x}, sso: {oidc: {issuer: "https://id", client_id: c, client_secret: s, redirect_url: "https://gw/ui/auth/callback"}}}`,
 		"sso no store":            `{sso: {oidc: {issuer: "https://id", client_id: c, client_secret: s, redirect_url: "https://gw/ui/auth/callback"}, roles: [{group: g, role: owner}]}}`,
 		"sso no secret":           `{store: {driver: sqlite, dsn: x}, sso: {oidc: {issuer: "https://id", client_id: c, redirect_url: "https://gw/ui/auth/callback"}, roles: [{group: g, role: owner}]}}`,
@@ -113,6 +121,23 @@ sso:
 	c, _ = Parse([]byte(`{store: {driver: sqlite, dsn: x}}`))
 	if c.AdminEnabled() {
 		t.Fatal("the admin API needs a token or SSO")
+	}
+}
+
+func TestAlertsConfig(t *testing.T) {
+	c, err := Parse([]byte(`
+store: {driver: sqlite, dsn: x}
+alerts:
+  webhooks:
+    - {name: dev, url: "http://localhost:9000/hook", events: [budget.threshold]}
+    - {name: slack, url: "https://hooks.slack.com/services/x", format: slack, events: [mcp.tool_pending]}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := c.Alerts
+	if len(a.BudgetThresholds) != 3 || a.Webhooks[0].Format != FormatJSON || !a.Webhooks[1].Wants(EventMCPToolPending) || a.Webhooks[1].Wants(EventBudgetThreshold) {
+		t.Fatalf("alerts = %+v", a)
 	}
 }
 
