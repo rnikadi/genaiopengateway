@@ -19,15 +19,21 @@ import (
 )
 
 // upstream is one upstream MCP server: a client session shared by every
-// caller, and the catalog last listed from it.
+// caller, or one per user for a user_auth server, and the catalog last
+// listed from it.
 type upstream struct {
 	name   string
 	cfg    config.MCPServer
 	client *mcp.Client
+	base   http.RoundTripper
 	http   *http.Client
+	// creds and maxUsers serve user_auth servers.
+	creds    Credentials
+	maxUsers int
 
 	mu      sync.Mutex
 	session *mcp.ClientSession
+	users   map[string]*userSession
 
 	catalog atomic.Pointer[catalog]
 	up      atomic.Bool
@@ -56,14 +62,21 @@ func (c *catalog) seal() {
 	c.hash = sha256.Sum256(append(raw, extra...))
 }
 
-func newUpstream(name string, cfg config.MCPServer, base http.RoundTripper) *upstream {
+func newUpstream(name string, cfg config.MCPServer, base http.RoundTripper, creds Credentials, maxUsers int) *upstream {
 	return &upstream{
-		name:   name,
-		cfg:    cfg,
-		client: mcp.NewClient(&mcp.Implementation{Name: "genaiopengateway", Version: Version}, nil),
-		http:   &http.Client{Transport: &headerTransport{base: base, headers: cfg.Headers}},
+		name:     name,
+		cfg:      cfg,
+		client:   mcp.NewClient(&mcp.Implementation{Name: "genaiopengateway", Version: Version}, nil),
+		base:     base,
+		http:     &http.Client{Transport: &headerTransport{base: base, headers: cfg.Headers}},
+		creds:    creds,
+		maxUsers: max(maxUsers, 1),
+		users:    map[string]*userSession{},
 	}
 }
+
+// perUser reports whether calls use each user's own credentials.
+func (u *upstream) perUser() bool { return u.cfg.UserAuth != nil && u.creds != nil }
 
 // headerTransport adds the credentials configured for an upstream.
 type headerTransport struct {
@@ -116,23 +129,37 @@ func (u *upstream) close() {
 		_ = u.session.Close()
 		u.session = nil
 	}
+	for subject := range u.users {
+		u.closeUserLocked(subject)
+	}
 }
 
-// do runs f on the shared session within the server's timeout. A broken
-// session is replaced. When the request was never delivered, because
-// the session had already closed or the upstream no longer knew it, f is
-// retried once on a new session.
-func (u *upstream) do(ctx context.Context, f func(context.Context, *mcp.ClientSession) error) error {
+// do runs f within the server's timeout on the session of a user, or on
+// the shared session when subject is empty. A broken session is
+// replaced. When the request was never delivered, because the session
+// had already closed or the upstream no longer knew it, f is retried
+// once on a new session.
+func (u *upstream) do(ctx context.Context, subject string, f func(context.Context, *mcp.ClientSession) error) error {
 	ctx, cancel := context.WithTimeout(ctx, u.cfg.Timeout.Std())
 	defer cancel()
 	for attempt := 0; ; attempt++ {
-		cs, err := u.connect(ctx)
+		var cs *mcp.ClientSession
+		var err error
+		if subject == "" {
+			cs, err = u.connect(ctx)
+		} else {
+			cs, err = u.userSession(ctx, subject)
+		}
 		if err != nil {
 			return err
 		}
 		err = f(ctx, cs)
 		if brokenSession(err) {
-			u.drop(cs)
+			if subject == "" {
+				u.drop(cs)
+			} else {
+				u.dropUser(subject, cs)
+			}
 			if attempt == 0 {
 				continue
 			}
@@ -141,10 +168,22 @@ func (u *upstream) do(ctx context.Context, f func(context.Context, *mcp.ClientSe
 	}
 }
 
-// list fetches the upstream's catalog, following pagination.
+// errNoUser is returned when a user_auth server cannot be listed because
+// nobody has connected it, and it was listed before.
+var errNoUser = errors.New("no user has connected this server")
+
+// list fetches the upstream's catalog, following pagination. A user_auth
+// server is listed with the token of the user who used it last; until
+// someone connects it, it is listed anonymously.
 func (u *upstream) list(ctx context.Context) (*catalog, error) {
+	subject := ""
+	if u.perUser() {
+		if subject = u.creds.RecentSubject(ctx, u.name); subject == "" && u.catalog.Load() != nil {
+			return nil, errNoUser
+		}
+	}
 	var c *catalog
-	err := u.do(ctx, func(ctx context.Context, cs *mcp.ClientSession) error {
+	err := u.do(ctx, subject, func(ctx context.Context, cs *mcp.ClientSession) error {
 		c = &catalog{Tools: []*mcp.Tool{}, Prompts: []*mcp.Prompt{}, Resources: []*mcp.Resource{}, Templates: []*mcp.ResourceTemplate{}}
 		init := cs.InitializeResult()
 		c.protocolVersion = init.ProtocolVersion

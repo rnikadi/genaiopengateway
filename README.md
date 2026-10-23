@@ -78,7 +78,7 @@ mcp:
           tools: [search_code, get_file_contents]
 ```
 
-Clients connect to `http://localhost:8080/mcp/engineering` with a gateway key, or with an access token from your identity provider when `mcp.oauth` is set. Tool definitions are pinned: a tool whose description changes after approval is hidden until an admin approves it again. Every call is recorded (`GET /admin/v1/mcp/calls`). See [docs/mcp.md](docs/mcp.md).
+Clients connect to `http://localhost:8080/mcp/engineering` with a gateway key, or with an access token from your identity provider when `mcp.oauth` is set. Tool definitions are pinned: a tool whose description changes after approval is hidden until an admin approves it again. Every call is recorded (`GET /admin/v1/mcp/calls`). Servers that act for a person, such as GitHub or Linear, can use each user's own account instead of a shared credential: the user connects it once from their MCP client, and the gateway keeps their token encrypted ([docs/mcp-user-credentials.md](docs/mcp-user-credentials.md)). See [docs/mcp.md](docs/mcp.md).
 
 ## Observability
 

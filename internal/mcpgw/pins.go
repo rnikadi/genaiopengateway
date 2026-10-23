@@ -143,6 +143,7 @@ type ServerStatus struct {
 	Up              bool           `json:"up"`
 	ProtocolVersion string         `json:"protocol_version,omitempty"`
 	PinTools        config.PinMode `json:"pin_tools"`
+	UserAuth        bool           `json:"user_auth"`
 	Tools           int            `json:"tools"`
 	HiddenTools     int            `json:"hidden_tools"`
 	Prompts         int            `json:"prompts"`
@@ -156,7 +157,7 @@ func (g *Gateway) Servers() []ServerStatus {
 	defer g.mu.Unlock()
 	out := []ServerStatus{}
 	for name, u := range g.upstreams {
-		st := ServerStatus{Name: name, URL: u.cfg.URL, Up: u.up.Load(), PinTools: u.cfg.PinTools}
+		st := ServerStatus{Name: name, URL: u.cfg.URL, Up: u.up.Load(), PinTools: u.cfg.PinTools, UserAuth: u.cfg.UserAuth != nil}
 		if c := u.catalog.Load(); c != nil {
 			st.ProtocolVersion, st.Tools, st.HiddenTools = c.protocolVersion, len(c.Tools), len(c.hidden)
 			st.Prompts, st.Resources = len(c.Prompts), len(c.Resources)+len(c.Templates)

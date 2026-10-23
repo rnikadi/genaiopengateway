@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
@@ -45,11 +46,22 @@ func (g *Gateway) buildServer(name string, vs config.VirtualServer) *mcp.Server 
 	tools, prompts, uris := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, ref := range vs.Servers {
 		u := g.upstreams[ref.Server]
+		prefix := ref.NamePrefix()
 		c := u.catalog.Load()
+		if u.perUser() && (c == nil || len(c.Tools) == 0) && !tools[prefix+"connect"] {
+			// Nobody has connected the server, so it cannot be listed, or
+			// it shows anonymous callers no tools: offer a tool that starts
+			// the connect flow.
+			s.AddTool(&mcp.Tool{
+				Name:        prefix + "connect",
+				Description: "Connect your " + u.name + " account to the gateway, so that its tools become available.",
+				InputSchema: &jsonschema.Schema{Type: "object"},
+			}, g.connectTool(u))
+			tools[prefix+"connect"] = true
+		}
 		if c == nil {
 			continue
 		}
-		prefix := ref.NamePrefix()
 		allowed := map[string]bool{}
 		for _, t := range ref.Tools {
 			allowed[t] = true
@@ -138,11 +150,16 @@ func absoluteURI(uri string) bool {
 	return ok && scheme != ""
 }
 
-// call is what the gateway learns about one request while serving it.
+// call is what the gateway learns about one request while serving it,
+// and what the middleware knows that handlers need.
 type call struct {
 	Server    string
 	Name      string
 	ErrorCode int64
+
+	caller          *Caller
+	virtualServer   string
+	protocolVersion string
 }
 
 type callKey struct{}
@@ -164,6 +181,14 @@ func (g *Gateway) forwardTool(u *upstream, name string) mcp.ToolHandler {
 			res, err = cs.CallTool(ctx, &mcp.CallToolParams{Meta: meta, Name: name, Arguments: req.Params.Arguments})
 			return err
 		})
+		var ce *ConnectError
+		if errors.As(err, &ce) {
+			g.opts.Metrics.ObserveMCPToolCall(u.name, name, telemetry.MCPError)
+			if c.protocolVersion < urlElicitationVersion {
+				return ce.toolResult(), nil
+			}
+			return nil, ce.rpcError()
+		}
 		status := telemetry.MCPOk
 		switch {
 		case err != nil:
@@ -176,6 +201,28 @@ func (g *Gateway) forwardTool(u *upstream, name string) mcp.ToolHandler {
 	}
 }
 
+// connectTool serves the tool offered for a user_auth server that has not
+// been listed yet.
+func (g *Gateway) connectTool(u *upstream) mcp.ToolHandler {
+	return func(ctx context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		c := callFrom(ctx)
+		c.Server, c.Name = u.name, "connect"
+		if c.caller == nil || c.caller.Subject == "" {
+			return nil, errAnonymous(u.name)
+		}
+		var ce *ConnectError
+		if err := g.connected(ctx, u, c); errors.As(err, &ce) {
+			return ce.toolResult(), nil
+		} else if err != nil {
+			return nil, err
+		}
+		go g.RefreshServer(g.ctx, u.name)
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{
+			Text: "Your " + u.name + " account is connected. Its tools appear in a moment; list the tools again.",
+		}}}, nil
+	}
+}
+
 func (g *Gateway) forwardPrompt(u *upstream, name string) mcp.PromptHandler {
 	return func(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 		c := callFrom(ctx)
@@ -185,7 +232,7 @@ func (g *Gateway) forwardPrompt(u *upstream, name string) mcp.PromptHandler {
 			res, err = cs.GetPrompt(ctx, &mcp.GetPromptParams{Meta: meta, Name: name, Arguments: req.Params.Arguments})
 			return err
 		})
-		return res, err
+		return res, rpcConnect(err)
 	}
 }
 
@@ -199,7 +246,7 @@ func (g *Gateway) forwardRead(u *upstream) mcp.ResourceHandler {
 			res, err = cs.ReadResource(ctx, &mcp.ReadResourceParams{Meta: meta, URI: uri})
 			return err
 		})
-		return res, err
+		return res, rpcConnect(err)
 	}
 }
 
@@ -218,14 +265,31 @@ func (g *Gateway) forward(ctx context.Context, u *upstream, method, name string,
 	}
 	meta := mcp.Meta{}
 	telemetry.Propagator.Inject(ctx, metaCarrier(meta))
+	c := callFrom(ctx)
 	ctx, cancel := detach(ctx)
 	defer cancel()
-	err := u.do(ctx, func(ctx context.Context, cs *mcp.ClientSession) error {
+	subject := ""
+	if u.perUser() {
+		if c.caller == nil || c.caller.Subject == "" {
+			return errAnonymous(u.name)
+		}
+		subject = c.caller.Subject
+		if err := g.connected(ctx, u, c); err != nil {
+			return err
+		}
+	}
+	err := u.do(ctx, subject, func(ctx context.Context, cs *mcp.ClientSession) error {
 		span.SetAttributes(attribute.String("mcp.protocol.version", cs.InitializeResult().ProtocolVersion))
 		return f(ctx, cs, meta)
 	})
 	if err == nil {
 		return nil
+	}
+	if subject != "" {
+		// The upstream may have refused the user's token for good.
+		if cerr := g.connected(ctx, u, c); cerr != nil {
+			return cerr
+		}
 	}
 	span.SetStatus(codes.Error, err.Error())
 	var rpcErr *jsonrpc.Error
@@ -239,6 +303,34 @@ func (g *Gateway) forward(ctx context.Context, u *upstream, method, name string,
 	g.opts.Log.Warn("MCP upstream request failed", "server", u.name, "method", method, "err", err)
 	data, _ := json.Marshal(map[string]string{"server": u.name})
 	return &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: msg, Data: data}
+}
+
+// connected returns nil when the caller has a usable connection to a
+// user_auth upstream, and otherwise a ConnectError with a new connect link.
+func (g *Gateway) connected(ctx context.Context, u *upstream, c *call) error {
+	_, err := u.creds.Token(ctx, u.name, c.caller.Subject, false)
+	if !errors.Is(err, ErrNotConnected) {
+		if err != nil {
+			g.opts.Log.Warn("getting a user token failed", "server", u.name, "err", err)
+			return &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: "the credentials for upstream MCP server " + u.name + " cannot be read"}
+		}
+		return nil
+	}
+	link, err := u.creds.ConnectURL(ctx, u.name, c.caller.Subject, c.virtualServer)
+	if err != nil {
+		g.opts.Log.Error("starting a connect flow failed", "server", u.name, "err", err)
+		return &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: "a connect link for upstream MCP server " + u.name + " cannot be created"}
+	}
+	return &ConnectError{Server: u.name, URL: link}
+}
+
+// rpcConnect turns a ConnectError into the URL elicitation error.
+func rpcConnect(err error) error {
+	var ce *ConnectError
+	if errors.As(err, &ce) {
+		return ce.rpcError()
+	}
+	return err
 }
 
 // detach returns a context that ends with parent and carries its span,
@@ -303,7 +395,10 @@ func (g *Gateway) middleware(vs string) mcp.Middleware {
 					attribute.String("gog.virtual_server", vs),
 				))
 			defer span.End()
-			c := &call{}
+			c := &call{caller: caller, virtualServer: vs}
+			if extra := req.GetExtra(); extra != nil && extra.Header != nil {
+				c.protocolVersion = extra.Header.Get("Mcp-Protocol-Version")
+			}
 			ctx = context.WithValue(ctx, callKey{}, c)
 
 			status := telemetry.MCPOk

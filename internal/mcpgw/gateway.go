@@ -5,6 +5,7 @@ package mcpgw
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -45,6 +46,8 @@ type Options struct {
 	// LogBody, which may be nil, receives the params and result of each
 	// call, for body logging. It decides whether to log.
 	LogBody func(caller *Caller, virtualServer, method string, params any, res mcp.Result, err error)
+	// Credentials, which may be nil, serves user_auth servers.
+	Credentials Credentials
 }
 
 // Gateway serves every virtual server in the config.
@@ -92,6 +95,7 @@ func New(ctx context.Context, cfg config.MCP, opts Options) *Gateway {
 		return &sdkauth.TokenInfo{Extra: map[string]any{callerExtra: c}}, nil
 	}, &sdkauth.RequireBearerTokenOptions{AllowMissingExpiration: true})(sdk)
 	g.Reload(cfg)
+	go g.reapLoop(ctx)
 	return g
 }
 
@@ -142,7 +146,7 @@ func (g *Gateway) Reload(cfg config.MCP) {
 		if _, ok := g.upstreams[name]; ok {
 			continue
 		}
-		u := newUpstream(name, sc, g.opts.Transport)
+		u := newUpstream(name, sc, g.opts.Transport, g.opts.Credentials, cfg.MaxUserSessions)
 		g.upstreams[name] = u
 		ctx, cancel := context.WithCancel(g.ctx)
 		g.loops[name] = cancel
@@ -162,6 +166,39 @@ func (g *Gateway) Refresh(ctx context.Context) {
 	}
 	wg.Wait()
 	g.rebuild()
+}
+
+// RefreshServer lists one upstream now, for example once a user has
+// connected it, and rebuilds the virtual servers if its catalog changed.
+func (g *Gateway) RefreshServer(ctx context.Context, name string) {
+	g.mu.Lock()
+	u := g.upstreams[name]
+	g.mu.Unlock()
+	if u == nil {
+		return
+	}
+	if changed, _ := g.refresh(ctx, u); changed {
+		g.rebuild()
+	}
+}
+
+// reapLoop closes idle user sessions every minute until ctx is done.
+func (g *Gateway) reapLoop(ctx context.Context) {
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		g.mu.Lock()
+		ups := maps.Clone(g.upstreams)
+		g.mu.Unlock()
+		for _, u := range ups {
+			u.reap(userSessionIdle)
+		}
+	}
 }
 
 // Close ends every upstream session.
@@ -202,7 +239,7 @@ func (g *Gateway) refreshLoop(ctx context.Context, u *upstream, interval time.Du
 // catalog.
 func (g *Gateway) refresh(ctx context.Context, u *upstream) (changed, ok bool) {
 	c, err := u.list(ctx)
-	if ctx.Err() != nil {
+	if ctx.Err() != nil || errors.Is(err, errNoUser) {
 		return false, true
 	}
 	wasUp := u.up.Swap(err == nil)

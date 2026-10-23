@@ -242,6 +242,9 @@ type MCP struct {
 	Servers         map[string]MCPServer     `yaml:"servers"`
 	VirtualServers  map[string]VirtualServer `yaml:"virtual_servers"`
 	OAuth           *OAuth                   `yaml:"oauth"`
+	// MaxUserSessions caps upstream sessions held for user_auth servers
+	// per replica; the least recently used is closed first.
+	MaxUserSessions int `yaml:"max_user_sessions"`
 }
 
 // OAuth accepts access tokens from an external authorization server on
@@ -265,6 +268,20 @@ type MCPServer struct {
 	Headers  map[string]Secret `yaml:"headers"`
 	Timeout  Duration          `yaml:"timeout"`
 	PinTools PinMode           `yaml:"pin_tools"`
+	// UserAuth makes the gateway call this server with each user's own
+	// OAuth token (docs/mcp-user-credentials.md).
+	UserAuth *UserAuth `yaml:"user_auth"`
+}
+
+// UserAuth registers the gateway as an OAuth client of an upstream MCP
+// server. Endpoints left empty are discovered from the server's metadata.
+type UserAuth struct {
+	ClientID         string   `yaml:"client_id"`
+	ClientSecret     Secret   `yaml:"client_secret"`
+	Scopes           []string `yaml:"scopes"`
+	AuthorizationURL string   `yaml:"authorization_url"`
+	TokenURL         string   `yaml:"token_url"`
+	RevocationURL    string   `yaml:"revocation_url"`
 }
 
 // PinMode says how an upstream's tool definitions are pinned.
@@ -347,6 +364,7 @@ const (
 	DefaultRefreshInterval = 5 * time.Second
 	DefaultMCPRefresh      = time.Minute
 	DefaultMCPTimeout      = time.Minute
+	DefaultMaxUserSessions = 1000
 	DefaultSessionTTL      = 8 * time.Hour
 	MinAdminTokenLength    = 32
 	MinStaticKeyLength     = 16
@@ -376,7 +394,7 @@ func Parse(raw []byte) (*Config, error) {
 		Limits:      Limits{MaxRequestBytes: DefaultMaxRequestBytes},
 		Limiter:     Limiter{Driver: "memory", FailOpenRateLimits: true},
 		Store:       Store{RefreshInterval: Duration(DefaultRefreshInterval)},
-		MCP:         MCP{RefreshInterval: Duration(DefaultMCPRefresh)},
+		MCP:         MCP{RefreshInterval: Duration(DefaultMCPRefresh), MaxUserSessions: DefaultMaxUserSessions},
 		SSO:         SSO{SessionTTL: Duration(DefaultSessionTTL)},
 		Alerts:      Alerts{BudgetThresholds: DefaultBudgetThresholds},
 		BodyLogging: BodyLogging{Retention: Duration(DefaultBodyRetention), MaxBodyBytes: DefaultMaxBodyBytes},
@@ -682,6 +700,9 @@ func (c *Config) validateMCP(add func(string, ...any)) {
 		add("mcp.refresh_interval must be at least 1s")
 	}
 	m.PublicURL = strings.TrimRight(m.PublicURL, "/")
+	if m.MaxUserSessions < 1 {
+		add("mcp.max_user_sessions must be at least 1")
+	}
 	if m.PublicURL != "" && !httpURL(m.PublicURL) {
 		add("mcp.public_url must be an http or https URL")
 	}
@@ -717,6 +738,25 @@ func (c *Config) validateMCP(add func(string, ...any)) {
 		}
 		if s.PinTools == PinStrict && c.Store.Driver == "" {
 			add("mcp server %q: pin_tools: strict needs a store, where approvals are kept", name)
+		}
+		if ua := s.UserAuth; ua != nil {
+			if ua.ClientID == "" {
+				add("mcp server %q: user_auth.client_id is required", name)
+			}
+			for field, u := range map[string]string{"authorization_url": ua.AuthorizationURL, "token_url": ua.TokenURL, "revocation_url": ua.RevocationURL} {
+				if u != "" && !httpURL(u) {
+					add("mcp server %q: user_auth.%s must be an http or https URL", name, field)
+				}
+			}
+			if m.OAuth == nil {
+				add("mcp server %q: user_auth needs mcp.oauth, which identifies each user", name)
+			}
+			if c.Secrets.EncryptionKey == "" {
+				add("mcp server %q: user_auth needs secrets.encryption_key, to encrypt user tokens", name)
+			}
+			if c.Store.Driver == "" {
+				add("mcp server %q: user_auth needs a store, where user tokens are kept", name)
+			}
 		}
 		m.Servers[name] = s
 	}
