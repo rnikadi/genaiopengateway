@@ -177,6 +177,10 @@ mcp:
 		{"key_static_dev", "eng", "alpha", "tools/call", "fail", "tool_error"},
 		{"key_static_dev", "eng", "alpha", "tools/call", "echo", "ok"},
 	}
+	// Records made in the same millisecond have ids in random order.
+	byContent := func(a, b call) int { return strings.Compare(a.Method+a.Name+a.Status, b.Method+b.Name+b.Status) }
+	slices.SortFunc(calls.Data, byContent)
+	slices.SortFunc(want, byContent)
 	if !slices.Equal(calls.Data, want) {
 		t.Fatalf("call records\n got %+v\nwant %+v", calls.Data, want)
 	}
