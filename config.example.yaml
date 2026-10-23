@@ -47,3 +47,16 @@ keys:
   - name: dev
     key: ${GATEWAY_DEV_KEY}
     allowed_models: []        # empty means all models
+
+# Uncomment to put MCP servers behind the gateway. MCP clients connect to
+# the /mcp/engineering endpoint with a gateway key. See docs/mcp.md.
+# mcp:
+#   servers:
+#     github:
+#       url: https://api.githubcopilot.com/mcp/
+#       headers: {Authorization: "Bearer ${GITHUB_MCP_TOKEN}"}
+#   virtual_servers:
+#     engineering:
+#       servers:
+#         - server: github
+#           tools: [search_code, get_file_contents]   # omit for every tool

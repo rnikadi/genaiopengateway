@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"reflect"
 	"regexp"
 	"sync"
 	"sync/atomic"
@@ -18,6 +19,7 @@ import (
 	"github.com/rnikadi/genaiopengateway/internal/id"
 	"github.com/rnikadi/genaiopengateway/internal/limits"
 	"github.com/rnikadi/genaiopengateway/internal/mcpgw"
+	"github.com/rnikadi/genaiopengateway/internal/oauth"
 	"github.com/rnikadi/genaiopengateway/internal/policy"
 	"github.com/rnikadi/genaiopengateway/internal/provider"
 	"github.com/rnikadi/genaiopengateway/internal/router"
@@ -31,6 +33,7 @@ import (
 type runtime struct {
 	cfg    *config.Config
 	router *router.Router
+	oauth  *oauth.Verifier // nil unless mcp.oauth is configured
 }
 
 // Server holds the live runtime and serves requests against it.
@@ -53,6 +56,7 @@ type Server struct {
 	metrics     *telemetry.Metrics
 	mcp         *mcpgw.Gateway
 	lastRefresh atomic.Int64 // unix nanoseconds of the last store load
+	tenants     atomic.Pointer[tenants]
 
 	// mu serializes rebuilding the key directory from its two sources.
 	mu        sync.Mutex
@@ -96,7 +100,17 @@ func (s *Server) Reload(cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	s.rt.Store(&runtime{cfg: cfg, router: r})
+	next := &runtime{cfg: cfg, router: r}
+	if oc := cfg.MCP.OAuth; oc != nil {
+		// Keep the verifier, and the keys it holds, when OAuth settings
+		// did not change.
+		if prev := s.rt.Load(); prev != nil && prev.oauth != nil && reflect.DeepEqual(prev.cfg.MCP.OAuth, oc) {
+			next.oauth = prev.oauth
+		} else {
+			next.oauth = oauth.NewVerifier(oauth.Config{Issuer: oc.Issuer, JWKSURL: oc.JWKSURL, Scopes: oc.Scopes}, s.client)
+		}
+	}
+	s.rt.Store(next)
 	s.mcp.Reload(cfg.MCP)
 	s.rebuildKeys()
 	return nil
@@ -185,6 +199,15 @@ func (s *Server) refresh(ctx context.Context) error {
 			ExpiresAt: k.ExpiresAt,
 		}
 	}
+	t := &tenants{orgs: snap.Orgs, teams: map[string]map[string]*store.Team{}}
+	for _, team := range snap.Teams {
+		if t.teams[team.OrgID] == nil {
+			t.teams[team.OrgID] = map[string]*store.Team{}
+		}
+		t.teams[team.OrgID][team.Name] = team
+		t.teams[team.OrgID][team.ID] = team
+	}
+	s.tenants.Store(t)
 	s.mu.Lock()
 	s.storeKeys = keys
 	s.mu.Unlock()
@@ -257,6 +280,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/responses", s.model(provider.Responses))
 	mux.HandleFunc("POST /v1/messages", s.model(provider.Messages))
 	mux.HandleFunc("/mcp/{name}", s.serveMCP)
+	mux.HandleFunc("/.well-known/oauth-protected-resource/mcp/{name}", s.mcpResourceMetadata)
 	s.adminRoutes(mux)
 	return s.recoverer(withRequestID(mux))
 }
