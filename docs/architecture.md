@@ -2,7 +2,7 @@
 
 The gateway is split into a stateless **data plane** that serves every request and a **control plane** that manages tenants, keys, policies and config. In v0.1 both run in one binary (ADR 0010).
 
-Model calls (and MCP tool calls from v0.5) pass through the same chain:
+Model calls (and MCP calls from v0.2, see [mcp.md](mcp.md)) pass through the same chain:
 
 1. **Ingress:** HTTP and SSE today; WebSocket and WebRTC with realtime audio in v0.8.
 2. **Authentication:** gateway key to org, team and key policy, from the in-memory snapshot.
@@ -26,6 +26,8 @@ Model calls (and MCP tool calls from v0.5) pass through the same chain:
 | `internal/store` | Store interface; SQLite and Postgres; migrations |
 | `internal/usage` | Usage records, cost calculation, async writer |
 | `internal/telemetry` | Metrics and tracing setup |
+| `internal/mcpgw` | MCP gateway: upstream sessions, catalogs, virtual servers, pinning |
+| `internal/oauth` | JWT access token validation and protected resource metadata |
 
 Dependencies point inward: `server` uses everything; adapters, store and limits know nothing about HTTP handlers.
 

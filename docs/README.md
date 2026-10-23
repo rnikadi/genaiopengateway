@@ -9,6 +9,7 @@
 | [Configuration and data model](config.md) | YAML reference, database tables |
 | [Security and threat model](security.md) | Assets, trust boundaries, STRIDE, defaults |
 | [Provider adapters](providers.md) | Adapter interface, translation rules, conformance tests |
+| [MCP gateway](mcp.md) | Virtual servers, tool pinning, auth, audit, MCP configuration |
 | [Observability](observability.md) | Logs, metrics, traces, usage records |
 | [Releases](releasing.md) | Versioning, artifacts, support |
 | [Roadmap](roadmap.md) | Phases and gates |

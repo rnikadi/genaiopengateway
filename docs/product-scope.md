@@ -28,8 +28,8 @@ GenAIOpenGateway is a single Apache-2.0 gateway for every GenAI modality and for
 ## Non-goals for v0.1
 
 - Image, audio, video and realtime endpoints (v0.8).
-- SSO, SCIM, custom roles, admin UI (v0.5). v0.1 has a bootstrap admin token and an admin REST API.
-- MCP gateway (v0.5).
+- SSO, SCIM, custom roles, admin UI (v0.3). v0.1 has a bootstrap admin token and an admin REST API.
+- MCP gateway (v0.2).
 - Guardrails beyond request size limits (v0.5).
 - Semantic caching (v0.8).
 - Prompt management, evaluations, fine-tuning orchestration. These belong in other tools.

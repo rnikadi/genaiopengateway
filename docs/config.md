@@ -59,7 +59,19 @@ keys:                                # static keys; read-only
   - name: local-dev
     key: ${GATEWAY_DEV_KEY}
     allowed_models: []
+    allowed_mcp_servers: []
     rpm: 60
+
+mcp:                                 # optional; see mcp.md for every field
+  servers:
+    github:
+      url: https://api.githubcopilot.com/mcp/
+      headers: {Authorization: "Bearer ${GITHUB_MCP_TOKEN}"}
+  virtual_servers:
+    engineering:
+      servers:
+        - server: github
+          tools: [search_code, get_file_contents]
 ```
 
 Prices in the example are placeholders; set them from your contracts.
@@ -73,7 +85,7 @@ Prices in the example are placeholders; set them from your contracts.
 
 ### Validation
 
-Startup fails if a model references an unknown provider, a provider has no `base_url`, a target has no `model`, a static key is empty or duplicated, or a duration or number is malformed.
+Startup fails if a model references an unknown provider, a virtual MCP server references an unknown upstream or two of its names collide, a provider has no `base_url`, a target has no `model`, a static key is empty or duplicated, or a duration or number is malformed.
 
 ## Data model
 
@@ -86,6 +98,8 @@ All ids are prefixed, time-sortable strings (`org_`, `team_`, `key_`, `req_`). T
 | `api_keys` | `id`, `org_id`, `team_id`, `name`, `prefix`, `secret_hash`, `policy`, `expires_at`, `revoked_at`, `last_used_at`, `created_at`, `updated_at` |
 | `usage` | `request_id`, `ts`, `org_id`, `team_id`, `key_id`, `endpoint`, `model`, `provider`, `upstream_model`, `status`, `latency_ms`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `reasoning_tokens`, `cost_usd` |
 | `audit_log` | `id`, `ts`, `actor`, `action`, `resource_type`, `resource_id`, `org_id`, `details` (JSON) |
+| `mcp_tool_pins` | `server`, `tool`, `hash`, `definition` (JSON), `status` (`approved`, `pending`), `approved_hash`, `updated_at` |
+| `mcp_calls` | `id`, `ts`, `org_id`, `team_id`, `key_id`, `subject`, `virtual_server`, `server`, `method`, `name`, `status`, `error_code`, `latency_ms`, `request_id` |
 | `schema_migrations` | `version`, `applied_at` |
 
 Key secrets have the form `sk-gog-` followed by 40 random base62 characters (about 238 bits). Only the SHA-256 hash and the first 11 characters (the prefix, for display) are stored. Because the secret is high-entropy, a fast hash is appropriate and keeps lookups constant time.

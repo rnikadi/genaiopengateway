@@ -14,5 +14,7 @@
 | [0010](0010-config-sync.md) | Data plane serves from a local snapshot |
 | [0011](0011-mcp-scope.md) | MCP gateway scope |
 | [0012](0012-governance.md) | Governance |
+| [0013](0013-mcp-termination.md) | Terminate MCP at the gateway with the official Go SDK |
+| [0014](0014-mcp-auth.md) | MCP authentication: gateway keys and OAuth 2.1 resource server |
 
 New ADRs copy [0000-template.md](0000-template.md).

@@ -61,7 +61,7 @@ OpenAI-style endpoints return `{"error": {"message": "...", "type": "<code>", "c
 
 ## Admin API
 
-Base path `/admin/v1`. JSON in and out. Authenticate with `Authorization: Bearer <admin token>`, where the token is set in config (`admin.token`). The admin API is disabled when no token is set or no store is configured. SSO and per-user roles replace the single token in v0.5.
+Base path `/admin/v1`. JSON in and out. Authenticate with `Authorization: Bearer <admin token>`, where the token is set in config (`admin.token`). The admin API is disabled when no token is set or no store is configured. SSO and per-user roles replace the single token in v0.3.
 
 ### Resources
 
@@ -86,13 +86,14 @@ Organizations, teams and keys share the same policy fields, all optional:
 {
   "name": "search-team",
   "allowed_models": ["chat-default", "embed-default"],
+  "allowed_mcp_servers": ["engineering"],
   "rpm": 600,
   "tpm": 200000,
   "budget": {"amount_usd": 500, "period": "monthly"}
 }
 ```
 
-`allowed_models` empty or absent means all models. `period` is `daily`, `monthly` (calendar month, UTC) or `total`. Keys also accept `expires_at` (RFC 3339).
+`allowed_models` and `allowed_mcp_servers` empty or absent mean all models and all MCP virtual servers. `period` is `daily`, `monthly` (calendar month, UTC) or `total`. Keys also accept `expires_at` (RFC 3339).
 
 Key create response:
 
@@ -111,6 +112,10 @@ List endpoints accept `limit` (default 50, max 500) and `after` (an id from the 
 ### Admin errors
 
 `{"error": {"message": "...", "code": "..."}}` with codes `unauthorized` (401), `not_found` (404), `conflict` (409), `invalid_request` (400).
+
+## MCP
+
+Virtual MCP servers are served at `POST /mcp/{name}` (Streamable HTTP), with admin endpoints for upstream status, tool pins and call audit under `/admin/v1/mcp`. See [mcp.md](mcp.md#api-additions).
 
 ## Operational endpoints
 
