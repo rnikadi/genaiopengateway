@@ -47,14 +47,20 @@ export function Playground() {
 
   useEffect(() => {
     if (!org) return;
+    // Switching organizations quickly must not show the previous one's teams.
+    let current = true;
     Promise.all([api('GET', `/admin/v1/orgs/${encodeURIComponent(org)}`), api('GET', `/admin/v1/orgs/${encodeURIComponent(org)}/teams?limit=500`)]).then(
       ([o, t]) => {
+        if (!current) return;
         setTeams(t.data);
         setTeam(t.data[0]?.id || '');
         setPolicy((p) => ({ ...p, org: o }));
       },
-      setError,
+      (err) => current && setError(err),
     );
+    return () => {
+      current = false;
+    };
   }, [org]);
   const teamObj = teams.find((t) => t.id === team);
   const allowed = (m) => [policy.org, teamObj].every((p) => !p?.allowed_models?.length || p.allowed_models.includes(m.name));
