@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-23
+
+Running it in production: an admin UI with single sign-on, alerts, per-user MCP credentials and audited body logging.
+
 ### Added
 
 - Admin UI at `/ui/`, embedded in the binary: an overview of spend, organizations, teams and keys with their policies (a new key is shown once), usage by model, team, key or day with CSV download, MCP servers, tool review and approval and call records, models, and the audit log.
@@ -55,6 +59,7 @@ The first release: an OpenAI-compatible gateway with tenants, keys, limits, budg
 - Config reload on `SIGHUP` and graceful shutdown.
 - Signed binaries and images with SBOMs.
 
-[Unreleased]: https://github.com/rnikadi/genaiopengateway/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/rnikadi/genaiopengateway/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/rnikadi/genaiopengateway/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/rnikadi/genaiopengateway/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/rnikadi/genaiopengateway/releases/tag/v0.1.0
