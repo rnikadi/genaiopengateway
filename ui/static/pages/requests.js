@@ -1,3 +1,4 @@
+import { guardrailColumns } from './guardrails.js';
 import { html, useState, useEffect, api, qs, useLoad, useSession, PageHeader, OrgPicker, defaultOrg, Table, Loading, ErrorBox, JSONView, when, usd, num } from '../lib.js';
 
 // Requests lists recent model requests; those with a logged body link to
@@ -53,6 +54,7 @@ export function Requests({ params }) {
 // RequestBody shows one logged body. Opening it is audited.
 export function RequestBody({ args: [id] }) {
   const state = useLoad(() => api('GET', `/admin/v1/requests/${encodeURIComponent(id)}`), [id]);
+  const events = useLoad(() => api('GET', '/admin/v1/guardrail-events' + qs({ request_id: id, limit: 100 })), [id]);
   return html`
     <${PageHeader} title="Request" sub=${id}>
       <a class="button secondary" href="#/requests">Back to requests</a>
@@ -67,6 +69,7 @@ export function RequestBody({ args: [id] }) {
         </p>
         <p class="notice">${`Content is shown as stored, redacted before it was written. ${redacted} This view is recorded in the audit log.`}</p>
         <section class="panel"><h2>Request</h2><${JSONView} value=${b.request} /></section>
-        <section class="panel"><h2>Response</h2><${JSONView} value=${b.response} /></section>`;
+        <section class="panel"><h2>Response</h2><${JSONView} value=${b.response} /></section>
+        ${events.data?.data?.length > 0 && html`<section class="panel"><h2>Guardrails</h2><${Table} rows=${events.data.data} rowKey=${(e) => e.id} columns=${guardrailColumns} /></section>`}`;
     }}<//>`;
 }

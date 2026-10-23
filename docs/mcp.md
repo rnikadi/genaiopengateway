@@ -117,6 +117,7 @@ mcp:
   virtual_servers:
     engineering:
       description: Code search and internal docs
+      guardrails: [no-secrets]                      # checks tool arguments and results (guardrails.md)
       servers:
         - server: github
           tools: [search_code, get_file_contents]   # omit for every tool

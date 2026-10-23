@@ -34,6 +34,9 @@ type Policy struct {
 	// LogBodies turns body logging on or off at this level; nil inherits
 	// from the level above (docs/body-logging.md).
 	LogBodies *bool `yaml:"log_bodies" json:"log_bodies,omitempty"`
+	// Guardrails names guardrails to run. Unlike other fields, the lists
+	// of all levels add up (docs/guardrails.md).
+	Guardrails []string `yaml:"guardrails" json:"guardrails,omitempty"`
 }
 
 // AllowsModel reports whether the policy permits a virtual model.

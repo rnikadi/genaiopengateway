@@ -102,6 +102,7 @@ export function policySummary(p) {
   if (p.rpm) parts.push(`${num(p.rpm)} RPM`);
   if (p.tpm) parts.push(`${compact(p.tpm)} TPM`);
   if (p.budget) parts.push(`${usd(p.budget.amount_usd)} ${p.budget.period}`);
+  if (p.guardrails?.length) parts.push(`${p.guardrails.length} guardrail${p.guardrails.length > 1 ? 's' : ''}`);
   if (p.log_bodies !== undefined && p.log_bodies !== null) parts.push(p.log_bodies ? 'Bodies logged' : 'Bodies not logged');
   return parts.join(' · ');
 }
@@ -199,6 +200,7 @@ export function PolicyForm({ initial = {}, kind, submitLabel, onSubmit, onCancel
     name: initial.name ?? '',
     allowed_models: initial.allowed_models ?? [],
     allowed_mcp_servers: initial.allowed_mcp_servers ?? [],
+    guardrails: initial.guardrails ?? [],
     rpm: initial.rpm || '',
     tpm: initial.tpm || '',
     budget_amount: initial.budget?.amount_usd ?? '',
@@ -219,6 +221,8 @@ export function PolicyForm({ initial = {}, kind, submitLabel, onSubmit, onCancel
       name: v.name.trim(),
       allowed_models: v.allowed_models,
       allowed_mcp_servers: v.allowed_mcp_servers,
+      // A guardrail removed from config no longer runs; dropping it keeps the save valid.
+      guardrails: v.guardrails.filter((g) => (me.guardrails || []).includes(g)),
       rpm: Number(v.rpm) || 0,
       tpm: Number(v.tpm) || 0,
       budget: v.budget_amount === '' ? null : { amount_usd: Number(v.budget_amount), period: v.budget_period },
@@ -255,6 +259,7 @@ export function PolicyForm({ initial = {}, kind, submitLabel, onSubmit, onCancel
     <${Field} label="Name"><input required maxlength="200" value=${v.name} onInput=${set('name')} /><//>
     <${Field} label="Allowed models" hint="None checked means every model.">${checks('allowed_models', catalog.models.map((m) => m.name))}<//>
     <${Field} label="Allowed MCP servers" hint="None checked means every MCP server.">${checks('allowed_mcp_servers', catalog.virtualServers.map((s) => s.name))}<//>
+    ${me.guardrails?.length > 0 && html`<${Field} label="Guardrails" hint="Guardrails set on the org, team and key all run; a lower level can add more but not remove any.">${checks('guardrails', me.guardrails)}<//>`}
     <div class="row">
       <${Field} label="Requests per minute" hint="Empty for no limit."><input type="number" min="0" value=${v.rpm} onInput=${set('rpm')} /><//>
       <${Field} label="Tokens per minute" hint="Empty for no limit."><input type="number" min="0" value=${v.tpm} onInput=${set('tpm')} /><//>

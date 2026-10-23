@@ -9,6 +9,7 @@ import { MCP } from './pages/mcp.js';
 import { Models } from './pages/models.js';
 import { Audit } from './pages/audit.js';
 import { Requests, RequestBody } from './pages/requests.js';
+import { Guardrails } from './pages/guardrails.js';
 
 const routes = [
   [/^\/$/, Overview, 'overview'],
@@ -18,6 +19,7 @@ const routes = [
   [/^\/usage$/, Usage, 'usage'],
   [/^\/requests$/, Requests, 'requests'],
   [/^\/requests\/([^/]+)$/, RequestBody, 'requests'],
+  [/^\/guardrails$/, Guardrails, 'guardrails'],
   [/^\/mcp$/, MCP, 'mcp'],
   [/^\/models$/, Models, 'models'],
   [/^\/audit$/, Audit, 'audit'],
@@ -28,6 +30,7 @@ const nav = [
   ['orgs', '#/orgs', 'Organizations'],
   ['usage', '#/usage', 'Usage'],
   ['requests', '#/requests', 'Requests'],
+  ['guardrails', '#/guardrails', 'Guardrails'],
   ['mcp', '#/mcp', 'MCP'],
   ['models', '#/models', 'Models'],
   ['audit', '#/audit', 'Audit log'],

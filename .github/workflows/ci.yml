@@ -42,6 +42,9 @@ jobs:
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
       - run: go test -race ./...
+      - name: Guardrail latency gate
+        # Without -race, which slows the code it measures.
+        run: go test -run TestBuiltinsLatencyGate -count=1 ./internal/guardrail/
       - run: go build ./cmd/gateway
 
   docker:

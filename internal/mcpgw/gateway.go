@@ -48,6 +48,10 @@ type Options struct {
 	LogBody func(caller *Caller, virtualServer, method string, params any, res mcp.Result, err error)
 	// Credentials, which may be nil, serves user_auth servers.
 	Credentials Credentials
+	// Guard, which may be nil, applies guardrails to the text of a tool
+	// call at a stage (docs/guardrails.md). It returns the texts, changed
+	// when redacted, or a message when the call is blocked.
+	Guard func(ctx context.Context, caller *Caller, virtualServer, stage string, texts []string) (out []string, changed bool, blocked string)
 }
 
 // Gateway serves every virtual server in the config.

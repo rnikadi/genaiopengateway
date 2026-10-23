@@ -17,6 +17,7 @@ import (
 	"github.com/rnikadi/genaiopengateway/internal/alerts"
 	"github.com/rnikadi/genaiopengateway/internal/auth"
 	"github.com/rnikadi/genaiopengateway/internal/config"
+	"github.com/rnikadi/genaiopengateway/internal/guardrail"
 	"github.com/rnikadi/genaiopengateway/internal/id"
 	"github.com/rnikadi/genaiopengateway/internal/limits"
 	"github.com/rnikadi/genaiopengateway/internal/mcpgw"
@@ -36,6 +37,7 @@ type runtime struct {
 	router *router.Router
 	oauth  *oauth.Verifier // nil unless mcp.oauth is configured
 	bodies *bodyLogger     // nil unless body logging is enabled
+	guards *guardrail.Set
 }
 
 // Server holds the live runtime and serves requests against it.
@@ -52,6 +54,8 @@ type Server struct {
 	calls *usage.Writer[store.MCPCall]
 	// bodies is nil without a store, like usage and calls.
 	bodies *usage.Writer[capturedBody]
+	// guardEvents is nil without a store.
+	guardEvents *usage.Writer[store.GuardrailEvent]
 
 	limiter *limits.Limiter
 	valkey  *limits.Valkey // nil unless the valkey driver is used
@@ -93,12 +97,13 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error)
 		s.usage = usage.NewWriter(st.InsertUsage, log, "usage")
 		s.calls = usage.NewWriter(st.InsertMCPCalls, log, "mcp_calls")
 		s.bodies = usage.NewWriterSize(s.writeBodies, log, "request_bodies", bodyQueue)
+		s.guardEvents = usage.NewWriter(st.InsertGuardrailEvents, log, "guardrail_events")
 	} else {
 		s.ready.Store(true)
 	}
 	s.metrics = telemetry.NewMetrics(s.usageWriteErrors, s.snapshotAge, s.bodiesDropped)
 	s.notifier = alerts.New(log, s.client.Transport, mcpgw.Version, s.metrics.ObserveAlertDelivery)
-	mo := mcpgw.Options{Log: log, Transport: s.client.Transport, Limiter: s.limiter, Metrics: s.metrics}
+	mo := mcpgw.Options{Log: log, Transport: s.client.Transport, Limiter: s.limiter, Metrics: s.metrics, Guard: s.guardTool}
 	if st != nil {
 		s.conns = newConnections(s)
 		mo.Pins, mo.Record, mo.Audit, mo.OnPending, mo.LogBody = st, s.calls.Add, st.AppendAudit, s.toolPending, s.logMCPBody
@@ -121,7 +126,11 @@ func (s *Server) Reload(cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	next := &runtime{cfg: cfg, router: r, bodies: bodies}
+	guards, err := s.newGuardrails(cfg)
+	if err != nil {
+		return err
+	}
+	next := &runtime{cfg: cfg, router: r, bodies: bodies, guards: guards}
 	if oc := cfg.MCP.OAuth; oc != nil {
 		// Keep the verifier, and the keys it holds, when OAuth settings
 		// did not change.
@@ -173,6 +182,7 @@ func (s *Server) Close(ctx context.Context) {
 		s.usage.Close(ctx)
 		s.calls.Close(ctx)
 		s.bodies.Close(ctx)
+		s.guardEvents.Close(ctx)
 	}
 	s.stop()
 	s.mcp.Close()
@@ -248,7 +258,7 @@ func (s *Server) usageWriteErrors() float64 {
 	if s.usage == nil {
 		return 0
 	}
-	return float64(s.usage.Dropped() + s.calls.Dropped())
+	return float64(s.usage.Dropped() + s.calls.Dropped() + s.guardEvents.Dropped())
 }
 
 // snapshotAge is zero without a store or before the first load, which
@@ -280,6 +290,12 @@ func (s *Server) pruneLoop(ctx context.Context, retention time.Duration) {
 			s.log.Error("pruning MCP call records failed", "err", err)
 		} else if n > 0 {
 			s.log.Info("pruned MCP call records", "rows", n)
+		}
+		n, err = s.store.PruneGuardrailEvents(ctx, before)
+		if err != nil {
+			s.log.Error("pruning guardrail events failed", "err", err)
+		} else if n > 0 {
+			s.log.Info("pruned guardrail events", "rows", n)
 		}
 		select {
 		case <-ctx.Done():

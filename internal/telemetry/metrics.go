@@ -43,6 +43,9 @@ type Metrics struct {
 	mcpConnections *prometheus.GaugeVec
 	connectFlows   *prometheus.CounterVec
 	tokenRefreshes *prometheus.CounterVec
+
+	guardrailChecks   *prometheus.CounterVec
+	guardrailDuration *prometheus.HistogramVec
 }
 
 // Model request latencies span milliseconds (embeddings) to minutes
@@ -105,6 +108,13 @@ func NewMetrics(usageErrors, snapshotAge, bodiesDropped func() float64) *Metrics
 		redactions: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "gog_redactions_total", Help: "Values redacted from logged bodies, by type.",
 		}, []string{"type"}),
+		guardrailChecks: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "gog_guardrail_checks_total", Help: "Guardrail checks, by result: pass, match or error.",
+		}, []string{"guardrail", "stage", "result"}),
+		guardrailDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name: "gog_guardrail_duration_seconds", Help: "Time to run one guardrail check.",
+			Buckets: []float64{.0005, .001, .0025, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5},
+		}, []string{"guardrail", "stage"}),
 		mcpConnections: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "gog_mcp_connections", Help: "Users connected to each user_auth MCP server.",
 		}, []string{"server"}),
@@ -119,7 +129,7 @@ func NewMetrics(usageErrors, snapshotAge, bodiesDropped func() float64) *Metrics
 		m.requests, m.duration, m.ttfb, m.tokens, m.cost, m.fallbacks, m.limitRejection, m.unpriced,
 		m.mcpRequests, m.mcpDuration, m.mcpToolCalls, m.mcpUp, m.mcpPending,
 		m.alerts, m.alertDeliveries, m.bodiesWritten, m.redactions,
-		m.mcpConnections, m.connectFlows, m.tokenRefreshes,
+		m.mcpConnections, m.connectFlows, m.tokenRefreshes, m.guardrailChecks, m.guardrailDuration,
 		prometheus.NewCounterFunc(prometheus.CounterOpts{
 			Name: "gog_request_bodies_dropped_total", Help: "Bodies not logged because the queue was full or the write failed.",
 		}, bodiesDropped),
@@ -255,6 +265,12 @@ func (m *Metrics) ObserveRedactions(counts map[string]int) {
 	for typ, n := range counts {
 		m.redactions.WithLabelValues(typ).Add(float64(n))
 	}
+}
+
+// ObserveGuardrail records one guardrail check.
+func (m *Metrics) ObserveGuardrail(guardrail, stage, result string, d time.Duration) {
+	m.guardrailChecks.WithLabelValues(guardrail, stage, result).Inc()
+	m.guardrailDuration.WithLabelValues(guardrail, stage).Observe(d.Seconds())
 }
 
 // SetMCPConnections sets how many users connected a server.

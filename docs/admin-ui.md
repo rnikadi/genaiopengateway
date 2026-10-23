@@ -31,6 +31,7 @@ v0.3 adds a web UI for operators, sign-in through the company's identity provide
 | Usage | Filter by organization, team, key and dates; group by model, team, key or day; chart, table and CSV download | `usage` |
 | MCP | Upstream servers and their status, virtual servers, tools with pin status; review a tool's definition and approve it; users' connections to per-user servers, with revoke (owners); call records | `mcp/*` |
 | Requests | Recent model requests; for those with a logged body, the redacted request and response (owners and organization admins; each view is audited) | `requests` |
+| Guardrails | What guardrails blocked, redacted or logged, by organization and action; never the matched text ([guardrails.md](guardrails.md)) | `guardrail-events` |
 | Audit log | Who changed what, filterable | `audit` |
 | Models | Virtual models and their targets, read-only | `models` (new) |
 

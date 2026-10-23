@@ -26,7 +26,7 @@ Prometheus, at `/metrics`. All names start with `gog_`. Go runtime and process m
 | `gog_fallbacks_total` | counter | `model`, `from_target`, `reason` |
 | `gog_limit_rejections_total` | counter | `scope` (org, team, key), `kind` (rpm, tpm, budget) |
 | `gog_unpriced_requests_total` | counter | `target` |
-| `gog_usage_write_errors_total` | counter | none (usage and MCP call records) |
+| `gog_usage_write_errors_total` | counter | none (usage, MCP call and guardrail event records) |
 | `gog_snapshot_age_seconds` | gauge | none |
 | `gog_mcp_requests_total` | counter | `virtual_server`, `method`, `status` (ok, tool_error, error, denied, rate_limited) |
 | `gog_mcp_request_duration_seconds` | histogram | `virtual_server`, `method` |
@@ -40,6 +40,8 @@ Prometheus, at `/metrics`. All names start with `gog_`. Go runtime and process m
 | `gog_mcp_token_refreshes_total` | counter | `server`, `result` (ok, invalid_grant, error) |
 | `gog_request_bodies_written_total` | counter | none |
 | `gog_request_bodies_dropped_total` | counter | none (queue full or write failed) |
+| `gog_guardrail_checks_total` | counter | `guardrail`, `stage`, `result` (pass, match, error) |
+| `gog_guardrail_duration_seconds` | histogram | `guardrail`, `stage` |
 | `gog_redactions_total` | counter | `type` (email, phone, credit_card, iban, us_ssn, secret, custom) |
 
 Labels never include org, team or key ids, to keep cardinality bounded. Per-tenant numbers come from the usage API.

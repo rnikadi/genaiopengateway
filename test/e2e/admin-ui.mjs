@@ -92,6 +92,38 @@ await step('owner manages tenants and keys', async () => {
   await ctx.close();
 });
 
+await step('owner turns on a guardrail and sees it block', async () => {
+  const { ctx, page } = await signIn('owner@example.com');
+  const org = (await adminAPI('GET', '/admin/v1/orgs?limit=500')).data.find((o) => o.name === orgName);
+  await page.goto(`${base}/ui/#/orgs/${org.id}`);
+  await page.click('button:has-text("Edit policy")');
+  await page.check('.modal label.check:has-text("no-pii") input');
+  await page.click('.modal button[type=submit]');
+  await page.waitForSelector('.modal', { state: 'detached' });
+  assert.deepEqual((await adminAPI('GET', `/admin/v1/orgs/${org.id}`)).guardrails, ['no-pii']);
+
+  const team = await adminAPI('POST', `/admin/v1/orgs/${org.id}/teams`, { name: 'guarded' });
+  const { id: keyID, key } = await adminAPI('POST', `/admin/v1/teams/${team.id}/keys`, { name: 'guarded' });
+  const res = await fetch(base + '/v1/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'chat-default', messages: [{ role: 'user', content: 'Mail jane@example.com' }] }),
+  });
+  assert.equal(res.status, 400);
+  assert.equal((await res.json()).error.code, 'guardrail_blocked');
+
+  // Events are written in batches; the page shows the block once it lands.
+  await page.goto(`${base}/ui/#/guardrails?org=${org.id}`);
+  for (let i = 0; i < 20 && !(await page.locator('td:has-text("no-pii")').count()); i++) {
+    await page.waitForTimeout(500);
+    await page.reload();
+  }
+  await page.waitForSelector('td .badge:has-text("block")');
+  assert.equal(await page.locator('text=jane@example.com').count(), 0, 'matched text is never shown');
+  await adminAPI('POST', `/admin/v1/keys/${keyID}/revoke`); // so cleanup can delete the team
+  await ctx.close();
+});
+
 await step('owner approves an MCP tool', async () => {
   const { ctx, page } = await signIn('owner@example.com');
   await page.click('text=MCP');

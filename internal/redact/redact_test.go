@@ -142,3 +142,32 @@ func FuzzBodyStaysJSON(f *testing.F) {
 		}
 	})
 }
+
+func TestWindowsCoverEveryMatch(t *testing.T) {
+	r := all(t)
+	long := strings.Repeat("x", 200)
+	cases := map[string]string{
+		"4111 1111 1111 1111 " + long + " DE89 3704 0044 0532 0130 00 " + long + " call +1 415 555 0100": "[REDACTED:credit_card]",
+		"a" + long + "b@example.com" + long:       "[REDACTED:email]",
+		strings.Repeat("1", 100) + " 078-05-1120": "[REDACTED:us_ssn]",
+		"ref12345 078-05-1120x":                   "", // no word boundary after the SSN
+		"no digits or at signs here":              "",
+	}
+	for in, want := range cases {
+		counts := Counts{}
+		got := r.String(in, counts)
+		full := Counts{}
+		for _, rl := range r.rules {
+			// The windowed result must equal a scan of the whole text.
+			plain := rl
+			plain.trigger, plain.literals = nil, nil
+			in = plain.apply(in, full)
+		}
+		if got != in {
+			t.Errorf("windowed %q\n    whole %q", got, in)
+		}
+		if want != "" && !strings.Contains(got, want) {
+			t.Errorf("%q lacks %s", got, want)
+		}
+	}
+}
