@@ -33,7 +33,30 @@ func writeError(w http.ResponseWriter, ep provider.Endpoint, status int, code, m
 		})
 		return
 	}
+	if ep == provider.GenerateContent {
+		writeJSON(w, status, map[string]any{"error": map[string]any{"code": status, "message": msg, "status": googleStatus(status)}})
+		return
+	}
 	writeJSON(w, status, map[string]any{"error": map[string]any{"message": msg, "type": code, "code": code}})
+}
+
+// googleStatus is the status name Google APIs use for an HTTP status.
+func googleStatus(status int) string {
+	switch status {
+	case http.StatusBadRequest, http.StatusRequestEntityTooLarge:
+		return "INVALID_ARGUMENT"
+	case http.StatusUnauthorized:
+		return "UNAUTHENTICATED"
+	case http.StatusForbidden:
+		return "PERMISSION_DENIED"
+	case http.StatusNotFound:
+		return "NOT_FOUND"
+	case http.StatusTooManyRequests:
+		return "RESOURCE_EXHAUSTED"
+	case http.StatusServiceUnavailable:
+		return "UNAVAILABLE"
+	}
+	return "INTERNAL"
 }
 
 func anthropicErrorType(status int) string {

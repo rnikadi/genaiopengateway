@@ -251,6 +251,11 @@ type Limits struct {
 const (
 	ProviderOpenAI    = "openai"
 	ProviderAnthropic = "anthropic"
+	ProviderGemini    = "gemini"
+	ProviderVertex    = "vertex"
+
+	// DefaultGeminiBaseURL is the Gemini API.
+	DefaultGeminiBaseURL = "https://generativelanguage.googleapis.com"
 )
 
 // Provider is an upstream that serves models.
@@ -260,6 +265,11 @@ type Provider struct {
 	APIKey  Secret            `yaml:"api_key"`
 	Timeout Duration          `yaml:"timeout"`
 	Headers map[string]string `yaml:"headers"`
+	// Project, Location and CredentialsFile configure a vertex provider.
+	// Without CredentialsFile, Application Default Credentials are used.
+	Project         string `yaml:"project"`
+	Location        string `yaml:"location"`
+	CredentialsFile string `yaml:"credentials_file"`
 }
 
 // Model is a virtual model. Targets are tried in order.
@@ -529,11 +539,23 @@ func (c *Config) validate() error {
 		case "":
 			p.Type = ProviderOpenAI
 		case ProviderOpenAI, ProviderAnthropic:
+		case ProviderGemini:
+			if p.BaseURL == "" {
+				p.BaseURL = DefaultGeminiBaseURL
+			}
+		case ProviderVertex:
+			if p.Project == "" || p.Location == "" {
+				add("provider %q: vertex needs project and location", name)
+			} else if !vertexLocation.MatchString(p.Location) || !vertexProject.MatchString(p.Project) {
+				add("provider %q: project or location has characters a Google Cloud name cannot have", name)
+			}
 		default:
-			add("provider %q: type must be openai or anthropic, got %q", name, p.Type)
+			add("provider %q: type must be openai, anthropic, gemini or vertex, got %q", name, p.Type)
 		}
 		if p.BaseURL == "" {
-			add("provider %q: base_url is required", name)
+			if p.Type != ProviderVertex {
+				add("provider %q: base_url is required", name)
+			}
 		} else if u, err := url.Parse(p.BaseURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			add("provider %q: base_url must be an http or https URL", name)
 		}
@@ -834,6 +856,9 @@ var (
 	mcpName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
 	// mcpPrefix fits the MCP tool name alphabet.
 	mcpPrefix = regexp.MustCompile(`^[A-Za-z0-9.-][A-Za-z0-9_.-]{0,63}$`)
+	// vertexProject and vertexLocation go into Vertex AI URLs.
+	vertexProject  = regexp.MustCompile(`^[a-z][a-z0-9:.-]{1,62}$`)
+	vertexLocation = regexp.MustCompile(`^[a-z][a-z0-9-]{1,30}$`)
 )
 
 func (c *Config) validateMCP(add func(string, ...any)) {

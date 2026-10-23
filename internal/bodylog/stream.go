@@ -11,8 +11,9 @@ import (
 // one event each. It reports false for a body it does not recognize.
 func Stream(assembled []byte) ([]byte, bool) {
 	var probe struct {
-		Object string `json:"object"`
-		Type   string `json:"type"`
+		Object     string          `json:"object"`
+		Type       string          `json:"type"`
+		Candidates json.RawMessage `json:"candidates"`
 	}
 	if json.Unmarshal(assembled, &probe) != nil {
 		return nil, false
@@ -24,6 +25,12 @@ func Stream(assembled []byte) ([]byte, bool) {
 		return anthropicEvents(assembled)
 	case probe.Object == "response":
 		return responsesEvents(assembled)
+	case probe.Candidates != nil:
+		// A Gemini stream is a series of partial responses; one whole
+		// response is a valid stream of one event.
+		var w eventWriter
+		w.event("", json.RawMessage(assembled))
+		return w.buf.Bytes(), true
 	}
 	return nil, false
 }

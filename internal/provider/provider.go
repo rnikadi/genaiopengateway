@@ -13,12 +13,15 @@ import (
 // Endpoint is a client-facing API the gateway serves.
 type Endpoint string
 
-// Endpoints served in v0.1.
+// Endpoints the gateway serves.
 const (
 	ChatCompletions Endpoint = "chat.completions"
 	Embeddings      Endpoint = "embeddings"
 	Responses       Endpoint = "responses"
 	Messages        Endpoint = "messages"
+	// GenerateContent is Google's generateContent and
+	// streamGenerateContent, served by passthrough.
+	GenerateContent Endpoint = "generate_content"
 )
 
 // Request is a client request already resolved to one target. Body is
@@ -51,6 +54,20 @@ type Provider interface {
 	// response was received; upstream error statuses are returned as
 	// responses.
 	Send(ctx context.Context, req *Request) (*Response, error)
+}
+
+// ModelSupporter is implemented by adapters whose endpoints depend on
+// the upstream model, such as Vertex AI serving Gemini and Claude.
+type ModelSupporter interface {
+	SupportsModel(e Endpoint, model string) bool
+}
+
+// SupportsModel reports whether p serves an endpoint for model.
+func SupportsModel(p Provider, e Endpoint, model string) bool {
+	if ms, ok := p.(ModelSupporter); ok {
+		return ms.SupportsModel(e, model)
+	}
+	return p.Supports(e)
 }
 
 // Retryable reports whether a status should trigger fallback to the next

@@ -53,6 +53,8 @@ func TestParseRejectsBadConfig(t *testing.T) {
 		"no base url":             `providers: {p: {type: openai}}`,
 		"bad base url":            `providers: {p: {base_url: "ftp://x"}}`,
 		"bad type":                `providers: {p: {type: magic, base_url: "http://x"}}`,
+		"vertex without project":  `providers: {p: {type: vertex, location: global}}`,
+		"vertex bad location":     `providers: {p: {type: vertex, project: acme, location: "us/../x"}}`,
 		"short key":               `keys: [{name: a, key: short}]`,
 		"duplicate key name":      `keys: [{name: a, key: aaaaaaaaaaaaaaaaaa}, {name: a, key: bbbbbbbbbbbbbbbbbb}]`,
 		"duplicate key value":     `keys: [{name: a, key: aaaaaaaaaaaaaaaaaa}, {name: b, key: aaaaaaaaaaaaaaaaaa}]`,
@@ -115,6 +117,19 @@ func TestParseRejectsBadConfig(t *testing.T) {
 		if _, err := Parse([]byte(raw)); err == nil {
 			t.Errorf("%s: expected an error", name)
 		}
+	}
+}
+
+func TestCloudProviders(t *testing.T) {
+	c, err := Parse([]byte(`providers:
+  g: {type: gemini, api_key: k}
+  v: {type: vertex, project: acme-ai, location: europe-west4}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Providers["g"].BaseURL != DefaultGeminiBaseURL || c.Providers["v"].BaseURL != "" {
+		t.Errorf("base urls %q %q", c.Providers["g"].BaseURL, c.Providers["v"].BaseURL)
 	}
 }
 

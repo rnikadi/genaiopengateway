@@ -9,8 +9,12 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - Guardrails ([docs/guardrails.md](docs/guardrails.md)): checks on the text of model requests (`input`), model responses (`output`), MCP tool arguments (`tool_input`) and MCP tool results (`tool_output`). Four types: `pii` (the body logging detectors), `regex` (RE2), `model` (a classifier such as Llama Guard, called through the gateway's own routing and metered under the requesting key) and `webhook` (a signed call to an operator's service, which answers allow, block or redact). Each `block`s with `400 guardrail_blocked`, `redact`s, or only `log`s; external checks have a timeout and `on_error`. Guardrails are attached by a new `guardrails` policy field, whose lists add up across organization, team and key, and by virtual MCP servers. Streamed responses are buffered when an `output` guardrail applies and re-sent as a valid stream when redacted. Built-in checks add about 2.5 ms at p50 on a 32 KiB request, and a 10 ms gate runs in CI.
 - Guardrail decisions are recorded without the matched text: the `X-Gog-Guardrails` response header, a `guardrail_events` table pruned with `usage_retention`, `GET /admin/v1/guardrail-events`, metrics `gog_guardrail_checks_total` and `gog_guardrail_duration_seconds`, and a Guardrails page in the admin UI. The policy form has a guardrails field.
 
+- Gemini and Vertex AI providers ([docs/cloud-providers.md](docs/cloud-providers.md)). `gemini` calls the Gemini API with an API key; `vertex` calls Vertex AI with Application Default Credentials or a `credentials_file`, picking the global, multi-region or regional endpoint from `location`. Chat completions are translated natively to generateContent, with streaming, tools (thought signatures kept in `extra_content`), data URL images, JSON schemas, `reasoning_effort` and usage that counts thinking tokens as output. Claude models on Vertex AI (`anthropic/claude-…`) reuse the Anthropic adapter for chat completions and `/v1/messages`.
+- `POST /v1beta/models/{model}:generateContent` and `:streamGenerateContent`, so the Google GenAI SDK and Gemini CLI can use the gateway; keys are also accepted in `x-goog-api-key`.
+
 ### Changed
 
+- When an output guardrail applies to a stream the gateway cannot read, the response is blocked instead of passed on unchecked.
 - The redaction detectors run their regular expressions only around the characters a match must contain, which makes body logging faster on long text.
 
 ## [0.3.0] - 2026-10-23

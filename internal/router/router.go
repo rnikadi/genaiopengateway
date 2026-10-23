@@ -18,7 +18,9 @@ import (
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/provider"
 	"github.com/rnikadi/genaiopengateway/internal/provider/anthropic"
+	"github.com/rnikadi/genaiopengateway/internal/provider/gemini"
 	"github.com/rnikadi/genaiopengateway/internal/provider/openai"
+	"github.com/rnikadi/genaiopengateway/internal/provider/vertex"
 	"github.com/rnikadi/genaiopengateway/internal/telemetry"
 )
 
@@ -33,6 +35,8 @@ var (
 var factories = map[string]func(config.Provider, *http.Client) provider.Provider{
 	config.ProviderOpenAI:    func(c config.Provider, h *http.Client) provider.Provider { return openai.New(c, h) },
 	config.ProviderAnthropic: func(c config.Provider, h *http.Client) provider.Provider { return anthropic.New(c, h) },
+	config.ProviderGemini:    func(c config.Provider, h *http.Client) provider.Provider { return gemini.New(c, h) },
+	config.ProviderVertex:    func(c config.Provider, h *http.Client) provider.Provider { return vertex.New(c, h) },
 }
 
 // Router dispatches requests to the targets of a virtual model.
@@ -102,7 +106,7 @@ func (r *Router) Route(ctx context.Context, ep provider.Endpoint, model string, 
 	}
 	var targets []config.Target
 	for _, t := range m.Targets {
-		if r.providers[t.Provider].Supports(ep) {
+		if provider.SupportsModel(r.providers[t.Provider], ep, t.Model) {
 			targets = append(targets, t)
 		}
 	}

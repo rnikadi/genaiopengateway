@@ -116,7 +116,14 @@ func (s *Server) guardResponse(ctx context.Context, rt *runtime, meta guardrail.
 	}
 	doc, err := guardrail.ParseDoc(assembled)
 	if err != nil {
-		return body, guardrail.Result{}
+		if !streamed {
+			return body, guardrail.Result{}
+		}
+		// A stream the gateway cannot read must not pass unchecked.
+		d := guardrail.Decision{Guardrail: rt.guards.Names(config.StageOutput, names)[0], Stage: config.StageOutput,
+			Action: config.ActionBlock, Reason: "the stream could not be read"}
+		s.recordGuardrails(meta, []guardrail.Decision{d})
+		return body, guardrail.Result{Blocked: &d, Decisions: []guardrail.Decision{d}}
 	}
 	res := rt.guards.Run(ctx, config.StageOutput, names, doc.Texts(), meta)
 	s.recordGuardrails(meta, res.Decisions)
