@@ -35,6 +35,7 @@ type runtime struct {
 	cfg    *config.Config
 	router *router.Router
 	oauth  *oauth.Verifier // nil unless mcp.oauth is configured
+	bodies *bodyLogger     // nil unless body logging is enabled
 }
 
 // Server holds the live runtime and serves requests against it.
@@ -49,6 +50,8 @@ type Server struct {
 	store *store.Store
 	usage *usage.Writer[usage.Record]
 	calls *usage.Writer[store.MCPCall]
+	// bodies is nil without a store, like usage and calls.
+	bodies *usage.Writer[capturedBody]
 
 	limiter *limits.Limiter
 	valkey  *limits.Valkey // nil unless the valkey driver is used
@@ -88,14 +91,15 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error)
 	if st != nil {
 		s.usage = usage.NewWriter(st.InsertUsage, log, "usage")
 		s.calls = usage.NewWriter(st.InsertMCPCalls, log, "mcp_calls")
+		s.bodies = usage.NewWriterSize(s.writeBodies, log, "request_bodies", bodyQueue)
 	} else {
 		s.ready.Store(true)
 	}
-	s.metrics = telemetry.NewMetrics(s.usageWriteErrors, s.snapshotAge)
+	s.metrics = telemetry.NewMetrics(s.usageWriteErrors, s.snapshotAge, s.bodiesDropped)
 	s.notifier = alerts.New(log, s.client.Transport, mcpgw.Version, s.metrics.ObserveAlertDelivery)
 	mo := mcpgw.Options{Log: log, Transport: s.client.Transport, Limiter: s.limiter, Metrics: s.metrics}
 	if st != nil {
-		mo.Pins, mo.Record, mo.Audit, mo.OnPending = st, s.calls.Add, st.AppendAudit, s.toolPending
+		mo.Pins, mo.Record, mo.Audit, mo.OnPending, mo.LogBody = st, s.calls.Add, st.AppendAudit, s.toolPending, s.logMCPBody
 	}
 	s.mcp = mcpgw.New(ctx, cfg.MCP, mo)
 	if err := s.Reload(cfg); err != nil {
@@ -110,7 +114,11 @@ func (s *Server) Reload(cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	next := &runtime{cfg: cfg, router: r}
+	bodies, err := newBodyLogger(cfg)
+	if err != nil {
+		return err
+	}
+	next := &runtime{cfg: cfg, router: r, bodies: bodies}
 	if oc := cfg.MCP.OAuth; oc != nil {
 		// Keep the verifier, and the keys it holds, when OAuth settings
 		// did not change.
@@ -149,6 +157,7 @@ func (s *Server) Start(ctx context.Context) {
 	go s.sessionPruneLoop(ctx)
 	go s.notifier.Run(ctx)
 	go s.keyExpiryLoop(ctx)
+	go s.bodyPruneLoop(ctx)
 	if retention := s.rt.Load().cfg.Store.UsageRetention.Std(); retention > 0 {
 		go s.pruneLoop(ctx, retention)
 	}
@@ -159,6 +168,7 @@ func (s *Server) Close(ctx context.Context) {
 	if s.usage != nil {
 		s.usage.Close(ctx)
 		s.calls.Close(ctx)
+		s.bodies.Close(ctx)
 	}
 	s.stop()
 	s.mcp.Close()

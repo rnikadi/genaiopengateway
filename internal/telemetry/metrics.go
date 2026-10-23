@@ -36,15 +36,18 @@ type Metrics struct {
 
 	alerts          *prometheus.CounterVec
 	alertDeliveries *prometheus.CounterVec
+
+	bodiesWritten prometheus.Counter
+	redactions    *prometheus.CounterVec
 }
 
 // Model request latencies span milliseconds (embeddings) to minutes
 // (long generations).
 var latencyBuckets = []float64{.025, .05, .1, .25, .5, 1, 2.5, 5, 10, 20, 40, 80, 160, 320}
 
-// NewMetrics registers all metrics on a new registry. usageErrors and
-// snapshotAge are read at scrape time.
-func NewMetrics(usageErrors func() float64, snapshotAge func() float64) *Metrics {
+// NewMetrics registers all metrics on a new registry. usageErrors,
+// snapshotAge and bodiesDropped are read at scrape time.
+func NewMetrics(usageErrors, snapshotAge, bodiesDropped func() float64) *Metrics {
 	m := &Metrics{
 		reg: prometheus.NewRegistry(),
 		requests: prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -92,11 +95,20 @@ func NewMetrics(usageErrors func() float64, snapshotAge func() float64) *Metrics
 		alertDeliveries: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "gog_alert_deliveries_total", Help: "Alert delivery attempts to webhooks, by result.",
 		}, []string{"webhook", "result"}),
+		bodiesWritten: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "gog_request_bodies_written_total", Help: "Request and response bodies written to the store.",
+		}),
+		redactions: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "gog_redactions_total", Help: "Values redacted from logged bodies, by type.",
+		}, []string{"type"}),
 	}
 	m.reg.MustRegister(
 		m.requests, m.duration, m.ttfb, m.tokens, m.cost, m.fallbacks, m.limitRejection, m.unpriced,
 		m.mcpRequests, m.mcpDuration, m.mcpToolCalls, m.mcpUp, m.mcpPending,
-		m.alerts, m.alertDeliveries,
+		m.alerts, m.alertDeliveries, m.bodiesWritten, m.redactions,
+		prometheus.NewCounterFunc(prometheus.CounterOpts{
+			Name: "gog_request_bodies_dropped_total", Help: "Bodies not logged because the queue was full or the write failed.",
+		}, bodiesDropped),
 		prometheus.NewCounterFunc(prometheus.CounterOpts{
 			Name: "gog_usage_write_errors_total", Help: "Usage records that could not be written to the store.",
 		}, usageErrors),
@@ -219,6 +231,16 @@ func (m *Metrics) ObserveAlert(event string) { m.alerts.WithLabelValues(event).I
 // dropped.
 func (m *Metrics) ObserveAlertDelivery(webhook, result string) {
 	m.alertDeliveries.WithLabelValues(webhook, result).Inc()
+}
+
+// ObserveBodies counts body records written to the store.
+func (m *Metrics) ObserveBodies(n int) { m.bodiesWritten.Add(float64(n)) }
+
+// ObserveRedactions counts redacted values by type.
+func (m *Metrics) ObserveRedactions(counts map[string]int) {
+	for typ, n := range counts {
+		m.redactions.WithLabelValues(typ).Add(float64(n))
+	}
 }
 
 func statusClass(status int) string {

@@ -348,6 +348,9 @@ func (g *Gateway) middleware(vs string) mcp.Middleware {
 			}
 			if counted[method] {
 				g.logCall(ctx, caller, vs, method, c, status, d)
+				if g.opts.LogBody != nil && caller != nil {
+					g.opts.LogBody(caller, vs, method, req.GetParams(), res, err)
+				}
 			}
 			return res, err
 		}

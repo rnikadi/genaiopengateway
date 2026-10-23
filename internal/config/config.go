@@ -17,25 +17,58 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/rnikadi/genaiopengateway/internal/policy"
+	"github.com/rnikadi/genaiopengateway/internal/redact"
+	"github.com/rnikadi/genaiopengateway/internal/secretbox"
 )
 
 // Config is the root of the configuration file.
 type Config struct {
-	Listen    string              `yaml:"listen"`
-	TLS       TLS                 `yaml:"tls"`
-	Admin     Admin               `yaml:"admin"`
-	Metrics   Metrics             `yaml:"metrics"`
-	Store     Store               `yaml:"store"`
-	Limiter   Limiter             `yaml:"limiter"`
-	Limits    Limits              `yaml:"limits"`
-	Providers map[string]Provider `yaml:"providers"`
-	Models    map[string]Model    `yaml:"models"`
-	Keys      []StaticKey         `yaml:"keys"`
-	MCP       MCP                 `yaml:"mcp"`
-	SSO       SSO                 `yaml:"sso"`
-	UI        UI                  `yaml:"ui"`
-	Alerts    Alerts              `yaml:"alerts"`
+	Listen      string              `yaml:"listen"`
+	TLS         TLS                 `yaml:"tls"`
+	Admin       Admin               `yaml:"admin"`
+	Metrics     Metrics             `yaml:"metrics"`
+	Store       Store               `yaml:"store"`
+	Limiter     Limiter             `yaml:"limiter"`
+	Limits      Limits              `yaml:"limits"`
+	Providers   map[string]Provider `yaml:"providers"`
+	Models      map[string]Model    `yaml:"models"`
+	Keys        []StaticKey         `yaml:"keys"`
+	MCP         MCP                 `yaml:"mcp"`
+	SSO         SSO                 `yaml:"sso"`
+	UI          UI                  `yaml:"ui"`
+	Alerts      Alerts              `yaml:"alerts"`
+	Secrets     Secrets             `yaml:"secrets"`
+	BodyLogging BodyLogging         `yaml:"body_logging"`
 }
+
+// Secrets holds the key that encrypts sensitive values in the store
+// (ADR 0017). PreviousKeys still decrypt, for rotation.
+type Secrets struct {
+	EncryptionKey Secret   `yaml:"encryption_key"`
+	PreviousKeys  []Secret `yaml:"previous_keys"`
+}
+
+// BodyLogging configures opt-in logging of request and response bodies
+// (docs/body-logging.md). Policies choose which requests are logged.
+type BodyLogging struct {
+	Enabled      bool     `yaml:"enabled"`
+	Retention    Duration `yaml:"retention"`
+	MaxBodyBytes int      `yaml:"max_body_bytes"`
+	Redact       Redact   `yaml:"redact"`
+}
+
+// Redact selects redactions; a nil Builtin means all of them.
+type Redact struct {
+	Builtin  []string `yaml:"builtin"`
+	Patterns []string `yaml:"patterns"`
+}
+
+// Body logging defaults and bounds.
+const (
+	DefaultBodyRetention = 30 * 24 * time.Hour
+	MaxBodyRetention     = 365 * 24 * time.Hour
+	DefaultMaxBodyBytes  = 64 << 10
+)
 
 // Alerts configures budget alerts and the webhooks that receive alerts
 // (docs/alerts.md).
@@ -339,13 +372,14 @@ func Parse(raw []byte) (*Config, error) {
 		return nil, err
 	}
 	c := Config{
-		Listen:  DefaultListen,
-		Limits:  Limits{MaxRequestBytes: DefaultMaxRequestBytes},
-		Limiter: Limiter{Driver: "memory", FailOpenRateLimits: true},
-		Store:   Store{RefreshInterval: Duration(DefaultRefreshInterval)},
-		MCP:     MCP{RefreshInterval: Duration(DefaultMCPRefresh)},
-		SSO:     SSO{SessionTTL: Duration(DefaultSessionTTL)},
-		Alerts:  Alerts{BudgetThresholds: DefaultBudgetThresholds},
+		Listen:      DefaultListen,
+		Limits:      Limits{MaxRequestBytes: DefaultMaxRequestBytes},
+		Limiter:     Limiter{Driver: "memory", FailOpenRateLimits: true},
+		Store:       Store{RefreshInterval: Duration(DefaultRefreshInterval)},
+		MCP:         MCP{RefreshInterval: Duration(DefaultMCPRefresh)},
+		SSO:         SSO{SessionTTL: Duration(DefaultSessionTTL)},
+		Alerts:      Alerts{BudgetThresholds: DefaultBudgetThresholds},
+		BodyLogging: BodyLogging{Retention: Duration(DefaultBodyRetention), MaxBodyBytes: DefaultMaxBodyBytes},
 	}
 	if len(doc.Content) > 0 {
 		dec := doc.Content[0]
@@ -456,6 +490,7 @@ func (c *Config) validate() error {
 	c.validateMCP(add)
 	c.validateSSO(add)
 	c.validateAlerts(add)
+	c.validateBodyLogging(add)
 
 	seen := map[string]bool{}
 	names := map[string]bool{}
@@ -490,6 +525,43 @@ func (c *Config) validate() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (c *Config) validateBodyLogging(add func(string, ...any)) {
+	for i, k := range append([]Secret{c.Secrets.EncryptionKey}, c.Secrets.PreviousKeys...) {
+		if (i == 0 && k == "") || validKey(k.Value()) {
+			continue
+		}
+		add("secrets: an encryption key must be 32 random bytes, base64 encoded (openssl rand -base64 32)")
+		break
+	}
+	if len(c.Secrets.PreviousKeys) > 0 && c.Secrets.EncryptionKey == "" {
+		add("secrets.previous_keys needs secrets.encryption_key")
+	}
+	b := &c.BodyLogging
+	if !b.Enabled {
+		return
+	}
+	if c.Store.Driver == "" {
+		add("body_logging needs a store")
+	}
+	if c.Secrets.EncryptionKey == "" {
+		add("body_logging needs secrets.encryption_key, to encrypt bodies at rest")
+	}
+	if r := b.Retention.Std(); r <= 0 || r > MaxBodyRetention {
+		add("body_logging.retention must be between 1s and 365d")
+	}
+	if b.MaxBodyBytes < 1024 || b.MaxBodyBytes > 1<<20 {
+		add("body_logging.max_body_bytes must be between 1024 and 1048576")
+	}
+	if _, err := redact.New(redact.Config{Builtin: b.Redact.Builtin, Patterns: b.Redact.Patterns}); err != nil {
+		add("body_logging.redact: %v", err)
+	}
+}
+
+func validKey(s string) bool {
+	_, err := secretbox.ParseKey(s)
+	return err == nil
 }
 
 // DefaultBudgetThresholds are the shares of a budget that raise alerts.

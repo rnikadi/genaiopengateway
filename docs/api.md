@@ -81,6 +81,9 @@ Base path `/admin/v1`. JSON in and out. Authenticate with `Authorization: Bearer
 | `GET /admin/v1/audit` | Admin audit log |
 | `GET /admin/v1/alerts` | Alerts raised, newest first; filter with `org_id` and `event` ([alerts.md](alerts.md)) |
 | `POST /admin/v1/alerts/test` | Send a test alert to a configured webhook: `{"webhook": "name"}`. Returns `{"ok", "status"}` (owners only) |
+| `GET /admin/v1/requests` | Model requests from usage records, newest first, with `has_body`; filter with `org_id`, `team_id`, `key_id`, `from`, `to`. `after` is a `request_id` ([body-logging.md](body-logging.md)) |
+| `GET /admin/v1/requests/{request_id}` | A request's logged body, decrypted: `request`, `response`, `truncated`, `redactions`. Owners and the organization's admins only; each read is audited as `request_body.read` |
+| `DELETE /admin/v1/requests?org_id=&before=` | Delete an organization's bodies logged before a time, for erasure requests. Returns `{"deleted": n}` (owners only, audited) |
 
 Organizations, teams and keys share the same policy fields, all optional:
 
@@ -91,9 +94,12 @@ Organizations, teams and keys share the same policy fields, all optional:
   "allowed_mcp_servers": ["engineering"],
   "rpm": 600,
   "tpm": 200000,
-  "budget": {"amount_usd": 500, "period": "monthly", "alert_at": [0.8, 1]}
+  "budget": {"amount_usd": 500, "period": "monthly", "alert_at": [0.8, 1]},
+  "log_bodies": true
 }
 ```
+
+`log_bodies` (true or false) turns body logging on or off for that scope; the most specific level that sets it wins, and unset everywhere means off ([body-logging.md](body-logging.md)).
 
 `alert_at` is optional: it overrides the gateway's alert thresholds for this budget, and `[]` turns its alerts off.
 

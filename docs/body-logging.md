@@ -53,15 +53,17 @@ One record per request in a new table, `request_bodies`, keyed by `request_id`. 
 | --- | --- |
 | `request_id`, `ts`, `org_id`, `team_id`, `key_id` | As in usage records. |
 | `kind` | `model` or `mcp`. |
-| `endpoint` / `method` | For example `/v1/chat/completions` or `tools/call`. |
+| `endpoint` | For model calls the endpoint as in usage records, for example `chat.completions`; for MCP the virtual server path, for example `/mcp/engineering`. |
 | `request` | The request body as received, redacted and truncated. |
 | `response` | For non-streaming responses, the body as returned. For streams, the assembled result: the text, tool calls and finish reason built from the events, not the raw event stream. Redacted and truncated. |
 | `truncated` | Whether either body was cut. |
 | `redactions` | Count per redaction type, for example `{"email": 2}`. Never the redacted values. |
 
-For MCP, `request` is the JSON-RPC params (tool name and arguments) and `response` the result content.
+For MCP, `tools/call`, `prompts/get` and `resources/read` are logged: `request` is the method and its params (for a tool, its name and arguments) and `response` the result, or the error. The MCP calls list in the UI links to the body.
 
-Bodies are written asynchronously through the same batched writer as usage records, so logging adds no latency to the response. When the queue is full, body records are dropped before usage records, and the drop is counted.
+Clients may set `X-Request-Id`, so one id can belong to requests of several organizations. A read returns only a record the operator's organizations may see.
+
+Bodies are written asynchronously through a batched writer like usage records, so logging adds no latency to the response. Redaction and encryption run in that writer, off the request path. Its queue is short (256 records), because each record can hold up to four times `max_body_bytes` of request and of response before redaction; when it is full, body records are dropped while usage records still have room, and the drop is counted.
 
 ## Redaction
 
@@ -87,7 +89,7 @@ Checksums keep false positives down for card numbers and IBANs. Redaction runs o
 
 ## Retention and deletion
 
-- An hourly job deletes bodies older than `retention`, in batches so it never holds long locks.
+- An hourly job deletes bodies older than `retention`, in batches so it never holds long locks. It runs when `body_logging.enabled` is false too, so bodies logged before it was turned off still expire.
 - Turning `log_bodies` off stops new records but keeps existing ones until they expire. `DELETE /admin/v1/requests?org_id=…&before=…` (owners only, audited) deletes early, for erasure requests.
 - Deleting an organization, team or key does not delete its bodies; they expire with retention, like usage records.
 

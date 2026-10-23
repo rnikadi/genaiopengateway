@@ -102,6 +102,7 @@ export function policySummary(p) {
   if (p.rpm) parts.push(`${num(p.rpm)} RPM`);
   if (p.tpm) parts.push(`${compact(p.tpm)} TPM`);
   if (p.budget) parts.push(`${usd(p.budget.amount_usd)} ${p.budget.period}`);
+  if (p.log_bodies !== undefined && p.log_bodies !== null) parts.push(p.log_bodies ? 'Bodies logged' : 'Bodies not logged');
   return parts.join(' · ');
 }
 
@@ -193,7 +194,7 @@ export function Columns({ items, format = num }) {
 // PolicyForm edits the fields organizations, teams and keys share. Empty
 // allow lists mean everything; an empty budget means none.
 export function PolicyForm({ initial = {}, kind, submitLabel, onSubmit, onCancel }) {
-  const { catalog } = useSession();
+  const { catalog, me } = useSession();
   const [v, setV] = useState({
     name: initial.name ?? '',
     allowed_models: initial.allowed_models ?? [],
@@ -204,6 +205,7 @@ export function PolicyForm({ initial = {}, kind, submitLabel, onSubmit, onCancel
     budget_period: initial.budget?.period ?? 'monthly',
     alert_at: alertAtText(initial.budget?.alert_at),
     expires_at: initial.expires_at ? initial.expires_at.slice(0, 10) : '',
+    log_bodies: initial.log_bodies === undefined || initial.log_bodies === null ? '' : String(initial.log_bodies),
   });
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -220,6 +222,7 @@ export function PolicyForm({ initial = {}, kind, submitLabel, onSubmit, onCancel
       rpm: Number(v.rpm) || 0,
       tpm: Number(v.tpm) || 0,
       budget: v.budget_amount === '' ? null : { amount_usd: Number(v.budget_amount), period: v.budget_period },
+      log_bodies: v.log_bodies === '' ? null : v.log_bodies === 'true',
     };
     if (body.budget && v.alert_at.trim()) {
       const at = parseAlertAt(v.alert_at);
@@ -266,6 +269,11 @@ export function PolicyForm({ initial = {}, kind, submitLabel, onSubmit, onCancel
     </div>
     ${v.budget_amount !== '' && html`<${Field} label="Alert at (% of budget)" hint="For example 50, 80, 100. Empty uses the gateway's thresholds; off sends no budget alerts.">
       <input value=${v.alert_at} placeholder="Gateway default" onInput=${set('alert_at')} />
+    <//>`}
+    ${(me.body_logging || v.log_bodies !== '') && html`<${Field} label="Log request bodies" hint="Stores redacted, encrypted request and response content. The most specific setting wins.">
+      <select value=${v.log_bodies} onChange=${set('log_bodies')}>
+        <option value="">${kind === 'org' ? 'Off (default)' : 'Inherit'}</option><option value="true">On</option><option value="false">Off</option>
+      </select>
     <//>`}
     ${kind === 'key' && html`<${Field} label="Expires" hint="Empty for no expiry."><input type="date" value=${v.expires_at} onInput=${set('expires_at')} /><//>`}
     <footer>

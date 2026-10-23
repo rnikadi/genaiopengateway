@@ -8,6 +8,7 @@ import { Usage } from './pages/usage.js';
 import { MCP } from './pages/mcp.js';
 import { Models } from './pages/models.js';
 import { Audit } from './pages/audit.js';
+import { Requests, RequestBody } from './pages/requests.js';
 
 const routes = [
   [/^\/$/, Overview, 'overview'],
@@ -15,6 +16,8 @@ const routes = [
   [/^\/orgs\/([^/]+)$/, Org, 'orgs'],
   [/^\/teams\/([^/]+)$/, Team, 'orgs'],
   [/^\/usage$/, Usage, 'usage'],
+  [/^\/requests$/, Requests, 'requests'],
+  [/^\/requests\/([^/]+)$/, RequestBody, 'requests'],
   [/^\/mcp$/, MCP, 'mcp'],
   [/^\/models$/, Models, 'models'],
   [/^\/audit$/, Audit, 'audit'],
@@ -24,6 +27,7 @@ const nav = [
   ['overview', '#/', 'Overview'],
   ['orgs', '#/orgs', 'Organizations'],
   ['usage', '#/usage', 'Usage'],
+  ['requests', '#/requests', 'Requests'],
   ['mcp', '#/mcp', 'MCP'],
   ['models', '#/models', 'Models'],
   ['audit', '#/audit', 'Audit log'],

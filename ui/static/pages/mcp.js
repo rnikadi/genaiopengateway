@@ -154,6 +154,7 @@ function Calls() {
         { label: 'Who', render: (c) => c.subject || c.key_id },
         { label: 'Result', render: (c) => (c.status === 'ok' ? html`<span class="badge good">OK</span>` : html`<span class="badge bad" title=${c.error_code || ''}>${c.status}</span>`) },
         { label: 'Latency', num: true, render: (c) => `${num(c.latency_ms)} ms` },
+        { label: 'Body', render: (c) => (c.has_body && s.canWrite(c.org_id) ? html`<a href=${`#/requests/${encodeURIComponent(c.request_id)}`}>View</a>` : '') },
       ]}
     />
     ${list.more && html`<p class="center"><button class="secondary" onClick=${() => load(list.items[list.items.length - 1].id)}>Load more</button></p>`}
