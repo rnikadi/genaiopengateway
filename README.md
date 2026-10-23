@@ -51,6 +51,25 @@ curl -s -H "$ADMIN" "localhost:8080/admin/v1/usage?org_id=$ORG&group_by=team"
 
 Every change is recorded in the audit log (`GET /admin/v1/audit`).
 
+## MCP gateway
+
+Put remote MCP servers behind the gateway and give each team a curated **virtual server**: chosen tools from one or more upstreams, upstream credentials held by the gateway, and the same keys, policies, rate limits and telemetry as models.
+
+```yaml
+mcp:
+  servers:
+    github:
+      url: https://api.githubcopilot.com/mcp/
+      headers: {Authorization: "Bearer ${GITHUB_MCP_TOKEN}"}
+  virtual_servers:
+    engineering:
+      servers:
+        - server: github
+          tools: [search_code, get_file_contents]
+```
+
+Clients connect to `http://localhost:8080/mcp/engineering` with a gateway key, or with an access token from your identity provider when `mcp.oauth` is set. Tool definitions are pinned: a tool whose description changes after approval is hidden until an admin approves it again. Every call is recorded (`GET /admin/v1/mcp/calls`). See [docs/mcp.md](docs/mcp.md).
+
 ## Observability
 
 Prometheus metrics are at `/metrics` (or on `metrics.listen`), one JSON log line is written per request, and traces are exported over OTLP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. See [observability](docs/observability.md).

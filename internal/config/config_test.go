@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -123,5 +124,23 @@ func TestExampleConfigIsValid(t *testing.T) {
 	}
 	if _, err := Parse(raw); err != nil {
 		t.Fatal(err)
+	}
+
+	// The commented-out sections must be valid once uncommented.
+	t.Setenv("GATEWAY_ADMIN_TOKEN", strings.Repeat("a", 32))
+	t.Setenv("GITHUB_MCP_TOKEN", "ghp_test")
+	section := regexp.MustCompile(`^# ( |[a-z_]+:)`)
+	lines := strings.Split(string(raw), "\n")
+	for i, l := range lines {
+		if section.MatchString(l) {
+			lines[i] = l[2:]
+		}
+	}
+	c, err := Parse([]byte(strings.Join(lines, "\n")))
+	if err != nil {
+		t.Fatalf("uncommented example: %v", err)
+	}
+	if c.Store.Driver != "sqlite" || len(c.MCP.VirtualServers) != 1 {
+		t.Fatalf("uncommented example did not enable store and MCP: %+v", c)
 	}
 }
