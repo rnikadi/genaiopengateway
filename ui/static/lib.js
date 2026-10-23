@@ -426,7 +426,7 @@ export function Health({ h }) {
 // Tabs switches between views of one page.
 export function Tabs({ tabs, value, onChange }) {
   return html`<div class="tabs" role="tablist">${Object.entries(tabs).map(
-    ([key, label]) => html`<button role="tab" aria-selected=${key === value} class=${key === value ? 'active' : ''} onClick=${() => onChange(key)}>${label}</button>`,
+    ([key, label]) => html`<button type="button" role="tab" aria-selected=${key === value} class=${key === value ? 'active' : ''} onClick=${() => onChange(key)}>${label}</button>`,
   )}</div>`;
 }
 

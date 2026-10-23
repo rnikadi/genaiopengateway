@@ -195,4 +195,5 @@ ul.alerts .muted { margin-right: 8px; }
 .msg-text { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 2px; }
 .compose { display: flex; gap: 8px; align-items: flex-end; }
 .compose textarea { flex: 1; }
+textarea.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 textarea { width: 100%; font: inherit; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); resize: vertical; box-sizing: border-box; }

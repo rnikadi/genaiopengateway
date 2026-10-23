@@ -1,4 +1,4 @@
-import { html, api, useLoad, Loading, Table, PageHeader, Health, providerTypes } from '../lib.js';
+import { html, api, useSession, useLoad, Loading, Table, PageHeader, Health, providerTypes } from '../lib.js';
 
 const authNames = {
   api_key: 'API key',
@@ -19,9 +19,12 @@ const where = (p) =>
 // Providers lists the upstreams from the gateway's configuration with
 // their health over the last hour (docs/admin-ui-config.md).
 export function Providers() {
+  const s = useSession();
   const state = useLoad(() => api('GET', '/admin/v1/providers'));
   return html`
-    <${PageHeader} title="Providers" sub="Upstreams from the gateway's configuration. Health covers the last hour across every replica. Credentials are never shown." />
+    <${PageHeader} title="Providers" sub="Upstreams from the gateway's configuration. Health covers the last hour across every replica. Credentials are never shown.">
+      ${s.owner && html`<a class="button secondary" href="#/config">Add or change</a>`}
+    <//>
     <${Loading} state=${state}>${(d) => html`<${Table}
       rowKey=${(p) => p.name}
       rows=${d.data}
