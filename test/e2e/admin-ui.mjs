@@ -103,7 +103,7 @@ await step('owner turns on a guardrail and sees it block', async () => {
   assert.deepEqual((await adminAPI('GET', `/admin/v1/orgs/${org.id}`)).guardrails, ['no-pii']);
 
   const team = await adminAPI('POST', `/admin/v1/orgs/${org.id}/teams`, { name: 'guarded' });
-  const { key } = await adminAPI('POST', `/admin/v1/teams/${team.id}/keys`, { name: 'guarded' });
+  const { id: keyID, key } = await adminAPI('POST', `/admin/v1/teams/${team.id}/keys`, { name: 'guarded' });
   const res = await fetch(base + '/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
@@ -120,6 +120,7 @@ await step('owner turns on a guardrail and sees it block', async () => {
   }
   await page.waitForSelector('td .badge:has-text("block")');
   assert.equal(await page.locator('text=jane@example.com').count(), 0, 'matched text is never shown');
+  await adminAPI('POST', `/admin/v1/keys/${keyID}/revoke`); // so cleanup can delete the team
   await ctx.close();
 });
 
