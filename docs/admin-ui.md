@@ -82,7 +82,7 @@ sso:
 3. The roles are resolved. With none, the user sees "no access" and nothing is stored.
 4. A session is created and the user is sent back to the page they asked for (a same-origin path only).
 
-The client is confidential (it has a secret) and only needs the redirect URL registered at the identity provider. Tested with Keycloak, Dex, Okta, Entra ID, Google and Auth0.
+The client is confidential (it has a secret) and only needs the redirect URL registered at the identity provider. It uses only standard OIDC discovery, so any compliant provider works (Keycloak, Dex, Okta, Entra ID, Google, Auth0). The Compose setup tests it against Dex.
 
 ### Without OIDC
 
@@ -123,12 +123,12 @@ Users are not stored beyond their sessions: the identity provider is the source 
 
 - Static files are embedded in the binary with `go:embed` and served at `/ui/` from the main listener, only when the admin API is enabled (a store and either an admin token or SSO).
 - Strict headers on every UI response: `Content-Security-Policy: default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`. No inline scripts or styles, so the policy needs no exceptions.
-- Hashed file names with long cache lifetimes; `index.html` is never cached.
+- Every file is sent with an `ETag` and `Cache-Control: no-cache`, so browsers revalidate cheaply and pick up a new gateway version on the next load without hashed file names or a build step.
 - `ui.enabled: false` turns the UI off while keeping the admin API.
 
 ## Docker Compose
 
-A new `sso` profile adds Dex with two static users (an owner and an organization viewer), so sign-in and roles can be tried and tested locally without an identity provider account.
+An override file, `compose.sso.yaml`, adds Dex with two static users (an owner and an organization viewer) and points the gateway at a config with `sso` set, so sign-in and roles can be tried and tested locally without an identity provider account.
 
 ## Testing
 
