@@ -61,7 +61,7 @@ OpenAI-style endpoints return `{"error": {"message": "...", "type": "<code>", "c
 
 ## Admin API
 
-Base path `/admin/v1`. JSON in and out. Authenticate with `Authorization: Bearer <admin token>`, where the token is set in config (`admin.token`). The admin API is disabled when no token is set or no store is configured. SSO and per-user roles replace the single token in v0.3.
+Base path `/admin/v1`. JSON in and out. Authenticate with `Authorization: Bearer <admin token>`, where the token is set in config (`admin.token`). The admin API is disabled when no token is set or no store is configured. From v0.3 the admin API also accepts a session cookie from the admin UI, with roles; see [admin-ui.md](admin-ui.md#admin-api-changes).
 
 ### Resources
 
