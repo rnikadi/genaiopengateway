@@ -33,6 +33,9 @@ type Metrics struct {
 	mcpToolCalls *prometheus.CounterVec
 	mcpUp        *prometheus.GaugeVec
 	mcpPending   *prometheus.GaugeVec
+
+	alerts          *prometheus.CounterVec
+	alertDeliveries *prometheus.CounterVec
 }
 
 // Model request latencies span milliseconds (embeddings) to minutes
@@ -83,10 +86,17 @@ func NewMetrics(usageErrors func() float64, snapshotAge func() float64) *Metrics
 		mcpPending: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "gog_mcp_tools_pending_approval", Help: "Upstream MCP tools hidden until an admin approves their definition.",
 		}, []string{"server"}),
+		alerts: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "gog_alerts_total", Help: "Alerts raised.",
+		}, []string{"event"}),
+		alertDeliveries: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "gog_alert_deliveries_total", Help: "Alert delivery attempts to webhooks, by result.",
+		}, []string{"webhook", "result"}),
 	}
 	m.reg.MustRegister(
 		m.requests, m.duration, m.ttfb, m.tokens, m.cost, m.fallbacks, m.limitRejection, m.unpriced,
 		m.mcpRequests, m.mcpDuration, m.mcpToolCalls, m.mcpUp, m.mcpPending,
+		m.alerts, m.alertDeliveries,
 		prometheus.NewCounterFunc(prometheus.CounterOpts{
 			Name: "gog_usage_write_errors_total", Help: "Usage records that could not be written to the store.",
 		}, usageErrors),
@@ -200,6 +210,15 @@ func (m *Metrics) SetMCPPendingTools(server string, n int) {
 func (m *Metrics) ForgetMCPUpstream(server string) {
 	m.mcpUp.DeleteLabelValues(server)
 	m.mcpPending.DeleteLabelValues(server)
+}
+
+// ObserveAlert counts a raised alert.
+func (m *Metrics) ObserveAlert(event string) { m.alerts.WithLabelValues(event).Inc() }
+
+// ObserveAlertDelivery counts a delivery result: ok, retried, failed or
+// dropped.
+func (m *Metrics) ObserveAlertDelivery(webhook, result string) {
+	m.alertDeliveries.WithLabelValues(webhook, result).Inc()
 }
 
 func statusClass(status int) string {

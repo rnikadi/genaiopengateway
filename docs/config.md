@@ -35,6 +35,19 @@ sso:                                 # operator sign-in to the admin UI; see adm
 ui:
   enabled: true                      # default when the admin API is enabled
 
+alerts:                              # see alerts.md; needs a store
+  budget_thresholds: [0.5, 0.8, 1.0] # default; shares of each budget
+  webhooks:
+    - name: finance
+      url: https://hooks.example.com/genai   # https, or http to localhost
+      secret: ${ALERT_WEBHOOK_SECRET}        # signs each body (X-GOG-Signature)
+      events: [budget.threshold]             # budget.threshold, mcp.tool_pending, key.expiring
+    - name: platform
+      url: ${SLACK_WEBHOOK_URL}
+      format: slack                          # json (default) or slack
+      events: [budget.threshold, mcp.tool_pending, key.expiring]
+      org: acme                              # only this organization's alerts; omit for all
+
 metrics:
   listen: ":9090"                    # omit to serve /metrics on the main listener
 

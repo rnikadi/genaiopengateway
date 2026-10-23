@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -33,7 +34,44 @@ type Config struct {
 	MCP       MCP                 `yaml:"mcp"`
 	SSO       SSO                 `yaml:"sso"`
 	UI        UI                  `yaml:"ui"`
+	Alerts    Alerts              `yaml:"alerts"`
 }
+
+// Alerts configures budget alerts and the webhooks that receive alerts
+// (docs/alerts.md).
+type Alerts struct {
+	// BudgetThresholds are shares of a budget at which to alert.
+	BudgetThresholds []float64 `yaml:"budget_thresholds"`
+	Webhooks         []Webhook `yaml:"webhooks"`
+}
+
+// Alert events.
+const (
+	EventBudgetThreshold = "budget.threshold"
+	EventMCPToolPending  = "mcp.tool_pending"
+	EventKeyExpiring     = "key.expiring"
+)
+
+// Webhook formats.
+const (
+	FormatJSON  = "json"
+	FormatSlack = "slack"
+)
+
+// Webhook receives alerts.
+type Webhook struct {
+	Name   string   `yaml:"name"`
+	URL    Secret   `yaml:"url"`
+	Secret Secret   `yaml:"secret"`
+	Format string   `yaml:"format"`
+	Events []string `yaml:"events"`
+	// Org limits the webhook to alerts about one organization, by name or
+	// id; empty receives all.
+	Org string `yaml:"org"`
+}
+
+// Wants reports whether the webhook receives an event.
+func (w *Webhook) Wants(event string) bool { return slices.Contains(w.Events, event) }
 
 // TLS enables HTTPS on the main listener when both files are set.
 type TLS struct {
@@ -307,6 +345,7 @@ func Parse(raw []byte) (*Config, error) {
 		Store:   Store{RefreshInterval: Duration(DefaultRefreshInterval)},
 		MCP:     MCP{RefreshInterval: Duration(DefaultMCPRefresh)},
 		SSO:     SSO{SessionTTL: Duration(DefaultSessionTTL)},
+		Alerts:  Alerts{BudgetThresholds: DefaultBudgetThresholds},
 	}
 	if len(doc.Content) > 0 {
 		dec := doc.Content[0]
@@ -416,6 +455,7 @@ func (c *Config) validate() error {
 
 	c.validateMCP(add)
 	c.validateSSO(add)
+	c.validateAlerts(add)
 
 	seen := map[string]bool{}
 	names := map[string]bool{}
@@ -450,6 +490,67 @@ func (c *Config) validate() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// DefaultBudgetThresholds are the shares of a budget that raise alerts.
+var DefaultBudgetThresholds = []float64{0.5, 0.8, 1.0}
+
+func (c *Config) validateAlerts(add func(string, ...any)) {
+	a := &c.Alerts
+	for _, t := range a.BudgetThresholds {
+		if t <= 0 || t > 1 {
+			add("alerts.budget_thresholds values must be above 0 and at most 1, got %v", t)
+		}
+	}
+	names := map[string]bool{}
+	for i := range a.Webhooks {
+		w := &a.Webhooks[i]
+		if w.Name == "" {
+			add("alerts.webhooks[%d]: name is required", i)
+		} else if names[w.Name] {
+			add("alerts.webhooks: name %q is used twice", w.Name)
+		}
+		names[w.Name] = true
+		if !webhookURL(w.URL.Value()) {
+			add("alerts webhook %q: url must be https, or http to localhost", w.Name)
+		}
+		switch w.Format {
+		case "":
+			w.Format = FormatJSON
+		case FormatJSON, FormatSlack:
+		default:
+			add("alerts webhook %q: format must be json or slack, got %q", w.Name, w.Format)
+		}
+		if len(w.Events) == 0 {
+			add("alerts webhook %q: events must list at least one event", w.Name)
+		}
+		for _, e := range w.Events {
+			switch e {
+			case EventBudgetThreshold, EventMCPToolPending, EventKeyExpiring:
+			default:
+				add("alerts webhook %q: unknown event %q", w.Name, e)
+			}
+		}
+	}
+	if len(a.Webhooks) > 0 && c.Store.Driver == "" {
+		add("alerts need a store, to send each alert once")
+	}
+}
+
+// webhookURL allows https, and http only to this machine for development.
+func webhookURL(s string) bool {
+	u, err := url.Parse(s)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	switch u.Scheme {
+	case "https":
+		return true
+	case "http":
+		h := u.Hostname()
+		return h == "localhost" || h == "127.0.0.1" || h == "::1"
+	}
+	return false
 }
 
 func (c *Config) validateSSO(add func(string, ...any)) {

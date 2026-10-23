@@ -114,9 +114,23 @@ func TestAdminKeyLifecycle(t *testing.T) {
 	var audit struct {
 		Data []store.AuditEntry `json:"data"`
 	}
-	e.call("GET", "/admin/v1/audit?org_id="+org.ID, "", 200, &audit)
-	if len(audit.Data) != 4 || audit.Data[0].Action != "key.revoke" || audit.Data[3].Action != "org.create" {
-		t.Fatalf("audit = %+v", audit.Data)
+	// The $15 request spent the key's $10 budget, which raises its three
+	// alerts in the background.
+	var changes []string
+	alerts := 0
+	for deadline := time.Now().Add(5 * time.Second); alerts < 3 && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		e.call("GET", "/admin/v1/audit?org_id="+org.ID, "", 200, &audit)
+		changes, alerts = nil, 0
+		for _, a := range audit.Data {
+			if a.Action == "alert.sent" {
+				alerts++
+			} else {
+				changes = append(changes, a.Action)
+			}
+		}
+	}
+	if strings.Join(changes, ",") != "key.revoke,key.create,team.create,org.create" || alerts != 3 {
+		t.Fatalf("audit = %v and %d alerts", changes, alerts)
 	}
 
 	// Deletes respect the hierarchy.

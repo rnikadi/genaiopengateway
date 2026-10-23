@@ -39,6 +39,9 @@ type Options struct {
 	Record func(store.MCPCall)
 	// Audit appends to the admin audit log; it may be nil.
 	Audit func(context.Context, *store.AuditEntry) error
+	// OnPending, which may be nil, is told when a tool is hidden until
+	// approval: new in strict mode, or changed since it was approved.
+	OnPending func(server, tool, hash string, changed bool)
 }
 
 // Gateway serves every virtual server in the config.

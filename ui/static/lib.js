@@ -202,6 +202,7 @@ export function PolicyForm({ initial = {}, kind, submitLabel, onSubmit, onCancel
     tpm: initial.tpm || '',
     budget_amount: initial.budget?.amount_usd ?? '',
     budget_period: initial.budget?.period ?? 'monthly',
+    alert_at: alertAtText(initial.budget?.alert_at),
     expires_at: initial.expires_at ? initial.expires_at.slice(0, 10) : '',
   });
   const [error, setError] = useState(null);
@@ -220,6 +221,14 @@ export function PolicyForm({ initial = {}, kind, submitLabel, onSubmit, onCancel
       tpm: Number(v.tpm) || 0,
       budget: v.budget_amount === '' ? null : { amount_usd: Number(v.budget_amount), period: v.budget_period },
     };
+    if (body.budget && v.alert_at.trim()) {
+      const at = parseAlertAt(v.alert_at);
+      if (!at) {
+        setError(new Error('Alert at takes percentages such as "50, 80, 100", or "off".'));
+        return;
+      }
+      body.budget.alert_at = at;
+    }
     if (kind === 'key') body.expires_at = v.expires_at ? new Date(v.expires_at + 'T23:59:59Z').toISOString() : null;
     setBusy(true);
     setError(null);
@@ -255,12 +264,31 @@ export function PolicyForm({ initial = {}, kind, submitLabel, onSubmit, onCancel
         </select>
       <//>
     </div>
+    ${v.budget_amount !== '' && html`<${Field} label="Alert at (% of budget)" hint="For example 50, 80, 100. Empty uses the gateway's thresholds; off sends no budget alerts.">
+      <input value=${v.alert_at} placeholder="Gateway default" onInput=${set('alert_at')} />
+    <//>`}
     ${kind === 'key' && html`<${Field} label="Expires" hint="Empty for no expiry."><input type="date" value=${v.expires_at} onInput=${set('expires_at')} /><//>`}
     <footer>
       <button type="button" class="secondary" onClick=${onCancel}>Cancel</button>
       <button type="submit" disabled=${busy}>${busy ? 'Saving…' : submitLabel}</button>
     </footer>
   </form>`;
+}
+
+// Budget alert thresholds are shares of the budget in the API and
+// percentages in the form.
+function alertAtText(a) {
+  if (a === undefined || a === null) return '';
+  return a.length ? a.map((x) => Math.round(x * 100)).join(', ') : 'off';
+}
+
+// parseAlertAt returns shares of the budget, or null when text is not
+// "off" or a list of percentages.
+function parseAlertAt(text) {
+  const t = text.trim().toLowerCase();
+  if (t === 'off') return [];
+  const vals = t.split(/[\s,]+/).map(Number);
+  return vals.every((x) => x > 0 && x <= 100) ? vals.map((x) => x / 100) : null;
 }
 
 // Confirm asks before something that cannot be undone.

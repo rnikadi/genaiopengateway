@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rnikadi/genaiopengateway/internal/alerts"
 	"github.com/rnikadi/genaiopengateway/internal/auth"
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/id"
@@ -67,6 +68,8 @@ type Server struct {
 	sso   *oidcClient
 
 	uiFiles map[string]*uiFile
+
+	notifier *alerts.Notifier
 }
 
 // New builds a server. st may be nil.
@@ -89,9 +92,10 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error)
 		s.ready.Store(true)
 	}
 	s.metrics = telemetry.NewMetrics(s.usageWriteErrors, s.snapshotAge)
+	s.notifier = alerts.New(log, s.client.Transport, mcpgw.Version, s.metrics.ObserveAlertDelivery)
 	mo := mcpgw.Options{Log: log, Transport: s.client.Transport, Limiter: s.limiter, Metrics: s.metrics}
 	if st != nil {
-		mo.Pins, mo.Record, mo.Audit = st, s.calls.Add, st.AppendAudit
+		mo.Pins, mo.Record, mo.Audit, mo.OnPending = st, s.calls.Add, st.AppendAudit, s.toolPending
 	}
 	s.mcp = mcpgw.New(ctx, cfg.MCP, mo)
 	if err := s.Reload(cfg); err != nil {
@@ -143,6 +147,8 @@ func (s *Server) Start(ctx context.Context) {
 	go s.seedBudgets(ctx)
 	go s.refreshLoop(ctx)
 	go s.sessionPruneLoop(ctx)
+	go s.notifier.Run(ctx)
+	go s.keyExpiryLoop(ctx)
 	if retention := s.rt.Load().cfg.Store.UsageRetention.Std(); retention > 0 {
 		go s.pruneLoop(ctx, retention)
 	}
