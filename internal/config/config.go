@@ -113,9 +113,28 @@ func (p Price) IsZero() bool { return p == Price{} }
 
 // MCP configures the MCP gateway. See docs/mcp.md.
 type MCP struct {
+	// PublicURL is the gateway's external URL, used to name each virtual
+	// server as an OAuth protected resource.
+	PublicURL       string                   `yaml:"public_url"`
 	RefreshInterval Duration                 `yaml:"refresh_interval"`
 	Servers         map[string]MCPServer     `yaml:"servers"`
 	VirtualServers  map[string]VirtualServer `yaml:"virtual_servers"`
+	OAuth           *OAuth                   `yaml:"oauth"`
+}
+
+// OAuth accepts access tokens from an external authorization server on
+// MCP endpoints (ADR 0014).
+type OAuth struct {
+	Issuer string `yaml:"issuer"`
+	// JWKSURL overrides discovery from the issuer's metadata.
+	JWKSURL string `yaml:"jwks_url"`
+	// Audience is accepted in addition to each virtual server's URL.
+	Audience string `yaml:"audience"`
+	// Organization is the id of the organization tokens map into.
+	Organization string `yaml:"organization"`
+	// TeamClaim names the claim whose value names the caller's team.
+	TeamClaim string   `yaml:"team_claim"`
+	Scopes    []string `yaml:"scopes"`
 }
 
 // MCPServer is an upstream MCP server reached over Streamable HTTP.
@@ -392,11 +411,32 @@ func (c *Config) validateMCP(add func(string, ...any)) {
 	if m.RefreshInterval < Duration(time.Second) {
 		add("mcp.refresh_interval must be at least 1s")
 	}
+	m.PublicURL = strings.TrimRight(m.PublicURL, "/")
+	if m.PublicURL != "" && !httpURL(m.PublicURL) {
+		add("mcp.public_url must be an http or https URL")
+	}
+	if o := m.OAuth; o != nil {
+		if !httpURL(o.Issuer) {
+			add("mcp.oauth.issuer must be an http or https URL")
+		}
+		if o.JWKSURL != "" && !httpURL(o.JWKSURL) {
+			add("mcp.oauth.jwks_url must be an http or https URL")
+		}
+		if m.PublicURL == "" {
+			add("mcp.oauth needs mcp.public_url, which names each virtual server to clients")
+		}
+		if o.Organization == "" || o.TeamClaim == "" {
+			add("mcp.oauth.organization and mcp.oauth.team_claim are required")
+		}
+		if c.Store.Driver == "" {
+			add("mcp.oauth needs a store, where organizations and teams are kept")
+		}
+	}
 	for name, s := range m.Servers {
 		if !mcpName.MatchString(name) {
 			add("mcp server %q: names use lowercase letters, digits, - and _", name)
 		}
-		if u, err := url.Parse(s.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		if !httpURL(s.URL) {
 			add("mcp server %q: url must be an http or https URL", name)
 		}
 		if s.Timeout <= 0 {
@@ -434,6 +474,11 @@ func (c *Config) validateMCP(add func(string, ...any)) {
 			prefixes[p] = true
 		}
 	}
+}
+
+func httpURL(s string) bool {
+	u, err := url.Parse(s)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 // Secret is a string that never prints its value.

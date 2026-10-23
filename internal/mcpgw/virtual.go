@@ -382,6 +382,9 @@ func (g *Gateway) logCall(ctx context.Context, caller *Caller, vs, method string
 	if caller != nil {
 		p := caller.Principal
 		attrs = append(attrs, "request_id", caller.RequestID, "org_id", p.OrgID, "team_id", p.TeamID, "key_id", p.KeyID)
+		if caller.Subject != "" {
+			attrs = append(attrs, "subject", caller.Subject)
+		}
 	}
 	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
 		attrs = append(attrs, "trace_id", sc.TraceID().String())

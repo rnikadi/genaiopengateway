@@ -118,13 +118,23 @@ mcp:
         - server: docs
           prompts: false                            # omit prompts from this upstream
           resources: false                          # omit resources and templates
-  oauth:                                    # optional; see ADR 0014
+  oauth:                                    # optional; needs a store; see below
     issuer: https://login.example.com/
-    audience: https://gateway.example.com/mcp
+    # jwks_url: https://login.example.com/keys  # default: discovered from the issuer
+    audience: api://genaiopengateway        # optional; accepted besides each server's URL
     organization: org_01J...                # tokens map into this organization
     team_claim: groups                      # a claim value naming a team in that organization
     scopes: [mcp]                           # required scopes; advertised in metadata
 ```
+
+### OAuth
+
+With `mcp.oauth` set, MCP endpoints accept access tokens from the company's identity provider besides gateway keys. The gateway is a resource server only (ADR 0014):
+
+- A request without valid credentials gets `401` with `WWW-Authenticate: Bearer resource_metadata="{public_url}/.well-known/oauth-protected-resource/mcp/{name}", scope="…"`. MCP clients follow it to the identity provider.
+- Tokens must be JWTs signed with RS, PS, ES or EdDSA algorithms by a key in the issuer's JWKS, which is discovered from `/.well-known/openid-configuration` or RFC 8414 metadata, cached, and refetched hourly or when a token names an unknown key (at most every 30 seconds).
+- `iss` must equal `issuer`; `exp` is required; one minute of clock skew is allowed. `aud` must name the virtual server (`{public_url}/mcp/{name}`, with or without a trailing slash) or `audience`. Every scope in `scopes` must be in `scope` or `scp`, or the request gets `403` with `error="insufficient_scope"`. `sub` is required and recorded in audit records and logs.
+- The token maps to `organization` and to the first value of `team_claim` (a string or a list) that names a team of that organization, by name or id. A token that names no such team gets `403`. Org and team policies, including `allowed_mcp_servers` and RPM, apply; there is no key level.
 
 Key, team and org policies gain `allowed_mcp_servers`, a list of virtual server names. An empty list allows all, as with `allowed_models`.
 
