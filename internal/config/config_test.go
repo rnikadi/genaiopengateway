@@ -144,3 +144,19 @@ func TestExampleConfigIsValid(t *testing.T) {
 		t.Fatalf("uncommented example did not enable store and MCP: %+v", c)
 	}
 }
+
+func TestComposeConfigIsValid(t *testing.T) {
+	for _, v := range []string{"OPENAI_API_KEY", "ANTHROPIC_API_KEY"} {
+		t.Setenv(v, "")
+	}
+	t.Setenv("GATEWAY_ADMIN_TOKEN", strings.Repeat("a", 32))
+	t.Setenv("GATEWAY_DEV_KEY", "dev-key-0123456789")
+	t.Setenv("OLLAMA_MODEL", "qwen2.5:0.5b")
+	raw, err := os.ReadFile("../../deploy/compose/config.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Parse(raw); err != nil {
+		t.Fatal(err)
+	}
+}

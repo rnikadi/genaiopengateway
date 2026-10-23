@@ -31,8 +31,16 @@ With Docker:
 
 ```
 docker run -p 8080:8080 -v $PWD/config.yaml:/etc/genaiopengateway/config.yaml:ro \
-  -e OPENAI_API_KEY -e ANTHROPIC_API_KEY -e GATEWAY_DEV_KEY ghcr.io/rnikadi/genaiopengateway:0.1
+  -e OPENAI_API_KEY -e ANTHROPIC_API_KEY -e GATEWAY_DEV_KEY ghcr.io/rnikadi/genaiopengateway:0.2
 ```
+
+With Docker Compose, for a full local setup with Postgres, Valkey, an MCP server and optionally a local model, Jaeger and Prometheus:
+
+```
+cd deploy/compose && docker compose up -d
+```
+
+See [deploy/compose](deploy/compose/README.md).
 
 Send `SIGHUP` to reload the config without dropping requests.
 
