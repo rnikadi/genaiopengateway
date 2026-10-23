@@ -27,7 +27,7 @@ This is the threat model as of v0.2. It is reviewed at every minor release.
 | Tampering | Config edited to point a provider at an attacker host | Config file is operator-owned; reloads are logged with a content hash; v0.5 audit covers config changes |
 | Repudiation | An admin deletes a team and denies it | Every admin write is recorded in `audit_log` with actor, action, resource and before/after |
 | Information disclosure | Provider keys leaked in logs, errors or responses | Secrets are typed so they redact themselves when logged; upstream error bodies pass through but upstream request headers never do |
-| Information disclosure | Prompts stored in logs | Request and response bodies are not logged in v0.1. Body logging arrives in v0.3 as opt-in with redaction and retention |
+| Information disclosure | Prompts stored in logs | Request and response bodies are not logged in v0.1. From v0.3, body logging is opt-in per scope, redacted before storage, encrypted, size-bounded and expired after a retention period ([body-logging.md](body-logging.md)) |
 | Information disclosure | Key from one org reads another org's data | Every admin query is scoped by `org_id`; usage queries filter by the caller's scope |
 | Denial of service | Huge bodies or slow clients exhaust memory | `max_request_bytes`, header read timeout, idle timeout, upstream timeouts |
 | Denial of service | One team floods a shared provider quota | Per-key, per-team and per-org RPM and TPM limits; budgets |

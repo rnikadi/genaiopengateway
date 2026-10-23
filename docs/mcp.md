@@ -31,7 +31,7 @@ This document is the design for v0.2. Decisions are recorded in ADRs [0011](adr/
 | --- | --- |
 | stdio servers | Running arbitrary local processes needs sandboxing; planned with hosted servers. Use a stdio-to-HTTP bridge meanwhile. |
 | The deprecated HTTP+SSE transport | Deprecated by the spec since 2025-03-26. |
-| Per-user upstream credentials (upstream OAuth on behalf of each user) | Needs user identities, which arrive with SSO in v0.3. |
+| Per-user upstream credentials (upstream OAuth on behalf of each user) | Designed for v0.3 in [mcp-user-credentials.md](mcp-user-credentials.md). |
 | Server-to-client requests: sampling, elicitation, roots, and the 2026-07-28 multi round-trip results that carry them | Rare in remote servers, and sampling, roots and logging are deprecated by the spec. A tool that needs input gets a clear error. |
 | The tasks extension, completions, subscriptions and list-changed notifications to clients | Clients see changes through `ttlMs` on list results and by listing again. |
 | Admin API for MCP servers | MCP servers are infrastructure, like providers, so they live in config (ADR 0003). Pins and audit are runtime data and do have admin endpoints. |
