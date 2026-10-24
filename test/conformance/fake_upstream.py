@@ -7,7 +7,10 @@ does.
 import email.parser
 import json
 import sys
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from websockets.sync.server import serve
 
 UPSTREAM_MODELS = {"up-chat", "up-embed", "gpt-image-1", "tts-1", "whisper-1", "omni-moderation-latest", "rerank-v3.5", "sora-2"}
 
@@ -104,5 +107,28 @@ def video(id, seconds, status="queued", progress=0, **extra):
             "created_at": 1, "size": "1280x720", "seconds": seconds, **extra}
 
 
+def realtime(ws):
+    """OpenAI's realtime WebSocket: session events and one usage report per
+    response."""
+    req = ws.request
+    if req.headers.get("Authorization") != "Bearer upstream-key" or req.path != "/v1/realtime?model=gpt-realtime":
+        ws.send(json.dumps({"type": "error", "error": {"type": "invalid_request_error", "message": "bad session " + req.path}}))
+        return
+    ws.send(json.dumps({"type": "session.created", "event_id": "e0", "session": {"type": "realtime", "model": "gpt-realtime"}}))
+    for raw in ws:
+        ev = json.loads(raw)
+        if ev["type"] == "session.update":
+            ws.send(json.dumps({"type": "session.updated", "event_id": "e1", "session": ev["session"]}))
+        elif ev["type"] == "response.create":
+            ws.send(json.dumps({"type": "response.done", "event_id": "e2", "response": {
+                "id": "resp_1", "object": "realtime.response", "status": "completed", "output": [],
+                "usage": {"total_tokens": 1500, "input_tokens": 1000, "output_tokens": 500,
+                          "input_token_details": {"cached_tokens": 0, "text_tokens": 200, "audio_tokens": 800},
+                          "output_token_details": {"text_tokens": 100, "audio_tokens": 400}}}}))
+
+
 if __name__ == "__main__":
-    ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_forever()
+    port = int(sys.argv[1])
+    ws = serve(realtime, "127.0.0.1", port + 1)
+    threading.Thread(target=ws.serve_forever, daemon=True).start()
+    ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()

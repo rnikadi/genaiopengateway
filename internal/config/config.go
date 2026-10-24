@@ -248,6 +248,8 @@ type Limiter struct {
 // Limits are global request limits.
 type Limits struct {
 	MaxRequestBytes int64 `yaml:"max_request_bytes"`
+	// MaxRealtimeSession is how long a realtime session may stay open.
+	MaxRealtimeSession Duration `yaml:"max_realtime_session"`
 }
 
 // Provider types.
@@ -305,10 +307,14 @@ type Price struct {
 	PerAudioMinute float64 `yaml:"per_audio_minute" json:"per_audio_minute,omitempty"`
 	PerVideoSecond float64 `yaml:"per_video_second" json:"per_video_second,omitempty"`
 	PerRequest     float64 `yaml:"per_request" json:"per_request,omitempty"`
+	// Audio token prices, for realtime; audio tokens use the token
+	// prices above when they are unset.
+	AudioInputPerMTok  float64 `yaml:"audio_input_per_mtok" json:"audio_input_per_mtok,omitempty"`
+	AudioOutputPerMTok float64 `yaml:"audio_output_per_mtok" json:"audio_output_per_mtok,omitempty"`
 }
 
 func (p Price) negative() bool {
-	return min(p.InputPerMTok, p.OutputPerMTok, p.CachedInputPerMTok, p.PerImage, p.PerMChars, p.PerAudioMinute, p.PerVideoSecond, p.PerRequest) < 0
+	return min(p.InputPerMTok, p.OutputPerMTok, p.CachedInputPerMTok, p.PerImage, p.PerMChars, p.PerAudioMinute, p.PerVideoSecond, p.PerRequest, p.AudioInputPerMTok, p.AudioOutputPerMTok) < 0
 }
 
 // IsZero reports whether no price is configured.
@@ -443,14 +449,16 @@ type StaticKey struct {
 const (
 	DefaultListen          = ":8080"
 	DefaultMaxRequestBytes = 32 << 20
-	DefaultProviderTimeout = 5 * time.Minute
-	DefaultRefreshInterval = 5 * time.Second
-	DefaultMCPRefresh      = time.Minute
-	DefaultMCPTimeout      = time.Minute
-	DefaultMaxUserSessions = 1000
-	DefaultSessionTTL      = 8 * time.Hour
-	MinAdminTokenLength    = 32
-	MinStaticKeyLength     = 16
+	// DefaultMaxRealtimeSession bounds a realtime session.
+	DefaultMaxRealtimeSession = Duration(30 * time.Minute)
+	DefaultProviderTimeout    = 5 * time.Minute
+	DefaultRefreshInterval    = 5 * time.Second
+	DefaultMCPRefresh         = time.Minute
+	DefaultMCPTimeout         = time.Minute
+	DefaultMaxUserSessions    = 1000
+	DefaultSessionTTL         = 8 * time.Hour
+	MinAdminTokenLength       = 32
+	MinStaticKeyLength        = 16
 )
 
 // Load reads and validates a config file.
@@ -474,7 +482,7 @@ func Parse(raw []byte) (*Config, error) {
 func decode(root *yaml.Node) (*Config, error) {
 	c := Config{
 		Listen:      DefaultListen,
-		Limits:      Limits{MaxRequestBytes: DefaultMaxRequestBytes},
+		Limits:      Limits{MaxRequestBytes: DefaultMaxRequestBytes, MaxRealtimeSession: DefaultMaxRealtimeSession},
 		Limiter:     Limiter{Driver: "memory", FailOpenRateLimits: true},
 		Store:       Store{RefreshInterval: Duration(DefaultRefreshInterval)},
 		MCP:         MCP{RefreshInterval: Duration(DefaultMCPRefresh), MaxUserSessions: DefaultMaxUserSessions},
@@ -546,6 +554,9 @@ func (c *Config) validate() error {
 	}
 	if c.Limits.MaxRequestBytes <= 0 {
 		add("limits.max_request_bytes must be positive")
+	}
+	if c.Limits.MaxRealtimeSession <= 0 {
+		add("limits.max_realtime_session must be positive")
 	}
 
 	for name, p := range c.Providers {

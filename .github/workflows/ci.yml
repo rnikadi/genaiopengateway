@@ -108,7 +108,7 @@ jobs:
           python-version: "3.12"
       - name: OpenAI SDK conformance
         run: |
-          pip install openai==2.8.1
+          pip install openai==2.8.1 websockets==15.0.1
           test/conformance/run.sh
 
   helm:

@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/coder/websocket"
+
 	"github.com/rnikadi/genaiopengateway/internal/usage"
 )
 
@@ -35,6 +37,8 @@ const (
 	// named by Request.JobID.
 	Videos     Endpoint = "videos"
 	VideoRemix Endpoint = "videos.remix"
+	// Realtime is a WebSocket session, served by Dialer.
+	Realtime Endpoint = "realtime"
 )
 
 // Multipart reports whether an endpoint takes multipart/form-data
@@ -95,6 +99,13 @@ type Provider interface {
 // body must be closed.
 type Forwarder interface {
 	Forward(ctx context.Context, method, path string) (*http.Response, error)
+}
+
+// Dialer is implemented by adapters that serve realtime sessions. The
+// caller closes the connection; on a refused handshake the response is
+// returned with its body.
+type Dialer interface {
+	DialRealtime(ctx context.Context, model string, header http.Header, subprotocols []string) (*websocket.Conn, *http.Response, error)
 }
 
 // ModelSupporter is implemented by adapters whose endpoints depend on

@@ -16,7 +16,7 @@ All of them use the OpenAI API shape, the one SDKs and most self-hosted servers 
 | `moderations` | `POST /v1/moderations` | JSON | JSON | request |
 | `rerank` | `POST /v1/rerank` | JSON | JSON | request (one search), and tokens when reported |
 | `videos` | `POST /v1/videos`, `GET /v1/videos`, `GET`/`DELETE /v1/videos/{id}`, `GET /v1/videos/{id}/content`, `POST /v1/videos/{id}/remix` | JSON or multipart | JSON; content is the video file | video second |
-| `realtime` | `GET /v1/realtime?model=` (WebSocket) | events | events | tokens, from each `response.done` |
+| `realtime` | `GET /v1/realtime?model=` (WebSocket) | events | events | text and audio tokens, from each `response.done` |
 
 `model` names a virtual model as everywhere else, in the JSON body, the multipart form or, for realtime, the query string. A model whose targets cannot serve an endpoint answers `404 model_not_found`, as today.
 
@@ -38,7 +38,7 @@ The model handler stays the one path for every endpoint. Multipart requests are 
 
 - **Routing and fallback**: unchanged. A video job is created on one target; later calls for that job go to the provider that created it.
 - **Limits and budgets**: requests per minute and budgets apply to every endpoint. Tokens per minute count reported tokens only.
-- **Guardrails**: `input` guardrails check the text a request carries: image prompts, speech input, moderation input, rerank query and documents, and video prompts. `output` guardrails check text responses: transcriptions, translations and JSON results. Audio, image and video bytes are not text and are not checked. Realtime sessions are not checked; the documentation says so where guardrails are set up.
+- **Guardrails**: `input` guardrails check the text a request carries: image prompts, speech input, moderation input, rerank query and documents, and video prompts. `output` guardrails check text responses: transcriptions, translations and JSON results. Audio, image and video bytes are not text and are not checked. Realtime audio cannot be checked, so keys with guardrails are refused realtime.
 - **Body logging**: text bodies are logged as today. Files and binary responses are replaced by a note with their type and size.
 - **Streaming**: SSE responses stream through, and usage is read from the final event.
 
@@ -101,7 +101,16 @@ A caller owns a job when it is in the same organization and team. Static keys fr
 
 ## Realtime
 
-`GET /v1/realtime?model=` upgrades to a WebSocket and opens one to the target, then relays events both ways. The key is read from the `Authorization` header or, for browsers, the `openai-insecure-api-key.<key>` subprotocol. When the session opens, the request limits and budget are checked. Each `response.done` event is charged as a request with its tokens. When a budget runs out, the gateway sends an `error` event and closes the session. One usage record is written per response, so long sessions show up as they go. The session's lifetime is capped by a new `limits.max_realtime_session` setting (default 30 minutes).
+`GET /v1/realtime?model=` upgrades to a WebSocket and relays OpenAI's realtime events between the client and one target.
+
+- **Key**: the `Authorization` header or, for browsers, the `openai-insecure-api-key.<key>` subprotocol, which the gateway removes before dialing upstream.
+- **Opening**: the model allow list, request limits and budgets are checked once, when the session opens. Targets are dialed in order and the next is tried when a dial fails, is refused with 429 or 5xx, or times out; once a session is open it stays on its target. The upstream gets the target's model in the query and the provider's key; the client's `OpenAI-Beta` header is passed on.
+- **Model**: a `session.update` event that names a `model` has it replaced by the target's model, so a client cannot leave the virtual model.
+- **Charging**: each `response.done` event is charged with its `usage` and written as one usage record (endpoint `realtime`), so long sessions show up as they go. Audio tokens are priced by `audio_input_per_mtok` and `audio_output_per_mtok` when set, otherwise as text tokens.
+- **Budgets**: when a charge spends a budget, the gateway sends the client an `error` event with code `budget_exceeded` and closes the session.
+- **Lifetime**: sessions close after `limits.max_realtime_session` (default `30m`), with an `error` event saying so.
+- **Guardrails**: realtime audio cannot be checked, so a key with any guardrail is refused realtime with `400 invalid_request`, as streamed transcripts are. Bodies are not logged.
+- **Log**: one request log line per session (endpoint `realtime`, status 101), written when it closes, with its duration and its responses' tokens and cost.
 
 ## Admin UI
 

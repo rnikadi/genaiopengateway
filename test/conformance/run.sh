@@ -2,7 +2,7 @@
 # Runs the OpenAI SDK conformance check: a fake upstream, the gateway in
 # front of it, and the official SDK calling every endpoint.
 #
-#   pip install openai==2.8.1 && test/conformance/run.sh
+#   pip install openai==2.8.1 websockets==15.0.1 && test/conformance/run.sh
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d)

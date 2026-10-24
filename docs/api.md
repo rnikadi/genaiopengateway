@@ -21,7 +21,7 @@ Request and response bodies follow the [OpenAI API reference](https://platform.o
 | `POST /v1/rerank` | Rerank with `query` and `documents`, the shape of Cohere, Jina and vLLM | v0.8 |
 | `POST /v1/videos`, `POST /v1/videos/{id}/remix` | OpenAI video jobs, JSON or multipart with `input_reference`; charged by the job's `seconds` when it is created | v0.8 |
 | `GET /v1/videos`, `GET`/`DELETE /v1/videos/{id}`, `GET /v1/videos/{id}/content` | The caller's video jobs, at the target that made them. Listing returns each job as last retrieved. Other teams get `404`; these calls are not charged and do not count toward limits | v0.8 |
-| `/v1/realtime` | OpenAI realtime over WebSocket ([modalities.md](modalities.md)) | v0.8, next |
+| `GET /v1/realtime?model=` | OpenAI realtime over WebSocket ([modalities.md](modalities.md)). The key comes in `Authorization` or, from browsers, the `openai-insecure-api-key.<key>` subprotocol. Each `response.done` is charged; a spent budget or `limits.max_realtime_session` ends the session with an `error` event. Refused for keys with guardrails | v0.8 |
 
 ### Authentication
 

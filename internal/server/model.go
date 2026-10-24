@@ -17,6 +17,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/rnikadi/genaiopengateway/internal/auth"
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/guardrail"
 	"github.com/rnikadi/genaiopengateway/internal/limits"
@@ -121,22 +122,8 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 			return
 		}
 
-		d := s.limiter.Admit(r.Context(), p)
-		setRateHeaders(w.Header(), d)
-		if !d.Allowed {
-			if d.Kind != "" {
-				s.metrics.ObserveLimitRejection(d.Scope, d.Kind)
-			}
-			status := http.StatusTooManyRequests
-			if d.Code == limits.CodeUnavailable {
-				status = http.StatusServiceUnavailable
-				s.log.Error("limiter unavailable", "request_id", rec.RequestID, "err", d.Message)
-				d.Message = "limits could not be checked"
-			}
-			if d.RetryAfter > 0 {
-				w.Header().Set("Retry-After", strconv.FormatInt(limits.RetryAfterSeconds(d.RetryAfter), 10))
-			}
-			fail(status, d.Code, d.Message)
+		if status, code, msg, ok := s.admit(w, r, p, rec.RequestID); !ok {
+			fail(status, code, msg)
 			return
 		}
 
@@ -292,6 +279,29 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 			})
 		}
 	}
+}
+
+// admit counts a request against the caller's limits and sets rate
+// limit headers. When it is refused, it returns the error to send.
+func (s *Server) admit(w http.ResponseWriter, r *http.Request, p *auth.Principal, requestID string) (int, string, string, bool) {
+	d := s.limiter.Admit(r.Context(), p)
+	setRateHeaders(w.Header(), d)
+	if d.Allowed {
+		return 0, "", "", true
+	}
+	if d.Kind != "" {
+		s.metrics.ObserveLimitRejection(d.Scope, d.Kind)
+	}
+	status := http.StatusTooManyRequests
+	if d.Code == limits.CodeUnavailable {
+		status = http.StatusServiceUnavailable
+		s.log.Error("limiter unavailable", "request_id", requestID, "err", d.Message)
+		d.Message = "limits could not be checked"
+	}
+	if d.RetryAfter > 0 {
+		w.Header().Set("Retry-After", strconv.FormatInt(limits.RetryAfterSeconds(d.RetryAfter), 10))
+	}
+	return status, d.Code, d.Message, false
 }
 
 // textOutput reports whether an endpoint answers with text that output

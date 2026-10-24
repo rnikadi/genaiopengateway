@@ -168,6 +168,8 @@ const mediaPrices = [
   ['per_audio_minute', 'USD per audio minute (transcription)'],
   ['per_video_second', 'USD per video second'],
   ['per_request', 'USD per request'],
+  ['audio_input_per_mtok', 'USD per million audio input tokens (realtime)'],
+  ['audio_output_per_mtok', 'USD per million audio output tokens (realtime)'],
 ];
 
 function ModelForm({ spec, providers, onChange }) {

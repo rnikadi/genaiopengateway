@@ -25,6 +25,11 @@ type Tokens struct {
 	AudioSeconds float64 `json:"audio_seconds"`
 	// VideoSeconds of video requested.
 	VideoSeconds float64 `json:"video_seconds"`
+	// AudioInputTokens and AudioOutputTokens are the parts of the input
+	// and output tokens that were audio, for audio token prices. They
+	// are not stored.
+	AudioInputTokens  int64 `json:"-"`
+	AudioOutputTokens int64 `json:"-"`
 	// Reported is false when the upstream returned no usage at all.
 	Reported bool `json:"-"`
 }
@@ -39,19 +44,29 @@ func (t Tokens) Total() int64 { return t.InputTokens + t.OutputTokens }
 
 // Cost returns the USD cost of one request that consumed t, at price p.
 // Cached input tokens use the cached price when one is set, otherwise
-// the full input price.
+// the full input price. Audio tokens use the audio prices when set.
 func Cost(t Tokens, p config.Price) float64 {
 	cachedPrice := p.CachedInputPerMTok
 	if cachedPrice == 0 {
 		cachedPrice = p.InputPerMTok
 	}
-	uncached := t.InputTokens - t.CachedInputTokens
-	if uncached < 0 {
-		uncached = 0
+	uncached := max(t.InputTokens-t.CachedInputTokens, 0)
+	output := t.OutputTokens
+	var audio float64
+	if p.AudioInputPerMTok > 0 {
+		n := min(t.AudioInputTokens, uncached)
+		uncached -= n
+		audio += float64(n) * p.AudioInputPerMTok
+	}
+	if p.AudioOutputPerMTok > 0 {
+		n := min(t.AudioOutputTokens, output)
+		output -= n
+		audio += float64(n) * p.AudioOutputPerMTok
 	}
 	return (float64(uncached)*p.InputPerMTok+
 		float64(t.CachedInputTokens)*cachedPrice+
-		float64(t.OutputTokens)*p.OutputPerMTok+
+		float64(output)*p.OutputPerMTok+
+		audio+
 		float64(t.Characters)*p.PerMChars)/1e6 +
 		float64(t.Images)*p.PerImage +
 		t.AudioSeconds/60*p.PerAudioMinute +

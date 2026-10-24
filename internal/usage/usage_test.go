@@ -54,3 +54,17 @@ func TestCost(t *testing.T) {
 		t.Fatalf("cached tokens without a cached price should use the input price, got %v", noCachedPrice)
 	}
 }
+
+func TestCostAudioTokens(t *testing.T) {
+	tok := Tokens{InputTokens: 1_000_000, CachedInputTokens: 100_000, OutputTokens: 500_000, AudioInputTokens: 600_000, AudioOutputTokens: 400_000}
+	// Without audio prices, audio tokens cost as text tokens.
+	if got := Cost(tok, config.Price{InputPerMTok: 4, OutputPerMTok: 16}); math.Abs(got-(1*4+0.5*16)) > 1e-9 {
+		t.Fatalf("text-priced cost = %v", got)
+	}
+	// 300k text in at 4, 100k cached at 4, 600k audio in at 32, 100k text
+	// out at 16 and 400k audio out at 64.
+	got := Cost(tok, config.Price{InputPerMTok: 4, OutputPerMTok: 16, AudioInputPerMTok: 32, AudioOutputPerMTok: 64})
+	if want := 0.3*4 + 0.1*4 + 0.6*32 + 0.1*16 + 0.4*64; math.Abs(got-want) > 1e-9 {
+		t.Fatalf("cost = %v, want %v", got, want)
+	}
+}
