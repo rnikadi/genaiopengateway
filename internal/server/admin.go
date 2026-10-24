@@ -71,6 +71,9 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	h("GET /admin/v1/requests", s.listRequests)
 	h("GET /admin/v1/requests/{request_id}", s.getRequestBody)
 	h("DELETE /admin/v1/requests", s.deleteRequestBodies)
+	h("GET /admin/v1/batches", s.listAdminBatches)
+	h("POST /admin/v1/batches/{id}/cancel", s.cancelAdminBatch)
+	h("GET /admin/v1/videos", s.listAdminVideos)
 }
 
 // apiError is an admin error with an HTTP status.

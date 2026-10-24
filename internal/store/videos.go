@@ -11,16 +11,16 @@ import (
 // VideoJob is a video job created through the gateway. Object is the
 // last job object the upstream returned.
 type VideoJob struct {
-	ID            string
-	OrgID         string
-	TeamID        string
-	KeyID         string
-	Model         string
-	Provider      string
-	UpstreamModel string
-	Object        json.RawMessage
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID            string          `json:"id"`
+	OrgID         string          `json:"org_id"`
+	TeamID        string          `json:"team_id"`
+	KeyID         string          `json:"key_id"`
+	Model         string          `json:"model"`
+	Provider      string          `json:"provider"`
+	UpstreamModel string          `json:"upstream_model"`
+	Object        json.RawMessage `json:"object"`
+	CreatedAt     time.Time       `json:"created_at"`
+	UpdatedAt     time.Time       `json:"updated_at"`
 }
 
 const videoCols = `id, org_id, team_id, key_id, model, provider, upstream_model, object, created_at, updated_at`
@@ -65,11 +65,12 @@ func (s *Store) DeleteVideoJob(ctx context.Context, id string) error {
 	return affected(s.db.ExecContext(ctx, s.q(`DELETE FROM video_jobs WHERE id = ?`), id))
 }
 
-// ListVideoJobs lists a team's jobs, newest first, or one key's when
-// keyID is set. After is the id of the last job of the previous page.
+// ListVideoJobs lists jobs, newest first: one organization's when orgID
+// is set, one team's when teamID is set, and one key's when keyID is set. After is the id
+// of the last job of the previous page.
 func (s *Store) ListVideoJobs(ctx context.Context, orgID, teamID, keyID string, p Page) ([]*VideoJob, bool, error) {
-	query := `SELECT ` + videoCols + ` FROM video_jobs WHERE org_id = ? AND team_id = ? AND (? = '' OR key_id = ?)`
-	args := []any{orgID, teamID, keyID, keyID}
+	query := `SELECT ` + videoCols + ` FROM video_jobs WHERE (? = '' OR org_id = ?) AND (? = '' OR team_id = ?) AND (? = '' OR key_id = ?)`
+	args := []any{orgID, orgID, teamID, teamID, keyID, keyID}
 	if p.After != "" {
 		var created int64
 		err := s.db.QueryRowContext(ctx, s.q(`SELECT created_at FROM video_jobs WHERE id = ?`), p.After).Scan(&created)

@@ -21,6 +21,8 @@ Request and response bodies follow the [OpenAI API reference](https://platform.o
 | `POST /v1/rerank` | Rerank with `query` and `documents`, the shape of Cohere, Jina and vLLM | v0.8 |
 | `POST /v1/videos`, `POST /v1/videos/{id}/remix` | OpenAI video jobs, JSON or multipart with `input_reference`; charged by the job's `seconds` when it is created | v0.8 |
 | `GET /v1/videos`, `GET`/`DELETE /v1/videos/{id}`, `GET /v1/videos/{id}/content` | The caller's video jobs, at the target that made them. Listing returns each job as last retrieved. Other teams get `404`; these calls are not charged and do not count toward limits | v0.8 |
+| `POST /v1/files` (`purpose=batch`), `GET /v1/files`, `GET`/`DELETE /v1/files/{id}`, `GET /v1/files/{id}/content` | Batch input files ([batch.md](batch.md)). An upload is checked line by line, routed by the model its lines name, rewritten to the target's model and kept on that target. Output and error files of the caller's batches download here too. Other teams get `404` | v0.8 |
+| `POST /v1/batches`, `GET /v1/batches`, `GET /v1/batches/{id}`, `POST /v1/batches/{id}/cancel` | OpenAI's Batch API on the input file's target. A batch is charged once, from the usage it reports when it finishes, less the target's `batch_discount` | v0.8 |
 | `GET /v1/realtime?model=` | OpenAI realtime over WebSocket ([modalities.md](modalities.md)). The key comes in `Authorization` or, from browsers, the `openai-insecure-api-key.<key>` subprotocol. Each `response.done` is charged; a spent budget or `limits.max_realtime_session` ends the session with an `error` event. Refused for keys with guardrails | v0.8 |
 
 ### Authentication
@@ -63,11 +65,11 @@ OpenAI-style endpoints return `{"error": {"message": "...", "type": "<code>", "c
 | 401 | `invalid_api_key` | Key missing, unknown, revoked or expired |
 | 403 | `model_not_allowed` | Key, team or organization may not use this model |
 | 404 | `model_not_found` | Virtual model does not exist, or does not support this endpoint |
-| 404 | `not_found` | The video job does not exist or belongs to another team |
-| 413 | `request_too_large` | Body exceeds `limits.max_request_bytes` |
+| 404 | `not_found` | The video job, file or batch does not exist or belongs to another team |
+| 413 | `request_too_large` | Body exceeds `limits.max_request_bytes`, or a batch file `limits.max_batch_file_bytes` |
 | 429 | `rate_limit_exceeded` | A requests or tokens per minute limit was hit; `retry-after` is set |
 | 429 | `budget_exceeded` | A budget for the current period is spent |
-| 501 | `database_required` | Video jobs need `store` configured |
+| 501 | `database_required` | Video jobs, files and batches need `store` configured |
 | 502 | `all_targets_failed` | No target produced a response |
 | 503 | `limiter_unavailable` | Budget state could not be checked and budgets fail closed |
 
@@ -98,6 +100,9 @@ Base path `/admin/v1`. JSON in and out. Authenticate with `Authorization: Bearer
 | `GET /admin/v1/requests/{request_id}` | A request's logged body, decrypted: `request`, `response`, `truncated`, `redactions`. Owners and the organization's admins only; each read is audited as `request_body.read` |
 | `GET /admin/v1/guardrail-events` | Guardrails that matched or failed, newest first; filter with `org_id`, `team_id`, `key_id`, `guardrail`, `action`, `request_id`, `from`, `to`. Never the matched text ([guardrails.md](guardrails.md)) |
 | `DELETE /admin/v1/requests?org_id=&before=` | Delete an organization's bodies logged before a time, for erasure requests. Returns `{"deleted": n}` (owners only, audited) |
+| `GET /admin/v1/batches` | Batches newest first, with owner, model, target, `status`, the last batch `object`, `cost_usd` and `charged_at`; filter with `org_id`, `team_id`, `status` ([batch.md](batch.md)) |
+| `POST /admin/v1/batches/{id}/cancel` | Cancel a batch at its target. Owners and the organization's admins; audited as `batch.cancel` |
+| `GET /admin/v1/videos` | Video jobs newest first, with owner, model, target and the last job `object`; filter with `org_id`, `team_id` |
 | `GET /admin/v1/models` | Virtual models with the endpoints they serve; each target with `provider_type`, `endpoints`, price and last-hour `health` |
 | `GET /admin/v1/providers` | Providers with `type`, `base_url`, `region`, `project`, `location`, `auth`, `timeout`, `header_names`, the `models` using them and last-hour `health`. Never credentials |
 | `GET /admin/v1/guardrails` | Guardrail definitions: `type`, `action`, `stages`, `detect`, `patterns`, `model`, `unsafe_if`, `webhook_host`, `timeout`, `on_error`, and the `virtual_servers` that attach them |

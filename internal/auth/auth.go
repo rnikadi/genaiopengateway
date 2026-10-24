@@ -110,12 +110,27 @@ func (p *Principal) AllowsMCPServer(name string) bool {
 // Directory is an immutable index of principals by key hash.
 type Directory struct {
 	byHash map[string]*Principal
+	byID   map[string]*Principal
 }
 
 // NewDirectory builds a directory from a hash-to-principal map. The map
 // must not be modified afterwards.
 func NewDirectory(byHash map[string]*Principal) *Directory {
-	return &Directory{byHash: byHash}
+	byID := make(map[string]*Principal, len(byHash))
+	for _, p := range byHash {
+		byID[p.KeyID] = p
+	}
+	return &Directory{byHash: byHash, byID: byID}
+}
+
+// ByKeyID returns the principal of a key by its id, for work charged
+// after the request that started it, such as a batch.
+func (d *Directory) ByKeyID(id string) (*Principal, bool) {
+	if d == nil || id == "" {
+		return nil, false
+	}
+	p, ok := d.byID[id]
+	return p, ok
 }
 
 // Lookup resolves a presented secret. Lookups go through the hash, so

@@ -66,6 +66,23 @@ r = client.videos.remix("video_1", prompt="at night")
 check("videos.remix", r.id == "video_1-remix" and r.remixed_from_video_id == "video_1")
 check("videos.delete", client.videos.delete("video_1-remix").deleted is True)
 
+lines = "".join(json.dumps({"custom_id": f"r{i}", "method": "POST", "url": "/v1/chat/completions",
+                            "body": {"model": "chat", "messages": [{"role": "user", "content": "hi"}]}}) + "\n" for i in range(2))
+f = client.files.create(file=("in.jsonl", lines.encode(), "application/jsonl"), purpose="batch")
+check("files.create (batch input, model rewritten)", f.id == "file_1" and f.purpose == "batch")
+check("files.list", [x.id for x in client.files.list().data] == ["file_1"])
+check("files.retrieve", client.files.retrieve("file_1").bytes > 0)
+b = client.batches.create(input_file_id=f.id, endpoint="/v1/chat/completions", completion_window="24h")
+check("batches.create", b.id == "batch_1" and b.status == "validating")
+b = client.batches.retrieve(b.id)
+check("batches.retrieve", b.status == "completed" and b.output_file_id == "file_out" and b.request_counts.completed == 2)
+out = client.files.content(b.output_file_id).text
+check("files.content (batch output)", json.loads(out.splitlines()[0])["custom_id"] == "r0")
+check("batches.list", [x.id for x in client.batches.list().data] == ["batch_1"])
+c = client.batches.create(input_file_id=f.id, endpoint="/v1/chat/completions", completion_window="24h")
+check("batches.cancel", client.batches.cancel(c.id).status == "cancelling")
+check("files.delete", client.files.delete("file_1").deleted is True)
+
 with client.realtime.connect(model="voice") as conn:
     first = conn.recv()
     check("realtime session opens", first.type == "session.created")
@@ -92,7 +109,7 @@ def usage():
 # Usage records are written in batches.
 for _ in range(50):
     rows = usage()
-    if len(rows) >= 12:
+    if len(rows) >= 13:
         break
     time.sleep(0.2)
 check("images metered", rows["images.generations"]["images"] == 2 and rows["images.edits"]["images"] == 1)
@@ -104,4 +121,5 @@ check("video seconds metered", rows["videos"]["video_seconds"] == 16 and rows["v
 check("video cost", abs(rows["videos"]["cost_usd"] - 1.6) < 1e-9)
 check("realtime audio and text cost", abs(rows["realtime"]["cost_usd"] - 0.0536) < 1e-9 and rows["realtime"]["input_tokens"] == 1000)
 check("rerank cost", abs(rows["rerank"]["cost_usd"] - 0.002) < 1e-9)
+check("batch charged once at the batch discount", rows["batches"]["requests"] == 1 and abs(rows["batches"]["cost_usd"] - 0.001) < 1e-9)
 print("conformance: all checks passed")

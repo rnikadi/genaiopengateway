@@ -49,7 +49,7 @@ mcp:
 `
 
 // openAIMedia lists the media endpoints an OpenAI-compatible provider serves.
-const openAIMedia = "images.generations,images.edits,audio.speech,audio.transcriptions,audio.translations,moderations,rerank,videos,realtime"
+const openAIMedia = "images.generations,images.edits,audio.speech,audio.transcriptions,audio.translations,moderations,rerank,videos,realtime,batches"
 
 func TestConfigView(t *testing.T) {
 	e := newAdminEnvConfig(t, configViewConfig)

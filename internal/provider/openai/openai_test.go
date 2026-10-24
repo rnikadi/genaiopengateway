@@ -161,7 +161,7 @@ func TestVideoRemixAndForward(t *testing.T) {
 	if resp.StatusCode != 200 || resp.Usage.VideoSeconds != 8 {
 		t.Fatalf("status %d, usage %+v", resp.StatusCode, *resp.Usage)
 	}
-	got, err := p.Forward(context.Background(), http.MethodGet, "/videos/video_2/content?variant=thumbnail")
+	got, err := p.Forward(context.Background(), http.MethodGet, "/videos/video_2/content?variant=thumbnail", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

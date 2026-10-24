@@ -189,6 +189,18 @@ await step('owner sees everything the gateway is configured with', async () => {
   await ctx.close();
 });
 
+await step('owner opens batches and video jobs', async () => {
+  const { ctx, page } = await signIn('owner@example.com');
+  await page.click('nav >> text=Jobs');
+  await page.waitForSelector('[role=tab][aria-selected=true]:has-text("Batches")');
+  await page.waitForSelector('text=No batches yet');
+  await page.selectOption('label:has-text("Status") select', 'completed');
+  await page.waitForSelector('text=No batches yet');
+  await page.click('[role=tab]:has-text("Video jobs")');
+  await page.waitForSelector('text=No video jobs yet');
+  await ctx.close();
+});
+
 await step('owner adds a provider and a model from the UI', async () => {
   const { ctx, page } = await signIn('owner@example.com');
   const provider = `e2e-${run}`;

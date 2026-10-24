@@ -136,6 +136,8 @@ Stream checks that release text as it arrives and cut the stream off on a match 
 
 On the media endpoints ([modalities.md](modalities.md)) guardrails check text only. `input` checks see image and video prompts, speech input, moderation input, and rerank queries and documents. `output` checks see transcripts and translations, as JSON or as text, SRT or WebVTT; a streamed transcript is refused while an `output` guardrail applies, since its text reaches the client as it is spoken. Images, audio and video are not text and pass unchecked. Realtime sessions carry audio that cannot be checked, so keys with any guardrail are refused realtime.
 
+Batch input files ([batch.md](batch.md)) are checked line by line with `input` guardrails when they are uploaded: a block rejects the file and names the request, and a redaction changes the line that is uploaded. Batch results come back as a file, so keys with an `output` guardrail are refused batches.
+
 ## What is recorded
 
 - **Response header** `X-Gog-Guardrails` on model calls, listing the guardrails that acted, for example `deny-terms=log, no-pii=redact`.

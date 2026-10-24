@@ -418,6 +418,7 @@ export const endpointNames = {
   videos: 'Videos',
   'videos.remix': 'Video remix',
   realtime: 'Realtime',
+  batches: 'Batch',
 };
 
 // priceText describes a target's price: tokens per million, and media
@@ -433,6 +434,7 @@ export function priceText(p) {
   if (p.per_video_second) parts.push(`$${p.per_video_second} per video second`);
   if (p.per_request) parts.push(`$${p.per_request} per request`);
   if (p.audio_input_per_mtok || p.audio_output_per_mtok) parts.push(`audio $${p.audio_input_per_mtok || 0} / $${p.audio_output_per_mtok || 0} per M`);
+  if (p.batch_discount) parts.push(`${p.batch_discount * 100}% off in batches`);
   return parts.length ? parts.join(' · ') : 'No price';
 }
 

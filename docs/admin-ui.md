@@ -30,6 +30,7 @@ v0.3 adds a web UI for operators, sign-in through the company's identity provide
 | Key | Limits, expiry, revoke; the secret is shown once, on create | `keys/{id}`, `keys/{id}/revoke` |
 | Usage | Filter by organization, team, key and dates; group by model, team, key, day, provider or endpoint; chart, table and CSV download | `usage` |
 | MCP | Upstream servers and their status, virtual servers, tools with pin status; review a tool's definition and approve it; users' connections to per-user servers, with revoke (owners); call records | `mcp/*` |
+| Jobs | Batches and video jobs of an organization: team, model, target, status, request counts and cost; cancelling a running batch (owners and organization admins; audited). Metadata only, never file contents ([batch.md](batch.md)) | `jobs` |
 | Requests | Recent model requests; for those with a logged body, the redacted request and response (owners and organization admins; each view is audited); deleting an organization's bodies before a date (owners) | `requests` |
 | Guardrails | Events: what guardrails blocked, redacted or logged, by organization and action, never the matched text ([guardrails.md](guardrails.md)). Definitions: each guardrail's checks, action, stages and error handling | `guardrail-events`, `guardrails` |
 | Audit log | Who changed what, filterable | `audit` |

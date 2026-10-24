@@ -27,6 +27,13 @@ def multipart_fields(content_type, body):
     return fields, files
 
 
+# Uploaded files, by id, and the batch output file.
+FILES = {"file_out": b'{"id":"r","custom_id":"r0","response":{"status_code":200,"body":{}},"error":null}\n'}
+BATCHES = []
+BATCH_USAGE = {"input_tokens": 1000, "output_tokens": 500, "total_tokens": 1500,
+               "input_tokens_details": {"cached_tokens": 0}, "output_tokens_details": {"reasoning_tokens": 0}}
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
@@ -45,9 +52,18 @@ class Handler(BaseHTTPRequestHandler):
         if ctype.startswith("multipart/"):
             body, files = multipart_fields(ctype, raw)
         else:
-            body, files = json.loads(raw), {}
+            body, files = json.loads(raw or b"{}"), {}
         if self.headers.get("Authorization") != "Bearer upstream-key":
             return self.reply(401, {"error": {"message": "bad upstream key"}})
+        if self.path == "/v1/files":
+            return self.upload(body, files)
+        if self.path == "/v1/batches":
+            if body.get("input_file_id") not in FILES or body.get("endpoint") != "/v1/chat/completions":
+                return self.reply(400, {"error": {"message": f"bad batch {body}"}})
+            BATCHES.append(body["input_file_id"])
+            return self.reply(200, batch(f"batch_{len(BATCHES)}", "validating", body["input_file_id"]))
+        if self.path.startswith("/v1/batches/") and self.path.endswith("/cancel"):
+            return self.reply(200, batch(self.path.split("/")[3], "cancelling", "file_1"))
         if self.path.startswith("/v1/videos/") and self.path.endswith("/remix"):
             # A remix takes only a prompt, as OpenAI's does.
             if set(body) != {"prompt"}:
@@ -86,11 +102,31 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"id": "r", "results": [{"index": 0, "relevance_score": 0.9}], "meta": {"billed_units": {"search_units": 1}}})
         return self.reply(404, {"error": {"message": "unknown path " + path}})
 
+    def upload(self, body, files):
+        """A batch input file: every line must name the upstream model."""
+        if body.get("purpose") != "batch" or "file" not in files:
+            return self.reply(400, {"error": {"message": "bad upload"}})
+        for line in files["file"].decode().splitlines():
+            if json.loads(line)["body"]["model"] != "up-chat":
+                return self.reply(400, {"error": {"message": "the model was not rewritten: " + line}})
+        fid = f"file_{len(FILES)}"
+        FILES[fid] = files["file"]
+        return self.reply(200, file_object(fid, len(files["file"])))
+
     def do_GET(self):
         if self.headers.get("Authorization") != "Bearer upstream-key":
             return self.reply(401, {"error": {"message": "bad upstream key"}})
         path, _, query = self.path.partition("?")
         parts = path.split("/")
+        if len(parts) >= 4 and parts[2] == "files":
+            if parts[3] not in FILES:
+                return self.reply(404, {"error": {"message": "no file " + parts[3]}})
+            if len(parts) == 5 and parts[4] == "content":
+                return self.reply(200, FILES[parts[3]], "application/octet-stream")
+            return self.reply(200, file_object(parts[3], len(FILES[parts[3]])))
+        if len(parts) == 4 and parts[2] == "batches":
+            return self.reply(200, batch(parts[3], "completed", "file_1", output_file_id="file_out",
+                                         request_counts={"total": 2, "completed": 2, "failed": 0}, usage=BATCH_USAGE))
         if len(parts) == 5 and parts[4] == "content":
             return self.reply(200, b"fake-" + query.encode(), "video/mp4")
         if len(parts) == 4 and parts[2] == "videos":
@@ -99,7 +135,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         parts = self.path.split("/")
+        if parts[2] == "files":
+            return self.reply(200, {"id": parts[3], "object": "file", "deleted": FILES.pop(parts[3], None) is not None})
         return self.reply(200, {"id": parts[3], "object": "video.deleted", "deleted": True})
+
+
+def file_object(id, size):
+    return {"id": id, "object": "file", "bytes": size, "created_at": 1, "filename": "in.jsonl", "purpose": "batch", "status": "processed"}
+
+
+def batch(id, status, input_file_id, **extra):
+    return {"id": id, "object": "batch", "endpoint": "/v1/chat/completions", "input_file_id": input_file_id,
+            "completion_window": "24h", "status": status, "created_at": 1, **extra}
 
 
 def video(id, seconds, status="queued", progress=0, **extra):

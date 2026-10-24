@@ -39,6 +39,9 @@ const (
 	VideoRemix Endpoint = "videos.remix"
 	// Realtime is a WebSocket session, served by Dialer.
 	Realtime Endpoint = "realtime"
+	// Batches is the Batch API with its input files (docs/batch.md),
+	// served by Forwarder, not Send.
+	Batches Endpoint = "batches"
 )
 
 // Multipart reports whether an endpoint takes multipart/form-data
@@ -94,11 +97,12 @@ type Provider interface {
 }
 
 // Forwarder is implemented by adapters that serve calls on upstream
-// objects, such as video jobs, which are not model requests. Path is
-// below the provider's base URL and may carry a query. The response
-// body must be closed.
+// objects, such as video jobs and batches, which are not model requests.
+// Path is below the provider's base URL and may carry a query. Body may
+// be nil; contentType is set when it is not empty. The response body
+// must be closed.
 type Forwarder interface {
-	Forward(ctx context.Context, method, path string) (*http.Response, error)
+	Forward(ctx context.Context, method, path string, body io.Reader, contentType string) (*http.Response, error)
 }
 
 // Dialer is implemented by adapters that serve realtime sessions. The

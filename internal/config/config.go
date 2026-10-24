@@ -250,6 +250,9 @@ type Limits struct {
 	MaxRequestBytes int64 `yaml:"max_request_bytes"`
 	// MaxRealtimeSession is how long a realtime session may stay open.
 	MaxRealtimeSession Duration `yaml:"max_realtime_session"`
+	// MaxBatchFileBytes bounds a batch input file, which the gateway
+	// reads into memory to check (docs/batch.md).
+	MaxBatchFileBytes int64 `yaml:"max_batch_file_bytes"`
 }
 
 // Provider types.
@@ -311,10 +314,13 @@ type Price struct {
 	// prices above when they are unset.
 	AudioInputPerMTok  float64 `yaml:"audio_input_per_mtok" json:"audio_input_per_mtok,omitempty"`
 	AudioOutputPerMTok float64 `yaml:"audio_output_per_mtok" json:"audio_output_per_mtok,omitempty"`
+	// BatchDiscount is the fraction taken off batch requests, such as 0.5
+	// for half price (docs/batch.md).
+	BatchDiscount float64 `yaml:"batch_discount" json:"batch_discount,omitempty"`
 }
 
 func (p Price) negative() bool {
-	return min(p.InputPerMTok, p.OutputPerMTok, p.CachedInputPerMTok, p.PerImage, p.PerMChars, p.PerAudioMinute, p.PerVideoSecond, p.PerRequest, p.AudioInputPerMTok, p.AudioOutputPerMTok) < 0
+	return min(p.InputPerMTok, p.OutputPerMTok, p.CachedInputPerMTok, p.PerImage, p.PerMChars, p.PerAudioMinute, p.PerVideoSecond, p.PerRequest, p.AudioInputPerMTok, p.AudioOutputPerMTok, p.BatchDiscount) < 0
 }
 
 // IsZero reports whether no price is configured.
@@ -451,6 +457,7 @@ const (
 	DefaultMaxRequestBytes = 32 << 20
 	// DefaultMaxRealtimeSession bounds a realtime session.
 	DefaultMaxRealtimeSession = Duration(30 * time.Minute)
+	DefaultMaxBatchFileBytes  = 100 << 20
 	DefaultProviderTimeout    = 5 * time.Minute
 	DefaultRefreshInterval    = 5 * time.Second
 	DefaultMCPRefresh         = time.Minute
@@ -482,7 +489,7 @@ func Parse(raw []byte) (*Config, error) {
 func decode(root *yaml.Node) (*Config, error) {
 	c := Config{
 		Listen:      DefaultListen,
-		Limits:      Limits{MaxRequestBytes: DefaultMaxRequestBytes, MaxRealtimeSession: DefaultMaxRealtimeSession},
+		Limits:      Limits{MaxRequestBytes: DefaultMaxRequestBytes, MaxRealtimeSession: DefaultMaxRealtimeSession, MaxBatchFileBytes: DefaultMaxBatchFileBytes},
 		Limiter:     Limiter{Driver: "memory", FailOpenRateLimits: true},
 		Store:       Store{RefreshInterval: Duration(DefaultRefreshInterval)},
 		MCP:         MCP{RefreshInterval: Duration(DefaultMCPRefresh), MaxUserSessions: DefaultMaxUserSessions},
@@ -558,6 +565,9 @@ func (c *Config) validate() error {
 	if c.Limits.MaxRealtimeSession <= 0 {
 		add("limits.max_realtime_session must be positive")
 	}
+	if c.Limits.MaxBatchFileBytes <= 0 {
+		add("limits.max_batch_file_bytes must be positive")
+	}
 
 	for name, p := range c.Providers {
 		switch p.Type {
@@ -608,6 +618,9 @@ func (c *Config) validate() error {
 			}
 			if t.Price.negative() {
 				add("model %q target %d: prices must not be negative", name, i)
+			}
+			if t.Price.BatchDiscount > 1 {
+				add("model %q target %d: batch_discount must be between 0 and 1", name, i)
 			}
 		}
 	}
