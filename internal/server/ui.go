@@ -42,7 +42,9 @@ func loadUI() map[string]*uiFile {
 
 // uiHeaders are set on every admin UI response (docs/admin-ui.md#serving-the-ui).
 func uiHeaders(h http.Header) {
-	h.Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+	// The playground shows generated images, inline or at the provider's
+	// URL, and plays generated speech from a blob.
+	h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob: https:; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "same-origin")
 	h.Set("X-Frame-Options", "DENY")
