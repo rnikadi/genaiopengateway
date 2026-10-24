@@ -189,6 +189,31 @@ await step('owner sees everything the gateway is configured with', async () => {
   await ctx.close();
 });
 
+await step('owner turns on the response cache and clears it', async () => {
+  const { ctx, page } = await signIn('owner@example.com');
+  const org = (await adminAPI('GET', '/admin/v1/orgs?limit=500')).data.find((o) => o.name === orgName);
+  const team = await adminAPI('POST', `/admin/v1/orgs/${org.id}/teams`, { name: 'cached' });
+  await page.goto(`${base}/ui/#/teams/${team.id}`);
+  await page.click('button:has-text("Edit policy")');
+  await page.selectOption('.modal label:has-text("Response cache") select', 'exact');
+  await page.fill('.modal label:has-text("Reuse answers for") input', '10m');
+  await page.click('.modal button[type=submit]');
+  await page.waitForSelector('.modal', { state: 'detached' });
+  assert.deepEqual((await adminAPI('GET', `/admin/v1/teams/${team.id}`)).cache, { mode: 'exact', ttl: '10m' });
+  await page.waitForSelector('text=Exact cache 10m');
+
+  // The compose stack has no live upstream, so hits and savings are
+  // checked by the Go and SDK conformance tests; here the team's cache
+  // is cleared from its page.
+  await page.goto(`${base}/ui/#/teams/${team.id}`);
+  await page.click('button:has-text("Clear cache")');
+  await page.click('.modal button:has-text("Clear cache")');
+  await page.waitForSelector('text=Cleared 0 cached answers.');
+  const audit = await adminAPI('GET', `/admin/v1/audit?org_id=${org.id}`);
+  assert.equal(audit.data[0].action, 'cache.clear');
+  await ctx.close();
+});
+
 await step('owner opens batches and video jobs', async () => {
   const { ctx, page } = await signIn('owner@example.com');
   await page.click('nav >> text=Jobs');

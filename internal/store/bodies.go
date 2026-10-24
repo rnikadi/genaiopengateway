@@ -135,6 +135,7 @@ type RequestRow struct {
 	InputTokens   int64     `json:"input_tokens"`
 	OutputTokens  int64     `json:"output_tokens"`
 	CostUSD       float64   `json:"cost_usd"`
+	CacheHit      bool      `json:"cache_hit"`
 	HasBody       bool      `json:"has_body"`
 }
 
@@ -159,7 +160,7 @@ func (s *Store) ListRequests(ctx context.Context, rq RequestQuery, p Page) ([]*R
 		args = append(args, p.After, p.After, p.After)
 	}
 	query := `SELECT u.request_id, u.ts, u.org_id, u.team_id, u.key_id, u.endpoint, u.model, u.provider, u.upstream_model,
-		u.status, u.latency_ms, u.input_tokens, u.output_tokens, u.cost_usd,
+		u.status, u.latency_ms, u.input_tokens, u.output_tokens, u.cost_usd, u.cache_hit,
 		EXISTS (SELECT 1 FROM request_bodies b WHERE b.request_id = u.request_id AND b.org_id = u.org_id)
 		FROM usage u`
 	if len(where) > 0 {
@@ -174,7 +175,7 @@ func (s *Store) ListRequests(ctx context.Context, rq RequestQuery, p Page) ([]*R
 		var r RequestRow
 		var ts int64
 		if err := row.Scan(&r.RequestID, &ts, &r.OrgID, &r.TeamID, &r.KeyID, &r.Endpoint, &r.Model, &r.Provider, &r.UpstreamModel,
-			&r.Status, &r.LatencyMS, &r.InputTokens, &r.OutputTokens, &r.CostUSD, &r.HasBody); err != nil {
+			&r.Status, &r.LatencyMS, &r.InputTokens, &r.OutputTokens, &r.CostUSD, &r.CacheHit, &r.HasBody); err != nil {
 			return nil, err
 		}
 		r.Time = toTime(ts)

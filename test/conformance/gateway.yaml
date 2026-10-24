@@ -19,3 +19,4 @@ models:
   video: {targets: [{provider: up, model: sora-2, price: {per_video_second: 0.1}}]}
 keys:
   - {name: conformance, key: conformance-key-0000000000}
+  - {name: cached, key: conformance-cached-key-000000, cache: {mode: exact, ttl: 1h}}

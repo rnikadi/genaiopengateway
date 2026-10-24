@@ -25,8 +25,8 @@ export function Usage({ params }) {
   const csv = (rows) =>
     downloadCSV(
       `usage-${f.group_by}-${f.period}.csv`,
-      [f.group_by, 'requests', 'input_tokens', 'output_tokens', 'cached_input_tokens', 'reasoning_tokens', 'images', 'characters', 'audio_seconds', 'video_seconds', 'cost_usd'],
-      rows.map((r) => [r.group, r.requests, r.input_tokens, r.output_tokens, r.cached_input_tokens, r.reasoning_tokens, r.images, r.characters, r.audio_seconds, r.video_seconds, r.cost_usd]),
+      [f.group_by, 'requests', 'input_tokens', 'output_tokens', 'cached_input_tokens', 'reasoning_tokens', 'images', 'characters', 'audio_seconds', 'video_seconds', 'cost_usd', 'cache_hits', 'saved_usd'],
+      rows.map((r) => [r.group, r.requests, r.input_tokens, r.output_tokens, r.cached_input_tokens, r.reasoning_tokens, r.images, r.characters, r.audio_seconds, r.video_seconds, r.cost_usd, r.cache_hits, r.saved_usd]),
     );
 
   return html`
@@ -57,6 +57,7 @@ export function Usage({ params }) {
           <${Card} label="Input tokens" value=${compact(t.input_tokens)} sub=${`${compact(t.cached_input_tokens)} cached`} />
           <${Card} label="Output tokens" value=${compact(t.output_tokens)} sub=${`${compact(t.reasoning_tokens)} reasoning`} />
           ${mediaSummary(t) && html`<${Card} label="Media" value=${mediaSummary(t)} />`}
+          ${t.cache_hits > 0 && html`<${Card} label="Cache saved" value=${usd(t.saved_usd)} sub=${`${num(t.cache_hits)} answer${t.cache_hits === 1 ? '' : 's'} from the cache`} />`}
         </div>
         <section class="panel">
           <h2>Spend by ${groups[f.group_by].toLowerCase()}</h2>
@@ -76,6 +77,10 @@ export function Usage({ params }) {
               { label: 'Output tokens', num: true, render: (r) => num(r.output_tokens) },
               ...(d.data.some((r) => mediaSummary(r)) ? [{ label: 'Media', render: (r) => html`<span class="small">${mediaSummary(r)}</span>` }] : []),
               { label: 'Spend', num: true, render: (r) => usd(r.cost_usd) },
+              ...(t.cache_hits > 0 ? [
+                { label: 'Cache hits', num: true, render: (r) => num(r.cache_hits) },
+                { label: 'Saved', num: true, render: (r) => usd(r.saved_usd) },
+              ] : []),
             ]}
           />
         </section>`;

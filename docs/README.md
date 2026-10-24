@@ -15,6 +15,7 @@
 | [Playground](playground.md) | Calling a model as a team from the admin UI |
 | [Images, audio, video and realtime](modalities.md) | Media endpoints, how they are metered and priced, and the rollout |
 | [Batch and files](batch.md) | The Batch API through the gateway: checked uploads, ownership, charging once, the Jobs page |
+| [Response cache](cache.md) | Exact and semantic caching per team: keys, guardrails, metering, the admin UI |
 | [Admin UI: editing configuration](admin-ui-config-editing.md) | Providers, models, guardrails, MCP servers and webhooks stored through the admin API |
 | [Per-user MCP credentials](mcp-user-credentials.md) | Connecting each user's upstream account, token storage and refresh |
 | [Body logging](body-logging.md) | Opt-in request and response logging, redaction, retention, access |

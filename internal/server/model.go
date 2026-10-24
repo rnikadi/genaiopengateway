@@ -18,6 +18,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/rnikadi/genaiopengateway/internal/auth"
+	"github.com/rnikadi/genaiopengateway/internal/cache"
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/guardrail"
 	"github.com/rnikadi/genaiopengateway/internal/limits"
@@ -149,6 +150,16 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 			}
 		}
 
+		plan := planCache(r, p, ep, envelope.Model, names, raw)
+		if plan != nil {
+			if e, semantic := s.cacheLookup(r.Context(), rt, p, rec.RequestID, plan); e != nil {
+				s.serveCached(w, rec, p, ep, e, semantic, acted, start, raw)
+				return
+			}
+			rec.Cache = "miss"
+			w.Header().Set(cacheHeader, rec.Cache)
+		}
+
 		hdr := http.Header{}
 		for _, h := range forwardedHeaders {
 			if v := r.Header.Values(h); len(v) > 0 {
@@ -204,6 +215,12 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 			created = &captureBuffer{max: maxJobObject}
 			src = io.TeeReader(src, created)
 		}
+		// answer is what the client received, kept for the cache.
+		var answer []byte
+		var kept *captureBuffer
+		if plan != nil && resp.StatusCode == http.StatusOK {
+			kept = &captureBuffer{max: int(rt.cfg.Cache.MaxEntryBytes)}
+		}
 		if resp.StatusCode == http.StatusOK && rt.guards.Applies(config.StageOutput, names) && textOutput(ep) && !binaryMedia(contentType) {
 			// Output guardrails see the whole response before the client.
 			held, err := readChecked(src)
@@ -229,31 +246,30 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 				fail(http.StatusBadRequest, codeGuardrailBlocked, blockedMessage(out.Blocked))
 			} else {
 				w.WriteHeader(resp.StatusCode)
-				_, _ = w.Write(held)
+				if _, err := w.Write(held); err == nil && kept != nil && len(held) <= kept.max {
+					answer = held
+				}
 			}
 		} else {
 			setGuardrailsHeader(w, acted)
 			w.WriteHeader(resp.StatusCode)
 			rec.UpstreamLatency = time.Since(start)
-			copyFlush(w, src)
+			if kept != nil {
+				src = io.TeeReader(src, kept)
+			}
+			// Only an answer read to its end, within the size limit, is kept.
+			if copyFlush(w, src) && kept != nil && !kept.truncated {
+				answer = kept.Bytes()
+			}
 		}
 		// Close before reading usage: adapters finalize it on close.
 		_ = resp.Body.Close()
 		if capture != nil {
-			// Copy only what redaction reads, so the queue does not hold
-			// whole large requests.
 			logged := raw
 			if files != nil {
 				logged = withFileNotes(body, files)
 			}
-			req := bytes.Clone(logged[:min(len(logged), capture.max)])
-			s.bodies.Add(capturedBody{
-				RequestBody: store.RequestBody{
-					RequestID: rec.RequestID, Time: start.UTC(), OrgID: p.OrgID, TeamID: p.TeamID, KeyID: p.KeyID,
-					Kind: "model", Endpoint: string(ep), Truncated: capture.truncated || len(req) < len(logged),
-				},
-				request: req, response: capture.Bytes(), responseContentType: resp.Header.Get("Content-Type"),
-			})
+			s.logModelBody(rec, p, ep, start, logged, capture, resp.Header.Get("Content-Type"))
 		}
 
 		if created != nil {
@@ -270,6 +286,11 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 				s.log.Error("charging limits failed", "request_id", rec.RequestID, "err", err)
 			}
 			s.budgetAlerts(ctx, p, spent)
+			if answer != nil {
+				s.cacheStore(ctx, plan, rec.RequestID, &cache.Entry{
+					ContentType: contentType, Provider: res.Target.Provider, Model: res.Target.Model, CostUSD: rec.CostUSD, Body: answer,
+				})
+			}
 		}
 		if s.usage != nil {
 			s.usage.Add(usage.Record{
@@ -279,6 +300,20 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 			})
 		}
 	}
+}
+
+// logModelBody queues a model request's bodies for logging. It copies
+// only what redaction reads, so the queue does not hold whole large
+// requests.
+func (s *Server) logModelBody(rec *requestLog, p *auth.Principal, ep provider.Endpoint, start time.Time, logged []byte, capture *captureBuffer, contentType string) {
+	req := bytes.Clone(logged[:min(len(logged), capture.max)])
+	s.bodies.Add(capturedBody{
+		RequestBody: store.RequestBody{
+			RequestID: rec.RequestID, Time: start.UTC(), OrgID: p.OrgID, TeamID: p.TeamID, KeyID: p.KeyID,
+			Kind: "model", Endpoint: string(ep), Truncated: capture.truncated || len(req) < len(logged),
+		},
+		request: req, response: capture.Bytes(), responseContentType: contentType,
+	})
 }
 
 // admit counts a request against the caller's limits and sets rate
@@ -336,20 +371,21 @@ func setRateHeaders(h http.Header, d limits.Decision) {
 }
 
 // copyFlush copies src to w, flushing after every read so streamed
-// tokens reach the client as soon as they arrive.
-func copyFlush(w http.ResponseWriter, src io.Reader) {
+// tokens reach the client as soon as they arrive. It reports whether
+// all of src was read and written.
+func copyFlush(w http.ResponseWriter, src io.Reader) bool {
 	rc := http.NewResponseController(w)
 	buf := make([]byte, 32<<10)
 	for {
 		n, err := src.Read(buf)
 		if n > 0 {
 			if _, werr := w.Write(buf[:n]); werr != nil {
-				return
+				return false
 			}
 			_ = rc.Flush()
 		}
 		if err != nil {
-			return
+			return errors.Is(err, io.EOF)
 		}
 	}
 }
@@ -367,6 +403,10 @@ type requestLog struct {
 	Tokens                             usage.Tokens
 	CostUSD                            float64
 	Unpriced                           bool
+	// Cache is the response cache's result: hit, semantic, miss or
+	// empty when the cache was not used.
+	Cache    string
+	SavedUSD float64
 }
 
 // finish reports a model request once it is served.
@@ -405,6 +445,10 @@ func (s *Server) finish(rt *runtime, rec *requestLog, span trace.Span, start tim
 	if rec.ErrorCode != "" {
 		span.SetAttributes(attribute.String("error.type", rec.ErrorCode))
 	}
+	if rec.Cache != "" {
+		span.SetAttributes(attribute.String("gog.cache", rec.Cache))
+		s.metrics.ObserveCache(rec.Cache, rec.SavedUSD)
+	}
 	span.End()
 
 	attrs := []slog.Attr{slog.String("request_id", rec.RequestID)}
@@ -432,6 +476,7 @@ func (s *Server) finish(rt *runtime, rec *requestLog, span trace.Span, start tim
 		slog.Float64("video_seconds", rec.Tokens.VideoSeconds),
 		slog.Float64("cost_usd", rec.CostUSD),
 		slog.Int("fallbacks", rec.Fallbacks),
+		slog.String("cache", rec.Cache),
 		slog.String("error_code", rec.ErrorCode),
 	)...)
 }

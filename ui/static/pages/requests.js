@@ -45,7 +45,7 @@ export function Requests({ params }) {
       columns=${[
         { label: 'Time', render: (r) => when(r.ts) },
         { label: 'Model', render: (r) => r.model },
-        { label: 'Status', render: (r) => html`<span class=${'badge ' + (r.status === 200 ? 'good' : 'bad')}>${r.status}</span>` },
+        { label: 'Status', render: (r) => html`<span class=${'badge ' + (r.status === 200 ? 'good' : 'bad')}>${r.status}</span>${r.cache_hit && html` <span class="badge" title="Answered from the response cache">Cached</span>`}` },
         { label: 'Tokens', num: true, render: (r) => `${num(r.input_tokens)} / ${num(r.output_tokens)}` },
         { label: 'Cost', num: true, render: (r) => usd(r.cost_usd) },
         { label: 'Latency', num: true, render: (r) => `${num(r.latency_ms)} ms` },

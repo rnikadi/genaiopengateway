@@ -25,6 +25,11 @@ def check(name, ok):
 r = client.chat.completions.create(model="chat", messages=[{"role": "user", "content": "hi"}])
 check("chat completions", r.choices[0].message.content == "hi" and r.usage.total_tokens == 7)
 
+cached = OpenAI(base_url=BASE + "/v1", api_key="conformance-cached-key-000000")
+answers = [cached.chat.completions.with_raw_response.create(model="chat", messages=[{"role": "user", "content": "cache me"}]) for _ in range(2)]
+check("response cache: miss then hit", [a.headers.get("x-gog-cache") for a in answers] == ["miss", "hit"]
+      and answers[1].parse().choices[0].message.content == answers[0].parse().choices[0].message.content)
+
 r = client.embeddings.create(model="embed", input="hi")
 check("embeddings", len(r.data[0].embedding) == 2)
 
@@ -122,4 +127,5 @@ check("video cost", abs(rows["videos"]["cost_usd"] - 1.6) < 1e-9)
 check("realtime audio and text cost", abs(rows["realtime"]["cost_usd"] - 0.0536) < 1e-9 and rows["realtime"]["input_tokens"] == 1000)
 check("rerank cost", abs(rows["rerank"]["cost_usd"] - 0.002) < 1e-9)
 check("batch charged once at the batch discount", rows["batches"]["requests"] == 1 and abs(rows["batches"]["cost_usd"] - 0.001) < 1e-9)
+check("cache hit metered at no cost", rows["chat.completions"]["cache_hits"] == 1 and rows["chat.completions"]["saved_usd"] > 0)
 print("conformance: all checks passed")

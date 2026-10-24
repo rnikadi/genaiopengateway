@@ -142,4 +142,8 @@ type Record struct {
 	LatencyMS     int64
 	Tokens        Tokens
 	CostUSD       float64
+	// CacheHit marks an answer served from the response cache; SavedUSD
+	// is what it cost when it was first made.
+	CacheHit bool
+	SavedUSD float64
 }

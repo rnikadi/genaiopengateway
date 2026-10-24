@@ -16,6 +16,7 @@ import (
 
 	"github.com/rnikadi/genaiopengateway/internal/alerts"
 	"github.com/rnikadi/genaiopengateway/internal/auth"
+	"github.com/rnikadi/genaiopengateway/internal/cache"
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/guardrail"
 	"github.com/rnikadi/genaiopengateway/internal/id"
@@ -64,6 +65,11 @@ type Server struct {
 	valkey  *limits.Valkey // nil unless the valkey driver is used
 	stop    context.CancelFunc
 
+	// cache holds answers for reuse, in Valkey when the limiter uses it;
+	// cacheIndex holds this replica's question embeddings.
+	cache      cache.Store
+	cacheIndex *cache.Index
+
 	metrics     *telemetry.Metrics
 	mcp         *mcpgw.Gateway
 	lastRefresh atomic.Int64 // unix nanoseconds of the last store load
@@ -104,6 +110,12 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error)
 		backend = limits.NewMemory(ctx)
 	}
 	s.limiter = limits.New(backend, cfg.Limiter.FailOpenRateLimits, cfg.Limiter.FailOpenBudgets)
+	if s.valkey != nil {
+		s.cache = cache.NewValkey(s.valkey.Client())
+	} else {
+		s.cache = cache.NewMemory(cfg.Cache.MaxMemoryBytes)
+	}
+	s.cacheIndex = cache.NewIndex(cfg.Cache.Semantic.MaxEntries)
 	if st != nil {
 		s.usage = usage.NewWriter(st.InsertUsage, log, "usage")
 		s.calls = usage.NewWriter(st.InsertMCPCalls, log, "mcp_calls")
