@@ -25,5 +25,6 @@
 | [0021](0021-cloud-providers.md) | Native Gemini, Vertex AI and Bedrock adapters with cloud credentials |
 | [0022](0022-helm-chart.md) | A basic Helm chart without bundled databases |
 | [0023](0023-hybrid-config.md) | Configuration objects stored through the admin API, merged into the file |
+| [0024](0024-modalities.md) | Images, audio, video and realtime through the one model path |
 
 New ADRs copy [0000-template.md](0000-template.md).

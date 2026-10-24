@@ -132,6 +132,10 @@ An `output` guardrail on a streamed response means the gateway must see the resp
 
 Stream checks that release text as it arrives and cut the stream off on a match are possible later, but cannot take back text already sent.
 
+## Media endpoints
+
+On the media endpoints ([modalities.md](modalities.md)) guardrails check text only. `input` checks see image prompts, speech input, moderation input, and rerank queries and documents. `output` checks see transcripts and translations, as JSON or as text, SRT or WebVTT; a streamed transcript is refused while an `output` guardrail applies, since its text reaches the client as it is spoken. Images and audio are not text and pass unchecked.
+
 ## What is recorded
 
 - **Response header** `X-Gog-Guardrails` on model calls, listing the guardrails that acted, for example `deny-terms=log, no-pii=redact`.

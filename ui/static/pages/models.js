@@ -1,6 +1,5 @@
-import { html, api, useSession, useLoad, Loading, Table, PageHeader, Health, endpointNames, providerTypes } from '../lib.js';
+import { html, api, useSession, useLoad, Loading, Table, PageHeader, Health, endpointNames, providerTypes, priceText } from '../lib.js';
 
-const price = (p) => (p && (p.input_per_mtok || p.output_per_mtok) ? `$${p.input_per_mtok} in · $${p.output_per_mtok} out${p.cached_input_per_mtok ? ` · $${p.cached_input_per_mtok} cached` : ''}` : 'No price');
 
 // silent marks a target that served nothing while a later one did: it is
 // failing over, since usage records only the target that answered.
@@ -10,7 +9,7 @@ export function Models() {
   const s = useSession();
   const state = useLoad(() => api('GET', '/admin/v1/models'));
   return html`
-    <${PageHeader} title="Models" sub="Virtual models from the gateway's configuration. Targets are tried in order; prices are per million tokens; health covers the last hour.">
+    <${PageHeader} title="Models" sub="Virtual models from the gateway's configuration. Targets are tried in order; health covers the last hour.">
       ${s.owner && html`<a class="button secondary" href="#/config">Add or change</a>`}
     <//>
     <${Loading} state=${state}>${(d) => html`<${Table}
@@ -23,7 +22,7 @@ export function Models() {
           label: 'Targets',
           render: (m) => html`<ol class="targets">${m.targets.map(
             (t, i) => html`<li key=${i}>
-              <code>${t.provider}/${t.model}</code> <span class="muted small">${providerTypes[t.provider_type] || t.provider_type} · ${price(t.price)}</span>
+              <code>${t.provider}/${t.model}</code> <span class="muted small">${providerTypes[t.provider_type] || t.provider_type} · ${priceText(t.price)}</span>
               <div>${silent(m.targets, i) ? html`<span class="badge bad" title="A later target answered instead: this one is failing over">Not answering</span>` : html`<${Health} h=${t.health} />`}</div>
               ${t.endpoints.length === 0 && html`<div class="badge warn">Serves no endpoint for this model</div>`}
             </li>`,

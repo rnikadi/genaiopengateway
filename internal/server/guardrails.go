@@ -110,6 +110,15 @@ func (s *Server) guardRequest(ctx context.Context, rt *runtime, meta guardrail.M
 // response, as an event stream when the original was one.
 func (s *Server) guardResponse(ctx context.Context, rt *runtime, meta guardrail.Meta, names []string, body []byte, contentType string) ([]byte, guardrail.Result) {
 	streamed := strings.HasPrefix(contentType, "text/event-stream")
+	if !streamed && strings.HasPrefix(contentType, "text/") {
+		// A transcript as text, SRT or WebVTT: the whole body is the text.
+		res := rt.guards.Run(ctx, config.StageOutput, names, []string{string(body)}, meta)
+		s.recordGuardrails(meta, res.Decisions)
+		if res.Changed && res.Blocked == nil {
+			return []byte(res.Texts[0]), res
+		}
+		return body, res
+	}
 	assembled := body
 	if streamed {
 		assembled = bodylog.Assemble(contentType, body)

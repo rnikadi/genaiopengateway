@@ -48,6 +48,9 @@ mcp:
     tools: {servers: [{server: docs}], guardrails: [policy-hook]}
 `
 
+// openAIMedia lists the media endpoints an OpenAI-compatible provider serves.
+const openAIMedia = "images.generations,images.edits,audio.speech,audio.transcriptions,audio.translations,moderations,rerank"
+
 func TestConfigView(t *testing.T) {
 	e := newAdminEnvConfig(t, configViewConfig)
 	now := time.Now()
@@ -102,11 +105,11 @@ func TestConfigView(t *testing.T) {
 	for _, m := range models.Data {
 		if m.Name == "claude" {
 			if m.Targets[0].ProviderType != "bedrock" || strings.Join(m.Targets[0].Endpoints, ",") != "chat.completions,messages" ||
-				strings.Join(m.Endpoints, ",") != "chat.completions,responses,messages,embeddings" {
+				strings.Join(m.Endpoints, ",") != "chat.completions,responses,messages,embeddings,"+openAIMedia {
 				t.Errorf("claude = %+v", m)
 			}
 		}
-		if m.Name == "embed" && strings.Join(m.Endpoints, ",") != "chat.completions,responses,embeddings" {
+		if m.Name == "embed" && strings.Join(m.Endpoints, ",") != "chat.completions,responses,embeddings,"+openAIMedia {
 			t.Errorf("embed endpoints = %v", m.Endpoints)
 		}
 	}

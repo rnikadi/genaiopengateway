@@ -74,7 +74,15 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 			return
 		}
 		var body map[string]json.RawMessage
-		if json.Unmarshal(raw, &body) != nil || body == nil {
+		var files []provider.File
+		if ep.Multipart() && isMultipart(r) {
+			// Text fields take the place of a JSON body; files ride beside.
+			if body, files, err = readMultipart(r, raw); err != nil {
+				fail(http.StatusBadRequest, codeInvalidRequest, "could not read the multipart body: "+err.Error())
+				return
+			}
+			raw, _ = json.Marshal(body)
+		} else if json.Unmarshal(raw, &body) != nil || body == nil {
 			fail(http.StatusBadRequest, codeInvalidRequest, "request body must be a JSON object")
 			return
 		}
@@ -119,6 +127,11 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 		}
 
 		names := p.Guardrails()
+		if envelope.Stream && (ep == provider.Transcriptions || ep == provider.Translations) && rt.guards.Applies(config.StageOutput, names) {
+			// Transcript deltas cannot be checked before the client sees them.
+			fail(http.StatusBadRequest, codeInvalidRequest, "streamed transcripts are not available when output guardrails apply; send the request without stream")
+			return
+		}
 		meta := guardMeta(rec.RequestID, p)
 		sent, in := s.guardRequest(r.Context(), rt, meta, names, raw)
 		acted := in.Decisions
@@ -141,7 +154,7 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 				hdr[h] = v
 			}
 		}
-		res, err := rt.router.Route(r.Context(), ep, envelope.Model, body, provider.Request{Stream: envelope.Stream, Header: hdr})
+		res, err := rt.router.Route(r.Context(), ep, envelope.Model, body, provider.Request{Stream: envelope.Stream, Header: hdr, Files: files})
 		if res != nil {
 			rec.Fallbacks = len(res.Failed)
 			for _, a := range res.Failed {
@@ -178,7 +191,7 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 		if capture != nil {
 			src = io.TeeReader(resp.Body, capture)
 		}
-		if resp.StatusCode == http.StatusOK && rt.guards.Applies(config.StageOutput, names) {
+		if resp.StatusCode == http.StatusOK && rt.guards.Applies(config.StageOutput, names) && textOutput(ep) && !binaryMedia(contentType) {
 			// Output guardrails see the whole response before the client.
 			held, err := readChecked(src)
 			rec.UpstreamLatency = time.Since(start)
@@ -216,11 +229,15 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 		if capture != nil {
 			// Copy only what redaction reads, so the queue does not hold
 			// whole large requests.
-			req := bytes.Clone(raw[:min(len(raw), capture.max)])
+			logged := raw
+			if files != nil {
+				logged = withFileNotes(body, files)
+			}
+			req := bytes.Clone(logged[:min(len(logged), capture.max)])
 			s.bodies.Add(capturedBody{
 				RequestBody: store.RequestBody{
 					RequestID: rec.RequestID, Time: start.UTC(), OrgID: p.OrgID, TeamID: p.TeamID, KeyID: p.KeyID,
-					Kind: "model", Endpoint: string(ep), Truncated: capture.truncated || len(req) < len(raw),
+					Kind: "model", Endpoint: string(ep), Truncated: capture.truncated || len(req) < len(logged),
 				},
 				request: req, response: capture.Bytes(), responseContentType: resp.Header.Get("Content-Type"),
 			})
@@ -229,7 +246,7 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 		if resp.StatusCode == http.StatusOK {
 			rec.Tokens = *resp.Usage
 			rec.CostUSD = usage.Cost(rec.Tokens, res.Target.Price)
-			rec.Unpriced = res.Target.Price == (config.Price{}) && rec.Tokens.Total() > 0
+			rec.Unpriced = res.Target.Price.IsZero() && (rec.Tokens.Total() > 0 || rec.Tokens.Media())
 			// The client may be gone; charging must still happen.
 			ctx := context.WithoutCancel(r.Context())
 			spent, err := s.limiter.Charge(ctx, p, rec.Tokens.Total(), rec.CostUSD)
@@ -246,6 +263,12 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 			})
 		}
 	}
+}
+
+// textOutput reports whether an endpoint answers with text that output
+// guardrails check. Images and speech answer with media.
+func textOutput(ep provider.Endpoint) bool {
+	return ep != provider.ImageGenerations && ep != provider.ImageEdits && ep != provider.Speech
 }
 
 // setGuardrailsHeader names the guardrails that acted.
@@ -359,6 +382,10 @@ func (s *Server) finish(rt *runtime, rec *requestLog, span trace.Span, start tim
 		slog.Int64("output_tokens", rec.Tokens.OutputTokens),
 		slog.Int64("cached_input_tokens", rec.Tokens.CachedInputTokens),
 		slog.Int64("reasoning_tokens", rec.Tokens.ReasoningTokens),
+		slog.Int64("images", rec.Tokens.Images),
+		slog.Int64("characters", rec.Tokens.Characters),
+		slog.Float64("audio_seconds", rec.Tokens.AudioSeconds),
+		slog.Float64("video_seconds", rec.Tokens.VideoSeconds),
 		slog.Float64("cost_usd", rec.CostUSD),
 		slog.Int("fallbacks", rec.Fallbacks),
 		slog.String("error_code", rec.ErrorCode),

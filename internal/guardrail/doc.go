@@ -45,6 +45,8 @@ func (r ref) set(s string) {
 var textFields = map[string]bool{
 	"content": true, "text": true, "input": true, "system": true, "instructions": true,
 	"output": true, "prompt": true, "arguments": true,
+	// Rerank requests.
+	"query": true, "documents": true,
 }
 
 // skipFields hold definitions and settings, not conversation text.

@@ -16,12 +16,19 @@ const maxLine = 1 << 20
 // Tap returns a reader that yields exactly the bytes of r and calls
 // onData with the payload of every complete "data:" line it sees.
 func Tap(r io.ReadCloser, onData func([]byte)) io.ReadCloser {
-	return &tap{r: r, onData: onData}
+	return TapLimit(r, onData, maxLine)
+}
+
+// TapLimit is Tap with a different bound on the lines it inspects, for
+// streams whose events carry images.
+func TapLimit(r io.ReadCloser, onData func([]byte), limit int) io.ReadCloser {
+	return &tap{r: r, onData: onData, limit: limit}
 }
 
 type tap struct {
 	r        io.ReadCloser
 	onData   func([]byte)
+	limit    int
 	line     []byte
 	overflow bool
 }
@@ -54,7 +61,7 @@ func (t *tap) append(b []byte) {
 	if t.overflow {
 		return
 	}
-	if len(t.line)+len(b) > maxLine {
+	if len(t.line)+len(b) > t.limit {
 		t.overflow = true
 		t.line = t.line[:0]
 		return

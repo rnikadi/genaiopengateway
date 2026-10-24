@@ -57,8 +57,13 @@ func SetupTracing(ctx context.Context, version string) (shutdown func(context.Co
 
 // Operation maps an endpoint to a gen_ai.operation.name value.
 func Operation(ep provider.Endpoint) string {
-	if ep == provider.Embeddings {
+	switch ep {
+	case provider.Embeddings:
 		return "embeddings"
+	case provider.ChatCompletions, provider.Responses, provider.Messages, provider.GenerateContent:
+		return "chat"
 	}
-	return "chat"
+	// Media endpoints have no semantic convention yet; their own name is
+	// the most useful.
+	return string(ep)
 }

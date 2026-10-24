@@ -1,6 +1,6 @@
 import {
   html, useState, api, useLoad, useSession, Loading, Table, Bars, Columns, PageHeader, OrgPicker, defaultOrg, Card,
-  periods, usageQuery, totals, downloadCSV, usd, num, compact, endpointNames,
+  periods, usageQuery, totals, downloadCSV, usd, num, compact, endpointNames, mediaSummary,
 } from '../lib.js';
 
 const groups = { model: 'Model', team: 'Team', key: 'Key', day: 'Day', provider: 'Provider', endpoint: 'Endpoint' };
@@ -25,8 +25,8 @@ export function Usage({ params }) {
   const csv = (rows) =>
     downloadCSV(
       `usage-${f.group_by}-${f.period}.csv`,
-      [f.group_by, 'requests', 'input_tokens', 'output_tokens', 'cached_input_tokens', 'reasoning_tokens', 'cost_usd'],
-      rows.map((r) => [r.group, r.requests, r.input_tokens, r.output_tokens, r.cached_input_tokens, r.reasoning_tokens, r.cost_usd]),
+      [f.group_by, 'requests', 'input_tokens', 'output_tokens', 'cached_input_tokens', 'reasoning_tokens', 'images', 'characters', 'audio_seconds', 'video_seconds', 'cost_usd'],
+      rows.map((r) => [r.group, r.requests, r.input_tokens, r.output_tokens, r.cached_input_tokens, r.reasoning_tokens, r.images, r.characters, r.audio_seconds, r.video_seconds, r.cost_usd]),
     );
 
   return html`
@@ -56,6 +56,7 @@ export function Usage({ params }) {
           <${Card} label="Requests" value=${num(t.requests)} />
           <${Card} label="Input tokens" value=${compact(t.input_tokens)} sub=${`${compact(t.cached_input_tokens)} cached`} />
           <${Card} label="Output tokens" value=${compact(t.output_tokens)} sub=${`${compact(t.reasoning_tokens)} reasoning`} />
+          ${mediaSummary(t) && html`<${Card} label="Media" value=${mediaSummary(t)} />`}
         </div>
         <section class="panel">
           <h2>Spend by ${groups[f.group_by].toLowerCase()}</h2>
@@ -73,6 +74,7 @@ export function Usage({ params }) {
               { label: 'Input tokens', num: true, render: (r) => num(r.input_tokens) },
               { label: 'Cached', num: true, render: (r) => num(r.cached_input_tokens) },
               { label: 'Output tokens', num: true, render: (r) => num(r.output_tokens) },
+              ...(d.data.some((r) => mediaSummary(r)) ? [{ label: 'Media', render: (r) => html`<span class="small">${mediaSummary(r)}</span>` }] : []),
               { label: 'Spend', num: true, render: (r) => usd(r.cost_usd) },
             ]}
           />

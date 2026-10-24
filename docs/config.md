@@ -126,6 +126,11 @@ models:
       - provider: anthropic
         model: claude-haiku-4-5
         price: {input_per_mtok: 1.00, output_per_mtok: 5.00}
+  image:                             # media endpoints; see modalities.md
+    targets:
+      - provider: openai
+        model: gpt-image-1
+        price: {per_image: 0.04}     # also per_mchars, per_audio_minute, per_video_second, per_request
 
 keys:                                # static keys; read-only
   - name: local-dev

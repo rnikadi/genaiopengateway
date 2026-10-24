@@ -370,7 +370,7 @@ export function usageQuery({ org, team, key, group_by, period = 'month' }) {
 }
 
 export function totals(rows) {
-  const t = { requests: 0, input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, reasoning_tokens: 0, cost_usd: 0 };
+  const t = { requests: 0, input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, reasoning_tokens: 0, images: 0, characters: 0, audio_seconds: 0, video_seconds: 0, cost_usd: 0 };
   for (const r of rows) for (const k of Object.keys(t)) t[k] += r[k] || 0;
   return t;
 }
@@ -408,7 +408,39 @@ export const endpointNames = {
   messages: 'Anthropic Messages',
   generate_content: 'Gemini generateContent',
   embeddings: 'Embeddings',
+  'images.generations': 'Image generation',
+  'images.edits': 'Image edits',
+  'audio.speech': 'Text to speech',
+  'audio.transcriptions': 'Transcription',
+  'audio.translations': 'Audio translation',
+  moderations: 'Moderation',
+  rerank: 'Rerank',
 };
+
+// priceText describes a target's price: tokens per million, and media
+// units (docs/modalities.md).
+export function priceText(p) {
+  if (!p) return 'No price';
+  const parts = [];
+  if (p.input_per_mtok || p.output_per_mtok) parts.push(`$${p.input_per_mtok} in · $${p.output_per_mtok} out per M tokens`);
+  if (p.cached_input_per_mtok) parts.push(`$${p.cached_input_per_mtok} cached`);
+  if (p.per_image) parts.push(`$${p.per_image} per image`);
+  if (p.per_mchars) parts.push(`$${p.per_mchars} per M characters`);
+  if (p.per_audio_minute) parts.push(`$${p.per_audio_minute} per audio minute`);
+  if (p.per_video_second) parts.push(`$${p.per_video_second} per video second`);
+  if (p.per_request) parts.push(`$${p.per_request} per request`);
+  return parts.length ? parts.join(' · ') : 'No price';
+}
+
+// mediaSummary describes the media units in a usage row, if any.
+export function mediaSummary(r) {
+  const parts = [];
+  if (r.images) parts.push(`${num(r.images)} images`);
+  if (r.characters) parts.push(`${compact(r.characters)} characters`);
+  if (r.audio_seconds) parts.push(`${num(Math.round(r.audio_seconds / 60))} audio min`);
+  if (r.video_seconds) parts.push(`${num(Math.round(r.video_seconds))} video s`);
+  return parts.join(' · ');
+}
 
 export const providerTypes = { openai: 'OpenAI-compatible', anthropic: 'Anthropic', gemini: 'Gemini API', vertex: 'Vertex AI', bedrock: 'Amazon Bedrock' };
 

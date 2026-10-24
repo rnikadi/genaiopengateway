@@ -54,8 +54,8 @@ One record per request in a new table, `request_bodies`, keyed by `request_id`. 
 | `request_id`, `ts`, `org_id`, `team_id`, `key_id` | As in usage records. |
 | `kind` | `model` or `mcp`. |
 | `endpoint` | For model calls the endpoint as in usage records, for example `chat.completions`; for MCP the virtual server path, for example `/mcp/engineering`. |
-| `request` | The request body as received, redacted and truncated. |
-| `response` | For non-streaming responses, the body as returned. For streams, the assembled result: the text, tool calls and finish reason built from the events, not the raw event stream. Redacted and truncated. |
+| `request` | The request body as received, redacted and truncated. For multipart requests (audio and image uploads), the text fields and each file's name, type and size, never the file. |
+| `response` | Audio, image and video responses are noted with their type and size, not kept. For other non-streaming responses, the body as returned. For streams, the assembled result: the text, tool calls and finish reason built from the events, not the raw event stream. Redacted and truncated. |
 | `truncated` | Whether either body was cut. |
 | `redactions` | Count per redaction type, for example `{"email": 2}`. Never the redacted values. |
 
