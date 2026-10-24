@@ -113,16 +113,13 @@ func (r *Router) RouteTo(ctx context.Context, ep provider.Endpoint, model, provi
 }
 
 func (r *Router) route(ctx context.Context, ep provider.Endpoint, model string, keep func(config.Target) bool, body map[string]json.RawMessage, req provider.Request) (*Result, error) {
-	m, ok := r.models[model]
-	if !ok {
-		return nil, ErrUnknownModel
+	all, err := r.Targets(ep, model)
+	if err != nil {
+		return nil, err
 	}
 	var targets []config.Target
-	for _, t := range m.Targets {
-		if keep != nil && !keep(t) {
-			continue
-		}
-		if provider.SupportsModel(r.providers[t.Provider], ep, t.Model) {
+	for _, t := range all {
+		if keep == nil || keep(t) {
 			targets = append(targets, t)
 		}
 	}
@@ -189,6 +186,31 @@ func (r *Router) send(ctx context.Context, t config.Target, req *provider.Reques
 	return s
 }
 
+// Targets lists the targets of a model that serve an endpoint, in
+// order, for callers that try them themselves, such as realtime.
+func (r *Router) Targets(ep provider.Endpoint, model string) ([]config.Target, error) {
+	m, ok := r.models[model]
+	if !ok {
+		return nil, ErrUnknownModel
+	}
+	var out []config.Target
+	for _, t := range m.Targets {
+		if provider.SupportsModel(r.providers[t.Provider], ep, t.Model) {
+			out = append(out, t)
+		}
+	}
+	if len(out) == 0 {
+		return nil, ErrUnsupported
+	}
+	return out, nil
+}
+
+// Dialer returns a provider's realtime adapter.
+func (r *Router) Dialer(providerName string) (provider.Dialer, bool) {
+	d, ok := r.providers[providerName].(provider.Dialer)
+	return d, ok
+}
+
 // Forwarder returns a provider's adapter for calls on upstream objects,
 // or false when the provider is gone or does not serve them.
 func (r *Router) Forwarder(providerName string) (provider.Forwarder, bool) {
@@ -200,7 +222,7 @@ func (r *Router) Forwarder(providerName string) (provider.Forwarder, bool) {
 var AllEndpoints = []provider.Endpoint{
 	provider.ChatCompletions, provider.Responses, provider.Messages, provider.GenerateContent, provider.Embeddings,
 	provider.ImageGenerations, provider.ImageEdits, provider.Speech, provider.Transcriptions, provider.Translations,
-	provider.Moderations, provider.Rerank, provider.Videos,
+	provider.Moderations, provider.Rerank, provider.Videos, provider.Realtime,
 }
 
 // Endpoints lists what a provider serves for an upstream model.

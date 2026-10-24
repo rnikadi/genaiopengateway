@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/coder/websocket"
+
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/provider"
 	"github.com/rnikadi/genaiopengateway/internal/sse"
@@ -50,7 +52,33 @@ func New(cfg config.Provider, client *http.Client) *Provider {
 // Supports implements provider.Provider.
 func (p *Provider) Supports(e provider.Endpoint) bool {
 	_, ok := paths[e]
-	return ok
+	return ok || e == provider.Realtime
+}
+
+// DialRealtime implements provider.Dialer: the realtime WebSocket at
+// the base URL, with the provider's key.
+func (p *Provider) DialRealtime(ctx context.Context, model string, header http.Header, subprotocols []string) (*websocket.Conn, *http.Response, error) {
+	u, err := url.Parse(p.cfg.BaseURL + "/realtime")
+	if err != nil {
+		return nil, nil, err
+	}
+	u.Scheme = map[string]string{"https": "wss", "http": "ws"}[u.Scheme]
+	q := u.Query()
+	q.Set("model", model)
+	u.RawQuery = q.Encode()
+	h := header.Clone()
+	if h == nil {
+		h = http.Header{}
+	}
+	if key := p.cfg.APIKey.Value(); key != "" {
+		h.Set("Authorization", "Bearer "+key)
+	}
+	for k, v := range p.cfg.Headers {
+		h.Set(k, v)
+	}
+	ctx, cancel := context.WithTimeout(ctx, p.cfg.Timeout.Std())
+	defer cancel()
+	return websocket.Dial(ctx, u.String(), &websocket.DialOptions{HTTPClient: p.client, HTTPHeader: h, Subprotocols: subprotocols})
 }
 
 // Send implements provider.Provider.

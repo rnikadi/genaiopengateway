@@ -5,6 +5,8 @@ admin: {token: conformance-admin-token-0000000000}
 store: {driver: sqlite, dsn: "file:${CONFORMANCE_DB}"}
 providers:
   up: {base_url: "http://127.0.0.1:18191/v1", api_key: upstream-key}
+  # The fake upstream's realtime WebSocket listens on the next port.
+  live: {base_url: "http://127.0.0.1:18192/v1", api_key: upstream-key}
 models:
   chat: {targets: [{provider: up, model: up-chat, price: {input_per_mtok: 1, output_per_mtok: 2}}]}
   embed: {targets: [{provider: up, model: up-embed}]}
@@ -13,6 +15,7 @@ models:
   transcribe: {targets: [{provider: up, model: whisper-1, price: {per_audio_minute: 0.006}}]}
   moderate: {targets: [{provider: up, model: omni-moderation-latest}]}
   rerank: {targets: [{provider: up, model: rerank-v3.5, price: {per_request: 0.002}}]}
+  voice: {targets: [{provider: live, model: gpt-realtime, price: {input_per_mtok: 4, output_per_mtok: 16, audio_input_per_mtok: 32, audio_output_per_mtok: 64}}]}
   video: {targets: [{provider: up, model: sora-2, price: {per_video_second: 0.1}}]}
 keys:
   - {name: conformance, key: conformance-key-0000000000}

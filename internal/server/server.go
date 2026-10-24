@@ -378,6 +378,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/videos/{id}", s.videoJob(http.MethodDelete, ""))
 	mux.HandleFunc("GET /v1/videos/{id}/content", s.videoJob(http.MethodGet, "/content"))
 	mux.HandleFunc("POST /v1/videos/{id}/remix", s.model(provider.VideoRemix))
+	mux.HandleFunc("GET /v1/realtime", s.realtime)
 	mux.HandleFunc("/mcp/{name}", s.serveMCP)
 	if s.store != nil {
 		mux.HandleFunc("GET /mcp/connect/callback", s.connectCallback)

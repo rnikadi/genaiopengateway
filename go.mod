@@ -8,6 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.24
 	github.com/aws/aws-sdk-go-v2/config v1.33.10
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.10
+	github.com/coder/websocket v1.8.14
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/jsonschema-go v0.4.3

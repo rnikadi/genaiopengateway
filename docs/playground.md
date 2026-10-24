@@ -23,6 +23,8 @@ The same holds for the media tabs ([modalities.md](modalities.md)), each audited
 
 The transcription upload is multipart, which a cookie request may send when its `Origin` is the gateway's own; browsers do not let other sites forge `Origin`. Every model on an `openai` provider lists every endpoint, so each tab keeps its own model choice. The page shows the generated images, plays the speech, and prices each call at the target's media prices.
 
+Video jobs and realtime sessions have no tab: a video takes minutes to render and a realtime session needs a microphone and a WebSocket held open, so operators try them with a team key and the OpenAI SDK ([modalities.md](modalities.md)).
+
 The page lists the models the team may use that serve chat completions, keeps the conversation in the page only, and shows `X-Gateway-Target`, `X-Gog-Guardrails`, the usage the upstream reported, and the cost at the target's configured price.
 
 ## Other actions
