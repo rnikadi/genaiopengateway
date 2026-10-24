@@ -43,6 +43,25 @@ type Config struct {
 	Secrets     Secrets              `yaml:"secrets"`
 	BodyLogging BodyLogging          `yaml:"body_logging"`
 	Guardrails  map[string]Guardrail `yaml:"guardrails"`
+	Cache       Cache                `yaml:"cache"`
+}
+
+// Cache configures the response cache (docs/cache.md). Policies turn it
+// on.
+type Cache struct {
+	// MaxEntryBytes bounds a cached answer; larger ones are not stored.
+	MaxEntryBytes int64 `yaml:"max_entry_bytes"`
+	// MaxMemoryBytes bounds the in-memory store, used without Valkey.
+	MaxMemoryBytes int64         `yaml:"max_memory_bytes"`
+	Semantic       SemanticCache `yaml:"semantic"`
+}
+
+// SemanticCache configures matching by meaning.
+type SemanticCache struct {
+	// Model is a virtual model that serves embeddings.
+	Model      string  `yaml:"model"`
+	Threshold  float64 `yaml:"threshold"`
+	MaxEntries int     `yaml:"max_entries"`
 }
 
 // Secrets holds the key that encrypts sensitive values in the store
@@ -458,6 +477,10 @@ const (
 	// DefaultMaxRealtimeSession bounds a realtime session.
 	DefaultMaxRealtimeSession = Duration(30 * time.Minute)
 	DefaultMaxBatchFileBytes  = 100 << 20
+	DefaultCacheEntryBytes    = 1 << 20
+	DefaultCacheMemoryBytes   = 256 << 20
+	DefaultCacheThreshold     = 0.95
+	DefaultCacheVectors       = 10000
 	DefaultProviderTimeout    = 5 * time.Minute
 	DefaultRefreshInterval    = 5 * time.Second
 	DefaultMCPRefresh         = time.Minute
@@ -488,9 +511,11 @@ func Parse(raw []byte) (*Config, error) {
 // validates the result.
 func decode(root *yaml.Node) (*Config, error) {
 	c := Config{
-		Listen:      DefaultListen,
-		Limits:      Limits{MaxRequestBytes: DefaultMaxRequestBytes, MaxRealtimeSession: DefaultMaxRealtimeSession, MaxBatchFileBytes: DefaultMaxBatchFileBytes},
-		Limiter:     Limiter{Driver: "memory", FailOpenRateLimits: true},
+		Listen:  DefaultListen,
+		Limits:  Limits{MaxRequestBytes: DefaultMaxRequestBytes, MaxRealtimeSession: DefaultMaxRealtimeSession, MaxBatchFileBytes: DefaultMaxBatchFileBytes},
+		Limiter: Limiter{Driver: "memory", FailOpenRateLimits: true},
+		Cache: Cache{MaxEntryBytes: DefaultCacheEntryBytes, MaxMemoryBytes: DefaultCacheMemoryBytes,
+			Semantic: SemanticCache{Threshold: DefaultCacheThreshold, MaxEntries: DefaultCacheVectors}},
 		Store:       Store{RefreshInterval: Duration(DefaultRefreshInterval)},
 		MCP:         MCP{RefreshInterval: Duration(DefaultMCPRefresh), MaxUserSessions: DefaultMaxUserSessions},
 		SSO:         SSO{SessionTTL: Duration(DefaultSessionTTL)},
@@ -567,6 +592,17 @@ func (c *Config) validate() error {
 	}
 	if c.Limits.MaxBatchFileBytes <= 0 {
 		add("limits.max_batch_file_bytes must be positive")
+	}
+	if c.Cache.MaxEntryBytes <= 0 || c.Cache.MaxMemoryBytes <= 0 || c.Cache.Semantic.MaxEntries <= 0 {
+		add("cache.max_entry_bytes, cache.max_memory_bytes and cache.semantic.max_entries must be positive")
+	}
+	if t := c.Cache.Semantic.Threshold; t <= 0 || t > 1 {
+		add("cache.semantic.threshold must be above 0 and at most 1")
+	}
+	if m := c.Cache.Semantic.Model; m != "" {
+		if _, ok := c.Models[m]; !ok {
+			add("cache.semantic.model %q is not configured", m)
+		}
 	}
 
 	for name, p := range c.Providers {
@@ -651,6 +687,9 @@ func (c *Config) validate() error {
 		seen[v] = true
 		if err := k.Policy.Validate(); err != nil {
 			add("key %q: %v", k.Name, err)
+		}
+		if k.Cache != nil && k.Cache.Mode == policy.CacheSemantic && c.Cache.Semantic.Model == "" {
+			add("key %q: the semantic cache needs cache.semantic.model", k.Name)
 		}
 		for _, m := range k.AllowedModels {
 			if _, ok := c.Models[m]; !ok {

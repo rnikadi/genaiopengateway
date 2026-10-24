@@ -30,7 +30,7 @@ The cache key is a SHA-256 of the team, the endpoint, the virtual model, the gua
 
 With `mode: semantic`, a chat or Messages request that misses exactly is matched by meaning:
 
-- The gateway embeds the text of the last user message with `cache.semantic.model`, a virtual model that serves embeddings. The embedding call is metered to the caller like any request, as endpoint `cache.embeddings`.
+- The gateway embeds the text of the last user message with `cache.semantic.model`, a virtual model that serves embeddings. The embedding call is metered to the caller like any request, as endpoint `cache.embeddings`, under the request's id with `:cache` appended.
 - Everything else must still match exactly: the system prompt, earlier turns, parameters and tools. Only the last user message is compared by meaning, so a paraphrased question in the same conversation hits, and the same question in a different conversation does not.
 - The nearest stored question with cosine similarity of at least `cache.semantic.threshold` (default 0.95) is served.
 
@@ -55,7 +55,7 @@ A hit writes a usage record with no tokens and no cost, marked as a cache hit, w
 - The policy form of organizations, teams and keys gains a **Response cache** setting: inherit, off, exact or semantic, with a TTL.
 - The **Usage** page shows cache hits and money saved, overall and per group, and the Requests page marks cached answers.
 - The **Settings** page shows the cache configuration.
-- `DELETE /admin/v1/cache?org_id=&team_id=` clears an organization's or a team's entries, for an answer that went stale. Owners and the organization's admins may; it is audited as `cache.clear`. The organization page has the button.
+- `DELETE /admin/v1/cache?org_id=&team_id=` clears an organization's or a team's entries, for an answer that went stale. Owners and the organization's admins may; it is audited as `cache.clear`. The organization and team pages have the button.
 
 ## Configuration
 

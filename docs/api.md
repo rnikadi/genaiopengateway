@@ -51,6 +51,7 @@ It never falls back on other 4xx responses, which indicate a problem with the re
 | `x-request-id` | Gateway request id; echoes the client's `x-request-id` if it is a safe token of up to 128 characters |
 | `x-gateway-target` | `<provider>/<upstream model>` that served the request |
 | `x-ratelimit-limit-requests`, `x-ratelimit-remaining-requests`, `x-ratelimit-reset-requests` | Tightest request limit that applies to the key, as in the OpenAI API |
+| `x-gog-cache` | `hit`, `semantic` or `miss` when the caller's policy turns on the response cache ([cache.md](cache.md)). Send `Cache-Control: no-cache` to skip the lookup, or `no-store` to skip the cache entirely |
 | `x-gog-guardrails` | Guardrails that acted on the request, as `name=action` pairs, for example `no-pii=redact` ([guardrails.md](guardrails.md)) |
 | `x-ratelimit-limit-tokens`, `x-ratelimit-remaining-tokens`, `x-ratelimit-reset-tokens` | Same for tokens per minute |
 
@@ -102,6 +103,7 @@ Base path `/admin/v1`. JSON in and out. Authenticate with `Authorization: Bearer
 | `DELETE /admin/v1/requests?org_id=&before=` | Delete an organization's bodies logged before a time, for erasure requests. Returns `{"deleted": n}` (owners only, audited) |
 | `GET /admin/v1/batches` | Batches newest first, with owner, model, target, `status`, the last batch `object`, `cost_usd` and `charged_at`; filter with `org_id`, `team_id`, `status` ([batch.md](batch.md)) |
 | `POST /admin/v1/batches/{id}/cancel` | Cancel a batch at its target. Owners and the organization's admins; audited as `batch.cancel` |
+| `DELETE /admin/v1/cache?org_id=&team_id=` | Remove an organization's cached answers, or one team's, and report how many as `cleared`. Owners and the organization's admins; audited as `cache.clear` ([cache.md](cache.md)) |
 | `GET /admin/v1/videos` | Video jobs newest first, with owner, model, target and the last job `object`; filter with `org_id`, `team_id` |
 | `GET /admin/v1/models` | Virtual models with the endpoints they serve; each target with `provider_type`, `endpoints`, price and last-hour `health` |
 | `GET /admin/v1/providers` | Providers with `type`, `base_url`, `region`, `project`, `location`, `auth`, `timeout`, `header_names`, the `models` using them and last-hour `health`. Never credentials |
@@ -124,9 +126,12 @@ Organizations, teams and keys share the same policy fields, all optional:
   "tpm": 200000,
   "budget": {"amount_usd": 500, "period": "monthly", "alert_at": [0.8, 1]},
   "guardrails": ["no-pii"],
-  "log_bodies": true
+  "log_bodies": true,
+  "cache": {"mode": "exact", "ttl": "1h"}
 }
 ```
+
+`cache` turns on the response cache for that scope: `mode` is `off`, `exact` or `semantic` (which needs `cache.semantic.model` in config), and `ttl` is how long an answer is reused, at most 720h. The most specific level that sets it wins, and unset everywhere means off ([cache.md](cache.md)).
 
 `log_bodies` (true or false) turns body logging on or off for that scope; the most specific level that sets it wins, and unset everywhere means off ([body-logging.md](body-logging.md)).
 
@@ -144,7 +149,7 @@ Key create response:
 
 ### Usage query
 
-`GET /admin/v1/usage?org_id=&team_id=&key_id=&from=&to=&group_by=` where `group_by` is one of `model`, `team`, `key`, `day`, `provider`, `endpoint`. `from` and `to` are RFC 3339 and default to the current month. The response lists rows with `requests`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `reasoning_tokens` and `cost_usd`.
+`GET /admin/v1/usage?org_id=&team_id=&key_id=&from=&to=&group_by=` where `group_by` is one of `model`, `team`, `key`, `day`, `provider`, `endpoint`. `from` and `to` are RFC 3339 and default to the current month. The response lists rows with `requests`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `reasoning_tokens`, `cost_usd`, and `cache_hits` and `saved_usd` for answers served from the response cache.
 
 `health` covers the last hour across all replicas, from usage records: `requests`, `errors` (status 400 or above), `error_rate`, `avg_latency_ms` and `last_error_at`. Only the target that answered a request is counted; failovers show in `gog_fallbacks_total`.
 

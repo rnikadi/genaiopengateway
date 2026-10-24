@@ -36,6 +36,7 @@ export function Orgs() {
 export function Org({ args: [id] }) {
   const s = useSession();
   const [modal, setModal] = useState(null);
+  const [notice, setNotice] = useState('');
   const state = useLoad(async () => {
     const [org, teams, usage] = await Promise.all([
       api('GET', `/admin/v1/orgs/${encodeURIComponent(id)}`),
@@ -54,9 +55,11 @@ export function Org({ args: [id] }) {
       <p class="crumbs"><a href="#/orgs">Organizations</a></p>
       <${PageHeader} title=${org.name} sub=${policySummary(org)}>
         ${canWrite && html`<button class="secondary" onClick=${() => setModal('edit')}>Edit policy</button>`}
+        ${canWrite && html`<button class="secondary" onClick=${() => setModal('clear')}>Clear cache</button>`}
         ${s.owner && html`<button class="danger" disabled=${teams.length > 0} title=${teams.length ? 'Delete its teams first' : ''} onClick=${() => setModal('delete')}>Delete</button>`}
         <a class="button secondary" href=${`#/usage?org=${encodeURIComponent(id)}`}>Usage</a>
       <//>
+      ${notice && html`<p class="notice" role="status">${notice}</p>`}
       <div class="cards">
         <${Card} label="Spend this month" value=${usd(t.cost_usd)} sub=${org.budget ? `of ${usd(org.budget.amount_usd)} ${org.budget.period}` : 'No budget'} />
         <${Card} label="Requests this month" value=${num(t.requests)} />
@@ -83,11 +86,18 @@ export function Org({ args: [id] }) {
         <${PolicyForm} kind="team" submitLabel="Create team" onCancel=${close}
           onSubmit=${async (body) => { const tm = await api('POST', `/admin/v1/orgs/${encodeURIComponent(id)}/teams`, body); location.hash = `#/teams/${encodeURIComponent(tm.id)}`; }} />
       <//>`}
+      ${modal === 'clear' && html`<${Confirm} title="Clear response cache" action="Clear cache" onClose=${close}
+        message=${`Remove every cached answer of ${org.name}'s teams? Their next requests go to the providers.`}
+        onConfirm=${async () => { const r = await api('DELETE', `/admin/v1/cache?org_id=${encodeURIComponent(id)}`); setNotice(cacheCleared(r.cleared)); }} />`}
       ${modal === 'delete' && html`<${Confirm} title="Delete organization" action="Delete organization" onClose=${close}
         message=${`Delete ${org.name}? This cannot be undone. Usage and audit history stay.`}
         onConfirm=${async () => { await api('DELETE', `/admin/v1/orgs/${encodeURIComponent(id)}`); s.refresh(); location.hash = '#/orgs'; }} />`}`;
   }}<//>`;
 }
+
+// cacheCleared reports how many answers a cache clear removed. Semantic
+// questions remembered on other replicas no longer find their answers.
+const cacheCleared = (n) => `Cleared ${num(n)} cached answer${n === 1 ? '' : 's'}.`;
 
 function keyStatus(k) {
   if (k.revoked_at) return html`<span class="badge bad">Revoked</span>`;
@@ -98,6 +108,7 @@ function keyStatus(k) {
 export function Team({ args: [id] }) {
   const s = useSession();
   const [modal, setModal] = useState(null);
+  const [notice, setNotice] = useState('');
   const [created, setCreated] = useState(null);
   const state = useLoad(async () => {
     const team = await api('GET', `/admin/v1/teams/${encodeURIComponent(id)}`);
@@ -118,9 +129,11 @@ export function Team({ args: [id] }) {
       <p class="crumbs"><a href="#/orgs">Organizations</a> / <a href=${`#/orgs/${encodeURIComponent(org.id)}`}>${org.name}</a></p>
       <${PageHeader} title=${team.name} sub=${policySummary(team)}>
         ${canWrite && html`<button class="secondary" onClick=${() => setModal({ kind: 'edit' })}>Edit policy</button>`}
+        ${canWrite && html`<button class="secondary" onClick=${() => setModal({ kind: 'clear' })}>Clear cache</button>`}
         ${canWrite && html`<button class="danger" disabled=${keys.some((k) => !k.revoked_at)} title=${keys.some((k) => !k.revoked_at) ? 'Revoke its keys first' : ''} onClick=${() => setModal({ kind: 'delete' })}>Delete</button>`}
         <a class="button secondary" href=${`#/usage?org=${encodeURIComponent(org.id)}&team=${encodeURIComponent(id)}`}>Usage</a>
       <//>
+      ${notice && html`<p class="notice" role="status">${notice}</p>`}
       <div class="cards">
         <${Card} label="Spend this month" value=${usd(t.cost_usd)} sub=${team.budget ? `of ${usd(team.budget.amount_usd)} ${team.budget.period}` : 'No budget'} />
         <${Card} label="Requests this month" value=${num(t.requests)} />
@@ -152,6 +165,9 @@ export function Team({ args: [id] }) {
         <${PolicyForm} kind="team" initial=${team} submitLabel="Save" onCancel=${close}
           onSubmit=${async (body) => { await api('PATCH', `/admin/v1/teams/${encodeURIComponent(id)}`, body); close(); state.reload(); }} />
       <//>`}
+      ${modal?.kind === 'clear' && html`<${Confirm} title="Clear response cache" action="Clear cache" onClose=${close}
+        message=${`Remove every cached answer of ${team.name}? Its next requests go to the providers.`}
+        onConfirm=${async () => { const r = await api('DELETE', `/admin/v1/cache?org_id=${encodeURIComponent(org.id)}&team_id=${encodeURIComponent(id)}`); setNotice(cacheCleared(r.cleared)); }} />`}
       ${modal?.kind === 'delete' && html`<${Confirm} title="Delete team" action="Delete team" onClose=${close}
         message=${`Delete ${team.name}? This cannot be undone. Usage and audit history stay.`}
         onConfirm=${async () => { await api('DELETE', `/admin/v1/teams/${encodeURIComponent(id)}`); location.hash = `#/orgs/${encodeURIComponent(org.id)}`; }} />`}

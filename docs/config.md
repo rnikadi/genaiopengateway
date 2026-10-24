@@ -95,6 +95,14 @@ limits:
   max_realtime_session: 30m          # realtime sessions close after this
   max_batch_file_bytes: 104857600    # batch input files, read into memory to check (batch.md)
 
+cache:                               # response cache (cache.md); policies turn it on
+  max_entry_bytes: 1048576           # larger answers are not cached
+  max_memory_bytes: 268435456        # without the valkey limiter: per replica, least recently used out
+  semantic:
+    model: embed-default             # embeddings model; required for mode: semantic
+    threshold: 0.95                  # cosine similarity a reworded question needs
+    max_entries: 10000               # questions remembered per replica
+
 providers:
   openai:
     type: openai                     # openai | anthropic | gemini | vertex | bedrock
@@ -183,10 +191,10 @@ All ids are prefixed, time-sortable strings (`org_`, `team_`, `key_`, `req_`). T
 
 | Table | Columns |
 | --- | --- |
-| `orgs` | `id`, `name`, `policy` (JSON: allowed models and MCP servers, rpm, tpm, budget, guardrails, log_bodies), `created_at`, `updated_at` |
+| `orgs` | `id`, `name`, `policy` (JSON: allowed models and MCP servers, rpm, tpm, budget, guardrails, log_bodies, cache), `created_at`, `updated_at` |
 | `teams` | `id`, `org_id`, `name`, `policy`, `created_at`, `updated_at` |
 | `api_keys` | `id`, `org_id`, `team_id`, `name`, `prefix`, `secret_hash`, `policy`, `expires_at`, `revoked_at`, `last_used_at`, `created_at`, `updated_at` |
-| `usage` | `request_id`, `ts`, `org_id`, `team_id`, `key_id`, `endpoint`, `model`, `provider`, `upstream_model`, `status`, `latency_ms`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `reasoning_tokens`, `cost_usd` |
+| `usage` | `request_id`, `ts`, `org_id`, `team_id`, `key_id`, `endpoint`, `model`, `provider`, `upstream_model`, `status`, `latency_ms`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `reasoning_tokens`, `cost_usd`, `cache_hit`, `saved_usd` (and the media counts) |
 | `audit_log` | `id`, `ts`, `actor`, `action`, `resource_type`, `resource_id`, `org_id`, `details` (JSON) |
 | `mcp_tool_pins` | `server`, `tool`, `hash` (of the definition last seen), `definition` (JSON), `approved_hash` (empty until approved), `updated_at`. Status is derived: `approved` when the hashes match, `pending` when nothing was approved, `changed` otherwise. |
 | `mcp_calls` | `id`, `ts`, `org_id`, `team_id`, `key_id`, `subject`, `virtual_server`, `server`, `method`, `name`, `status`, `error_code`, `latency_ms`, `request_id`. Pruned with `usage_retention`. |

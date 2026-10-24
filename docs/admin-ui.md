@@ -24,11 +24,11 @@ v0.3 adds a web UI for operators, sign-in through the company's identity provide
 | Page | Contents | Admin API used |
 | --- | --- | --- |
 | Overview | Spend and requests this month, top teams and models, MCP calls, tools awaiting approval, providers with errors in the last hour | `usage`, `mcp/servers`, `mcp/tools`, `providers` |
-| Organizations | List, create, edit policy (allowed models and MCP servers, RPM, TPM, budget), delete | `orgs` |
-| Organization | Its teams, usage by team, edit | `orgs/{id}`, `orgs/{id}/teams`, `usage` |
-| Team | Its keys, usage by key and model, edit policy | `teams/{id}`, `teams/{id}/keys`, `usage` |
+| Organizations | List, create, edit policy (allowed models and MCP servers, RPM, TPM, budget, response cache), delete | `orgs` |
+| Organization | Its teams, usage by team, edit, clear the response cache | `orgs/{id}`, `orgs/{id}/teams`, `usage`, `cache` |
+| Team | Its keys, usage by key and model, edit policy, clear the response cache | `teams/{id}`, `teams/{id}/keys`, `usage`, `cache` |
 | Key | Limits, expiry, revoke; the secret is shown once, on create | `keys/{id}`, `keys/{id}/revoke` |
-| Usage | Filter by organization, team, key and dates; group by model, team, key, day, provider or endpoint; chart, table and CSV download | `usage` |
+| Usage | Filter by organization, team, key and dates; group by model, team, key, day, provider or endpoint; chart, table and CSV download; cache hits and money saved when the cache answered | `usage` |
 | MCP | Upstream servers and their status, virtual servers, tools with pin status; review a tool's definition and approve it; users' connections to per-user servers, with revoke (owners); call records | `mcp/*` |
 | Jobs | Batches and video jobs of an organization: team, model, target, status, request counts and cost; cancelling a running batch (owners and organization admins; audited). Metadata only, never file contents ([batch.md](batch.md)) | `jobs` |
 | Requests | Recent model requests; for those with a logged body, the redacted request and response (owners and organization admins; each view is audited); deleting an organization's bodies before a date (owners) | `requests` |

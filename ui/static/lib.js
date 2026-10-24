@@ -104,6 +104,7 @@ export function policySummary(p) {
   if (p.budget) parts.push(`${usd(p.budget.amount_usd)} ${p.budget.period}`);
   if (p.guardrails?.length) parts.push(`${p.guardrails.length} guardrail${p.guardrails.length > 1 ? 's' : ''}`);
   if (p.log_bodies !== undefined && p.log_bodies !== null) parts.push(p.log_bodies ? 'Bodies logged' : 'Bodies not logged');
+  if (p.cache) parts.push(p.cache.mode === 'off' ? 'Cache off' : `${p.cache.mode === 'semantic' ? 'Semantic' : 'Exact'} cache ${p.cache.ttl || '1h'}`);
   return parts.join(' · ');
 }
 
@@ -208,6 +209,8 @@ export function PolicyForm({ initial = {}, kind, submitLabel, onSubmit, onCancel
     alert_at: alertAtText(initial.budget?.alert_at),
     expires_at: initial.expires_at ? initial.expires_at.slice(0, 10) : '',
     log_bodies: initial.log_bodies === undefined || initial.log_bodies === null ? '' : String(initial.log_bodies),
+    cache_mode: initial.cache?.mode ?? '',
+    cache_ttl: initial.cache?.ttl ?? '',
   });
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -227,6 +230,7 @@ export function PolicyForm({ initial = {}, kind, submitLabel, onSubmit, onCancel
       tpm: Number(v.tpm) || 0,
       budget: v.budget_amount === '' ? null : { amount_usd: Number(v.budget_amount), period: v.budget_period },
       log_bodies: v.log_bodies === '' ? null : v.log_bodies === 'true',
+      cache: v.cache_mode === '' ? null : { mode: v.cache_mode, ttl: v.cache_mode === 'off' ? '' : v.cache_ttl.trim() || '1h' },
     };
     if (body.budget && v.alert_at.trim()) {
       const at = parseAlertAt(v.alert_at);
@@ -280,6 +284,17 @@ export function PolicyForm({ initial = {}, kind, submitLabel, onSubmit, onCancel
         <option value="">${kind === 'org' ? 'Off (default)' : 'Inherit'}</option><option value="true">On</option><option value="false">Off</option>
       </select>
     <//>`}
+    <div class="row">
+      <${Field} label="Response cache" hint="Answers repeated prompts without calling the provider. Exact needs the same request; semantic also matches a reworded last question.">
+        <select value=${v.cache_mode} onChange=${set('cache_mode')}>
+          <option value="">${kind === 'org' ? 'Off (default)' : 'Inherit'}</option><option value="off">Off</option><option value="exact">Exact</option>
+          ${(me.semantic_cache || v.cache_mode === 'semantic') && html`<option value="semantic">Semantic</option>`}
+        </select>
+      <//>
+      ${(v.cache_mode === 'exact' || v.cache_mode === 'semantic') && html`<${Field} label="Reuse answers for" hint="For example 10m, 1h or 24h; at most 720h.">
+        <input value=${v.cache_ttl} placeholder="1h" onInput=${set('cache_ttl')} />
+      <//>`}
+    </div>
     ${kind === 'key' && html`<${Field} label="Expires" hint="Empty for no expiry."><input type="date" value=${v.expires_at} onInput=${set('expires_at')} /><//>`}
     <footer>
       <button type="button" class="secondary" onClick=${onCancel}>Cancel</button>
@@ -370,7 +385,7 @@ export function usageQuery({ org, team, key, group_by, period = 'month' }) {
 }
 
 export function totals(rows) {
-  const t = { requests: 0, input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, reasoning_tokens: 0, images: 0, characters: 0, audio_seconds: 0, video_seconds: 0, cost_usd: 0 };
+  const t = { requests: 0, input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, reasoning_tokens: 0, images: 0, characters: 0, audio_seconds: 0, video_seconds: 0, cost_usd: 0, cache_hits: 0, saved_usd: 0 };
   for (const r of rows) for (const k of Object.keys(t)) t[k] += r[k] || 0;
   return t;
 }
@@ -419,6 +434,7 @@ export const endpointNames = {
   'videos.remix': 'Video remix',
   realtime: 'Realtime',
   batches: 'Batch',
+  'cache.embeddings': 'Cache lookups (semantic)',
 };
 
 // priceText describes a target's price: tokens per million, and media

@@ -46,6 +46,9 @@ type Metrics struct {
 
 	guardrailChecks   *prometheus.CounterVec
 	guardrailDuration *prometheus.HistogramVec
+
+	cacheLookups *prometheus.CounterVec
+	cacheSaved   prometheus.Counter
 }
 
 // Model request latencies span milliseconds (embeddings) to minutes
@@ -124,12 +127,19 @@ func NewMetrics(usageErrors, snapshotAge, bodiesDropped func() float64) *Metrics
 		tokenRefreshes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "gog_mcp_token_refreshes_total", Help: "Refreshes of users' upstream MCP tokens, by result.",
 		}, []string{"server", "result"}),
+		cacheLookups: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "gog_cache_lookups_total", Help: "Response cache lookups, by result: hit, semantic or miss.",
+		}, []string{"result"}),
+		cacheSaved: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "gog_cache_saved_usd_total", Help: "What answers served from the response cache cost when first made, in US dollars.",
+		}),
 	}
 	m.reg.MustRegister(
 		m.requests, m.duration, m.ttfb, m.tokens, m.cost, m.fallbacks, m.limitRejection, m.unpriced,
 		m.mcpRequests, m.mcpDuration, m.mcpToolCalls, m.mcpUp, m.mcpPending,
 		m.alerts, m.alertDeliveries, m.bodiesWritten, m.redactions,
 		m.mcpConnections, m.connectFlows, m.tokenRefreshes, m.guardrailChecks, m.guardrailDuration,
+		m.cacheLookups, m.cacheSaved,
 		prometheus.NewCounterFunc(prometheus.CounterOpts{
 			Name: "gog_request_bodies_dropped_total", Help: "Bodies not logged because the queue was full or the write failed.",
 		}, bodiesDropped),
@@ -287,6 +297,14 @@ func (m *Metrics) ObserveConnectFlow(server, result string) {
 // ObserveTokenRefresh counts a token refresh: ok, invalid_grant or error.
 func (m *Metrics) ObserveTokenRefresh(server, result string) {
 	m.tokenRefreshes.WithLabelValues(server, result).Inc()
+}
+
+// ObserveCache counts a response cache lookup and what a hit saved.
+func (m *Metrics) ObserveCache(result string, savedUSD float64) {
+	m.cacheLookups.WithLabelValues(result).Inc()
+	if savedUSD > 0 {
+		m.cacheSaved.Add(savedUSD)
+	}
 }
 
 func statusClass(status int) string {

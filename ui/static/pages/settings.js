@@ -41,6 +41,13 @@ export function Settings() {
           ['Previous keys still accepted', num(d.secrets.previous_keys)],
         ]} /><p class="muted small">Encrypts logged bodies and users' MCP credentials. Rotate by moving the key to <code>secrets.previous_keys</code>.</p></section>
       </div>
+      <section class="panel"><h2>Response cache</h2><${KV} items=${[
+        ['Answers stored', d.cache.store === 'valkey' ? 'Valkey (shared by replicas)' : `In memory, up to ${num(Math.round(d.cache.max_memory_bytes / 1048576))} MiB per replica`],
+        ['Largest answer kept', `${num(Math.round(d.cache.max_entry_bytes / 1024))} KiB`],
+        ['Semantic matching model', d.cache.semantic.model || 'Not set: semantic mode is unavailable'],
+        ['Semantic similarity needed', d.cache.semantic.threshold],
+        ['Questions remembered per replica', num(d.cache.semantic.max_entries)],
+      ]} /><p class="muted small">Organizations, teams and keys turn the cache on in their policy.</p></section>
       <section class="panel"><h2>Sign-in</h2>
         ${d.sso.oidc
           ? html`<${KV} items=${[

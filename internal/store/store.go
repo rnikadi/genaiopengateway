@@ -509,7 +509,7 @@ func (s *Store) InsertUsage(ctx context.Context, recs []usage.Record) error {
 		return nil
 	}
 	return s.tx(ctx, func(tx *sql.Tx) error {
-		stmt, err := tx.PrepareContext(ctx, s.q(`INSERT INTO usage (request_id, ts, org_id, team_id, key_id, endpoint, model, provider, upstream_model, status, latency_ms, input_tokens, output_tokens, cached_input_tokens, reasoning_tokens, images, characters, audio_seconds, video_seconds, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`))
+		stmt, err := tx.PrepareContext(ctx, s.q(`INSERT INTO usage (request_id, ts, org_id, team_id, key_id, endpoint, model, provider, upstream_model, status, latency_ms, input_tokens, output_tokens, cached_input_tokens, reasoning_tokens, images, characters, audio_seconds, video_seconds, cost_usd, cache_hit, saved_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`))
 		if err != nil {
 			return err
 		}
@@ -517,9 +517,13 @@ func (s *Store) InsertUsage(ctx context.Context, recs []usage.Record) error {
 		lastUsed := map[string]int64{}
 		for _, r := range recs {
 			ts := r.Time.UnixMilli()
+			hit := 0
+			if r.CacheHit {
+				hit = 1
+			}
 			if _, err := stmt.ExecContext(ctx, r.RequestID, ts, r.OrgID, r.TeamID, r.KeyID, r.Endpoint, r.Model, r.Provider, r.UpstreamModel,
 				r.Status, r.LatencyMS, r.Tokens.InputTokens, r.Tokens.OutputTokens, r.Tokens.CachedInputTokens, r.Tokens.ReasoningTokens,
-				r.Tokens.Images, r.Tokens.Characters, r.Tokens.AudioSeconds, r.Tokens.VideoSeconds, r.CostUSD); err != nil {
+				r.Tokens.Images, r.Tokens.Characters, r.Tokens.AudioSeconds, r.Tokens.VideoSeconds, r.CostUSD, hit, r.SavedUSD); err != nil {
 				return err
 			}
 			lastUsed[r.KeyID] = max(lastUsed[r.KeyID], ts)
@@ -554,6 +558,10 @@ type UsageRow struct {
 	AudioSeconds      float64 `json:"audio_seconds"`
 	VideoSeconds      float64 `json:"video_seconds"`
 	CostUSD           float64 `json:"cost_usd"`
+	// CacheHits are requests answered from the response cache, and
+	// SavedUSD what those answers cost when they were first made.
+	CacheHits int64   `json:"cache_hits"`
+	SavedUSD  float64 `json:"saved_usd"`
 }
 
 // QueryUsage aggregates usage between From (inclusive) and To (exclusive).
@@ -579,7 +587,8 @@ func (s *Store) QueryUsage(ctx context.Context, uq UsageQuery) ([]UsageRow, erro
 	}
 	query := `SELECT ` + group + ` AS g, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),
 		COALESCE(SUM(cached_input_tokens), 0), COALESCE(SUM(reasoning_tokens), 0), COALESCE(SUM(images), 0), COALESCE(SUM(characters), 0),
-		COALESCE(SUM(audio_seconds), 0), COALESCE(SUM(video_seconds), 0), COALESCE(SUM(cost_usd), 0)
+		COALESCE(SUM(audio_seconds), 0), COALESCE(SUM(video_seconds), 0), COALESCE(SUM(cost_usd), 0),
+		COALESCE(SUM(cache_hit), 0), COALESCE(SUM(saved_usd), 0)
 		FROM usage WHERE ` + strings.Join(where, " AND ") + ` GROUP BY g ORDER BY g`
 	rows, err := s.db.QueryContext(ctx, s.q(query), args...)
 	if err != nil {
@@ -590,7 +599,7 @@ func (s *Store) QueryUsage(ctx context.Context, uq UsageQuery) ([]UsageRow, erro
 	for rows.Next() {
 		var r UsageRow
 		if err := rows.Scan(&r.Group, &r.Requests, &r.InputTokens, &r.OutputTokens, &r.CachedInputTokens, &r.ReasoningTokens,
-			&r.Images, &r.Characters, &r.AudioSeconds, &r.VideoSeconds, &r.CostUSD); err != nil {
+			&r.Images, &r.Characters, &r.AudioSeconds, &r.VideoSeconds, &r.CostUSD, &r.CacheHits, &r.SavedUSD); err != nil {
 			return nil, err
 		}
 		if uq.GroupBy == "day" {

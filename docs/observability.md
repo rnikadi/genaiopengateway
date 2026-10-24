@@ -42,6 +42,8 @@ Prometheus, at `/metrics`. All names start with `gog_`. Go runtime and process m
 | `gog_request_bodies_dropped_total` | counter | none (queue full or write failed) |
 | `gog_guardrail_checks_total` | counter | `guardrail`, `stage`, `result` (pass, match, error) |
 | `gog_guardrail_duration_seconds` | histogram | `guardrail`, `stage` |
+| `gog_cache_lookups_total` | counter | `result` (hit, semantic, miss) |
+| `gog_cache_saved_usd_total` | counter | none (what cached answers cost when first made) |
 | `gog_redactions_total` | counter | `type` (email, phone, credit_card, iban, us_ssn, secret, custom) |
 
 Labels never include org, team or key ids, to keep cardinality bounded. Per-tenant numbers come from the usage API.

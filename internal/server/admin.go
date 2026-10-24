@@ -74,6 +74,7 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	h("GET /admin/v1/batches", s.listAdminBatches)
 	h("POST /admin/v1/batches/{id}/cancel", s.cancelAdminBatch)
 	h("GET /admin/v1/videos", s.listAdminVideos)
+	h("DELETE /admin/v1/cache", s.clearCache)
 }
 
 // apiError is an admin error with an HTTP status.
@@ -180,6 +181,7 @@ type patch struct {
 	Budget            optional[policy.Budget] `json:"budget"`
 	LogBodies         optional[bool]          `json:"log_bodies"`
 	Guardrails        *[]string               `json:"guardrails"`
+	Cache             optional[policy.Cache]  `json:"cache"`
 	ExpiresAt         optional[time.Time]     `json:"expires_at"`
 	isKey             bool
 }
@@ -214,6 +216,9 @@ func (s *Server) apply(p *patch, name *string, pol *policy.Policy, expires **tim
 	if p.Guardrails != nil {
 		pol.Guardrails = slices.Compact(slices.Sorted(slices.Values(*p.Guardrails)))
 	}
+	if p.Cache.Set {
+		pol.Cache = p.Cache.Value
+	}
 	if p.ExpiresAt.Set {
 		if !p.isKey {
 			return badRequest("expires_at applies only to keys")
@@ -224,6 +229,9 @@ func (s *Server) apply(p *patch, name *string, pol *policy.Policy, expires **tim
 		return badRequest("%v", err)
 	}
 	cfg := s.rt.Load().cfg
+	if pol.Cache != nil && pol.Cache.Mode == policy.CacheSemantic && cfg.Cache.Semantic.Model == "" {
+		return badRequest("the semantic cache needs cache.semantic.model in the gateway configuration")
+	}
 	for _, m := range pol.AllowedModels {
 		if _, ok := cfg.Models[m]; !ok {
 			return badRequest("allowed model %q is not configured", m)
@@ -668,10 +676,11 @@ func (s *Server) readScope(r *http.Request, orgID, teamID, keyID string) error {
 func (s *Server) me(w http.ResponseWriter, r *http.Request) error {
 	cfg := s.rt.Load().cfg
 	writeJSON(w, http.StatusOK, map[string]any{
-		"operator":     operatorFrom(r.Context()),
-		"sso":          cfg.SSO.OIDC != nil,
-		"body_logging": cfg.BodyLogging.Enabled,
-		"guardrails":   slices.Sorted(maps.Keys(cfg.Guardrails)),
+		"operator":       operatorFrom(r.Context()),
+		"sso":            cfg.SSO.OIDC != nil,
+		"body_logging":   cfg.BodyLogging.Enabled,
+		"semantic_cache": cfg.Cache.Semantic.Model != "",
+		"guardrails":     slices.Sorted(maps.Keys(cfg.Guardrails)),
 	})
 	return nil
 }

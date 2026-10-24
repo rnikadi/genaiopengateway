@@ -134,6 +134,10 @@ func NewValkey(addr, password string) *Valkey {
 // Close closes the connection pool.
 func (v *Valkey) Close() error { return v.c.Close() }
 
+// Client is the connection pool, for other state kept in the same
+// Valkey, such as the response cache.
+func (v *Valkey) Client() redis.UniversalClient { return v.c }
+
 var addScript = redis.NewScript(`
 local v = redis.call('INCRBYFLOAT', KEYS[1], ARGV[1])
 if tonumber(ARGV[2]) > 0 and redis.call('PTTL', KEYS[1]) < 0 then

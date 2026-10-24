@@ -71,6 +71,17 @@ func (p *Principal) LogBodies() bool {
 	return false
 }
 
+// Cache returns the response cache setting of the most specific level
+// that sets one, or the zero value (off).
+func (p *Principal) Cache() policy.Cache {
+	for i := len(p.Policies) - 1; i >= 0; i-- {
+		if c := p.Policies[i].Cache; c != nil {
+			return *c
+		}
+	}
+	return policy.Cache{Mode: policy.CacheOff}
+}
+
 // Guardrails returns the guardrails named at any level, sorted and
 // without duplicates.
 func (p *Principal) Guardrails() []string {

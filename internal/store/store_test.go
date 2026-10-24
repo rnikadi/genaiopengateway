@@ -153,12 +153,15 @@ func TestUsageAggregationAndSpend(t *testing.T) {
 				return usage.Record{RequestID: "r", Time: at, OrgID: org.ID, TeamID: team.ID, KeyID: key.ID, Endpoint: "chat.completions",
 					Model: model, Provider: "p", UpstreamModel: "u", Status: 200, Tokens: usage.Tokens{InputTokens: 10, OutputTokens: 5}, CostUSD: cost}
 			}
-			err := s.InsertUsage(ctx, []usage.Record{rec("chat", day, 1.5), rec("chat", day.Add(time.Hour), 0.5), rec("embed", day.Add(24*time.Hour), 2)})
+			hit := rec("chat", day.Add(2*time.Hour), 0)
+			hit.Tokens, hit.CacheHit, hit.SavedUSD = usage.Tokens{}, true, 1.5
+			err := s.InsertUsage(ctx, []usage.Record{rec("chat", day, 1.5), rec("chat", day.Add(time.Hour), 0.5), rec("embed", day.Add(24*time.Hour), 2), hit})
 			if err != nil {
 				t.Fatal(err)
 			}
 			rows, err := s.QueryUsage(ctx, UsageQuery{OrgID: org.ID, From: day.Add(-time.Hour), To: day.Add(48 * time.Hour), GroupBy: "model"})
-			if err != nil || len(rows) != 2 || rows[0].Group != "chat" || rows[0].Requests != 2 || rows[0].CostUSD != 2 || rows[0].InputTokens != 20 {
+			if err != nil || len(rows) != 2 || rows[0].Group != "chat" || rows[0].Requests != 3 || rows[0].CostUSD != 2 || rows[0].InputTokens != 20 ||
+				rows[0].CacheHits != 1 || rows[0].SavedUSD != 1.5 {
 				t.Fatalf("by model = %+v, %v", rows, err)
 			}
 			rows, err = s.QueryUsage(ctx, UsageQuery{From: day.Add(-time.Hour), To: day.Add(48 * time.Hour), GroupBy: "day"})
@@ -180,6 +183,10 @@ func TestUsageAggregationAndSpend(t *testing.T) {
 			n, err := s.PruneUsage(ctx, day.Add(2*time.Hour))
 			if err != nil || n != 2 {
 				t.Fatalf("pruned %d, %v", n, err)
+			}
+			reqs, _, err := s.ListRequests(ctx, RequestQuery{OrgID: org.ID}, Page{})
+			if err != nil || len(reqs) != 2 || !reqs[1].CacheHit || reqs[0].CacheHit {
+				t.Fatalf("requests = %+v, %v", reqs, err)
 			}
 		})
 	}

@@ -16,6 +16,14 @@ import (
 	"github.com/rnikadi/genaiopengateway/internal/store"
 )
 
+// cacheStoreName is where cached answers live: valkey or memory.
+func cacheStoreName(cfg *config.Config) string {
+	if cfg.Limiter.Driver == "valkey" {
+		return "valkey"
+	}
+	return "memory"
+}
+
 // Version is the gateway's version, set by main.
 var Version = "dev"
 
@@ -251,6 +259,12 @@ func (s *Server) settings(w http.ResponseWriter, r *http.Request) error {
 			"driver": cfg.Limiter.Driver, "fail_open_rate_limits": cfg.Limiter.FailOpenRateLimits, "fail_open_budgets": cfg.Limiter.FailOpenBudgets,
 		},
 		"limits": map[string]any{"max_request_bytes": cfg.Limits.MaxRequestBytes},
+		"cache": map[string]any{
+			"store": cacheStoreName(cfg), "max_entry_bytes": cfg.Cache.MaxEntryBytes, "max_memory_bytes": cfg.Cache.MaxMemoryBytes,
+			"semantic": map[string]any{
+				"model": cfg.Cache.Semantic.Model, "threshold": cfg.Cache.Semantic.Threshold, "max_entries": cfg.Cache.Semantic.MaxEntries,
+			},
+		},
 		"body_logging": map[string]any{
 			"enabled": cfg.BodyLogging.Enabled, "retention": duration(cfg.BodyLogging.Retention), "max_body_bytes": cfg.BodyLogging.MaxBodyBytes,
 			"detectors": cfg.BodyLogging.Redact.Builtin, "custom_patterns": len(cfg.BodyLogging.Redact.Patterns),
