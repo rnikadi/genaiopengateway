@@ -15,6 +15,7 @@ import { Alerts } from './pages/alerts.js';
 import { Settings } from './pages/settings.js';
 import { Playground } from './pages/playground.js';
 import { Config } from './pages/config.js';
+import { Jobs } from './pages/jobs.js';
 
 const routes = [
   [/^\/$/, Overview, 'overview'],
@@ -24,6 +25,7 @@ const routes = [
   [/^\/usage$/, Usage, 'usage'],
   [/^\/requests$/, Requests, 'requests'],
   [/^\/requests\/([^/]+)$/, RequestBody, 'requests'],
+  [/^\/jobs$/, Jobs, 'jobs'],
   [/^\/guardrails$/, Guardrails, 'guardrails'],
   [/^\/mcp$/, MCP, 'mcp'],
   [/^\/models$/, Models, 'models'],
@@ -40,6 +42,7 @@ const nav = [
   ['orgs', '#/orgs', 'Organizations'],
   ['usage', '#/usage', 'Usage'],
   ['requests', '#/requests', 'Requests'],
+  ['jobs', '#/jobs', 'Jobs'],
   ['guardrails', '#/guardrails', 'Guardrails'],
   ['mcp', '#/mcp', 'MCP'],
   ['models', '#/models', 'Models'],

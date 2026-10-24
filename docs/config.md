@@ -93,6 +93,7 @@ limiter:
 limits:
   max_request_bytes: 33554432        # 32 MiB; also each realtime message
   max_realtime_session: 30m          # realtime sessions close after this
+  max_batch_file_bytes: 104857600    # batch input files, read into memory to check (batch.md)
 
 providers:
   openai:
@@ -132,7 +133,8 @@ models:
       - provider: openai
         model: gpt-image-1
         price: {per_image: 0.04}     # also per_mchars, per_audio_minute, per_video_second, per_request,
-                                     # audio_input_per_mtok, audio_output_per_mtok (realtime)
+                                     # audio_input_per_mtok, audio_output_per_mtok (realtime),
+                                     # batch_discount (0.5 for half price in batches)
 
 keys:                                # static keys; read-only
   - name: local-dev

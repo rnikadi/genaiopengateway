@@ -209,6 +209,7 @@ func (s *Server) Start(ctx context.Context) {
 	go s.keyExpiryLoop(ctx)
 	go s.bodyPruneLoop(ctx)
 	go s.connectionsLoop(ctx)
+	go s.batchPollLoop(ctx)
 	if retention := s.rt.Load().cfg.Store.UsageRetention.Std(); retention > 0 {
 		go s.pruneLoop(ctx, retention)
 	}
@@ -378,6 +379,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/videos/{id}", s.videoJob(http.MethodDelete, ""))
 	mux.HandleFunc("GET /v1/videos/{id}/content", s.videoJob(http.MethodGet, "/content"))
 	mux.HandleFunc("POST /v1/videos/{id}/remix", s.model(provider.VideoRemix))
+	mux.HandleFunc("POST /v1/files", s.uploadFile)
+	mux.HandleFunc("GET /v1/files", s.listFiles)
+	mux.HandleFunc("GET /v1/files/{id}", s.fileCall(http.MethodGet, ""))
+	mux.HandleFunc("DELETE /v1/files/{id}", s.fileCall(http.MethodDelete, ""))
+	mux.HandleFunc("GET /v1/files/{id}/content", s.fileCall(http.MethodGet, "/content"))
+	mux.HandleFunc("POST /v1/batches", s.createBatch)
+	mux.HandleFunc("GET /v1/batches", s.listBatches)
+	mux.HandleFunc("GET /v1/batches/{id}", s.batchCall(http.MethodGet, ""))
+	mux.HandleFunc("POST /v1/batches/{id}/cancel", s.batchCall(http.MethodPost, "/cancel"))
 	mux.HandleFunc("GET /v1/realtime", s.realtime)
 	mux.HandleFunc("/mcp/{name}", s.serveMCP)
 	if s.store != nil {

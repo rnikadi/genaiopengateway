@@ -26,7 +26,7 @@ models:
 	if c.Listen != DefaultListen || p.Type != ProviderOpenAI || p.APIKey.Value() != "secret-value" || p.BaseURL != "https://api.openai.com/v1" {
 		t.Fatalf("unexpected config: %+v", c)
 	}
-	if p.Timeout.Std() != DefaultProviderTimeout || c.Limits.MaxRequestBytes != DefaultMaxRequestBytes || c.Limiter.Driver != "memory" || !c.Limiter.FailOpenRateLimits || c.Limiter.FailOpenBudgets {
+	if p.Timeout.Std() != DefaultProviderTimeout || c.Limits.MaxRequestBytes != DefaultMaxRequestBytes || c.Limits.MaxBatchFileBytes != DefaultMaxBatchFileBytes || c.Limiter.Driver != "memory" || !c.Limiter.FailOpenRateLimits || c.Limiter.FailOpenBudgets {
 		t.Fatalf("defaults not applied: %+v", c)
 	}
 }
@@ -50,6 +50,8 @@ func TestParseRejectsBadConfig(t *testing.T) {
 		"no targets":              `models: {chat: {targets: []}}`,
 		"empty target model":      `{providers: {p: {base_url: "http://x"}}, models: {chat: {targets: [{provider: p}]}}}`,
 		"negative price":          `{providers: {p: {base_url: "http://x"}}, models: {chat: {targets: [{provider: p, model: m, price: {input_per_mtok: -1}}]}}}`,
+		"batch discount over 1":   `{providers: {p: {base_url: "http://x"}}, models: {chat: {targets: [{provider: p, model: m, price: {batch_discount: 1.5}}]}}}`,
+		"zero batch file limit":   `limits: {max_batch_file_bytes: 0}`,
 		"no base url":             `providers: {p: {type: openai}}`,
 		"bad base url":            `providers: {p: {base_url: "ftp://x"}}`,
 		"bad type":                `providers: {p: {type: magic, base_url: "http://x"}}`,

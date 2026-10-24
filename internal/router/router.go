@@ -222,7 +222,7 @@ func (r *Router) Forwarder(providerName string) (provider.Forwarder, bool) {
 var AllEndpoints = []provider.Endpoint{
 	provider.ChatCompletions, provider.Responses, provider.Messages, provider.GenerateContent, provider.Embeddings,
 	provider.ImageGenerations, provider.ImageEdits, provider.Speech, provider.Transcriptions, provider.Translations,
-	provider.Moderations, provider.Rerank, provider.Videos, provider.Realtime,
+	provider.Moderations, provider.Rerank, provider.Videos, provider.Realtime, provider.Batches,
 }
 
 // Endpoints lists what a provider serves for an upstream model.

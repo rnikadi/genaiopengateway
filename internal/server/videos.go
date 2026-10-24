@@ -21,7 +21,7 @@ const maxJobObject = 1 << 20
 
 var (
 	errJobNotFound = errors.New("video not found")
-	errNoDatabase  = errors.New("video jobs need a database")
+	errNoDatabase  = errors.New("this endpoint needs a database")
 )
 
 // createsJob reports whether an endpoint answers with a new video job.
@@ -123,7 +123,7 @@ func (s *Server) videoJob(method, suffix string) http.HandlerFunc {
 		if v := r.URL.Query().Get("variant"); suffix != "" && v != "" {
 			path += "?" + url.Values{"variant": {v}}.Encode()
 		}
-		resp, err := f.Forward(r.Context(), method, path)
+		resp, err := f.Forward(r.Context(), method, path, nil, "")
 		if err != nil {
 			s.log.Warn("video job call failed", "video_id", j.ID, "provider", j.Provider, "err", err)
 			writeError(w, provider.Videos, http.StatusBadGateway, codeAllTargetsFailed, "the upstream did not answer")

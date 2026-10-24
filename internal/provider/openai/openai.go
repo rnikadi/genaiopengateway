@@ -34,6 +34,7 @@ var paths = map[provider.Endpoint]string{
 	provider.Translations:     "/audio/translations",
 	provider.Moderations:      "/moderations",
 	provider.Rerank:           "/rerank",
+	provider.Batches:          "/batches",
 	provider.Videos:           "/videos",
 	provider.VideoRemix:       "/videos/{id}/remix",
 }
@@ -163,12 +164,15 @@ func (p *Provider) Send(ctx context.Context, req *provider.Request) (*provider.R
 }
 
 // Forward implements provider.Forwarder.
-func (p *Provider) Forward(ctx context.Context, method, path string) (*http.Response, error) {
+func (p *Provider) Forward(ctx context.Context, method, path string, body io.Reader, contentType string) (*http.Response, error) {
 	ctx, cancel := context.WithTimeout(ctx, p.cfg.Timeout.Std())
-	hreq, err := p.newRequest(ctx, method, path, nil)
+	hreq, err := p.newRequest(ctx, method, path, body)
 	if err != nil {
 		cancel()
 		return nil, err
+	}
+	if contentType != "" {
+		hreq.Header.Set("Content-Type", contentType)
 	}
 	resp, err := p.client.Do(hreq)
 	if err != nil {

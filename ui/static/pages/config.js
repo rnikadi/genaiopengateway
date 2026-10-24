@@ -170,6 +170,7 @@ const mediaPrices = [
   ['per_request', 'USD per request'],
   ['audio_input_per_mtok', 'USD per million audio input tokens (realtime)'],
   ['audio_output_per_mtok', 'USD per million audio output tokens (realtime)'],
+  ['batch_discount', 'Fraction off in batches, such as 0.5 for half price'],
 ];
 
 function ModelForm({ spec, providers, onChange }) {
@@ -197,7 +198,7 @@ function ModelForm({ spec, providers, onChange }) {
         <${Field} label="Output, USD per million tokens"><input type="number" min="0" step="any" value=${t.price?.output_per_mtok ?? ''} onInput=${(e) => setPrice(i, 'output_per_mtok', e.target.value)} /><//>
       </div>
       <details open=${mediaPrices.some(([k]) => t.price?.[k])}>
-        <summary class="small">Media prices: images, speech, audio, video, requests</summary>
+        <summary class="small">More prices: images, speech, audio, video, requests, batch discount</summary>
         <div class="row">
           ${mediaPrices.map(([k, label]) => html`<${Field} label=${label} key=${k}><input type="number" min="0" step="any" value=${t.price?.[k] ?? ''} onInput=${(e) => setPrice(i, k, e.target.value)} /><//>`)}
         </div>

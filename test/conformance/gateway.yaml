@@ -8,7 +8,7 @@ providers:
   # The fake upstream's realtime WebSocket listens on the next port.
   live: {base_url: "http://127.0.0.1:18192/v1", api_key: upstream-key}
 models:
-  chat: {targets: [{provider: up, model: up-chat, price: {input_per_mtok: 1, output_per_mtok: 2}}]}
+  chat: {targets: [{provider: up, model: up-chat, price: {input_per_mtok: 1, output_per_mtok: 2, batch_discount: 0.5}}]}
   embed: {targets: [{provider: up, model: up-embed}]}
   image: {targets: [{provider: up, model: gpt-image-1, price: {per_image: 0.04}}]}
   speech: {targets: [{provider: up, model: tts-1, price: {per_mchars: 15}}]}

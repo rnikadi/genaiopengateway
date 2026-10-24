@@ -153,4 +153,4 @@ Each step is one pull request with its tests, docs and conformance cases. The or
 
 ## Not in this design
 
-- Batch (`/v1/batches`, `/v1/files`), semantic cache, WebRTC: they stay in issue #35 for later.
+- Batch (`/v1/batches`, `/v1/files`) has its own design in [batch.md](batch.md). Semantic cache and WebRTC stay in issue #35 for later.
