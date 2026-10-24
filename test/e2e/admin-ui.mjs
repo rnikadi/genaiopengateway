@@ -128,6 +128,8 @@ await step('owner calls a model as a team in the playground', async () => {
   const { ctx, page } = await signIn('owner@example.com');
   const org = (await adminAPI('GET', '/admin/v1/orgs?limit=500')).data.find((o) => o.name === orgName);
   await page.click('nav >> text=Playground');
+  // The Overview has an organization picker too: pick on the playground.
+  await page.waitForSelector('h1:has-text("Playground")');
   await page.selectOption('label:has-text("Organization") select', org.id);
   try {
     await page.waitForSelector('label:has-text("Team") option:has-text("guarded")', { state: 'attached', timeout: 10000 });
