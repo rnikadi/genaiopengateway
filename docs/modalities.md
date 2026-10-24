@@ -90,7 +90,14 @@ Usage by organization, team, key, model, provider and endpoint shows the new cou
 
 ## Video jobs
 
-`POST /v1/videos` creates a job on the first target that accepts it. The gateway stores the job's id with the organization, team, key, provider and model (`video_jobs` table), and answers with the upstream's job object. `GET`, `DELETE`, `content` and `remix` look the job up, check that the caller's team owns it, and go to the same provider. Listing returns the team's jobs from the store, refreshed from the provider. A remix is a new job, charged like one.
+Videos are made by jobs that run for minutes, so the gateway keeps a record of each job in the store (`video_jobs` table): the upstream's job id, the organization, team and key that created it, the virtual model, the target, and the last job object the upstream returned.
+
+- `POST /v1/videos` (JSON, or multipart with an `input_reference` image) goes through the model handler like every model endpoint: policies, limits, fallback, input guardrails on the prompt. The job is created on the first target that accepts it and recorded. It is charged when it is created, by the `seconds` the job object reports, so budgets hold back work before it runs. A job that later fails is not refunded.
+- `POST /v1/videos/{id}/remix` is a new job, made on the same target as the original, and handled and charged like a created one.
+- `GET /v1/videos/{id}`, `DELETE /v1/videos/{id}` and `GET /v1/videos/{id}/content` (with its `variant` query) look the job up, check that the caller owns it, and go to the target that created it. They are not charged and do not count toward request limits, since clients poll. A retrieve updates the stored job object; a delete removes the record.
+- `GET /v1/videos` lists the caller's jobs from the store, newest first, as their last stored objects, with OpenAI's `limit` and `after` paging.
+
+A caller owns a job when it is in the same organization and team. Static keys from the file share no team, so each owns only the jobs it created. Other callers get `404`, so job ids do not leak across teams. Without a database the video endpoints answer `501`.
 
 ## Realtime
 

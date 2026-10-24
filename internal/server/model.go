@@ -62,6 +62,10 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 			return
 		}
 		rec.OrgID, rec.TeamID, rec.KeyID, rec.KeyPrefix = p.OrgID, p.TeamID, p.KeyID, p.KeyPrefix
+		if createsJob(ep) && s.store == nil {
+			fail(jobError(errNoDatabase))
+			return
+		}
 
 		raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, rt.cfg.Limits.MaxRequestBytes))
 		if err != nil {
@@ -85,6 +89,16 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 		} else if json.Unmarshal(raw, &body) != nil || body == nil {
 			fail(http.StatusBadRequest, codeInvalidRequest, "request body must be a JSON object")
 			return
+		}
+		var job *store.VideoJob
+		if ep == provider.VideoRemix {
+			// A remix is made on the original job's model and target.
+			if job, err = s.ownedJob(r, p); err != nil {
+				fail(jobError(err))
+				return
+			}
+			body["model"], _ = json.Marshal(job.Model)
+			raw, _ = json.Marshal(body)
 		}
 		if ep == provider.GenerateContent {
 			if !googleRequest(r, body) {
@@ -154,7 +168,14 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 				hdr[h] = v
 			}
 		}
-		res, err := rt.router.Route(r.Context(), ep, envelope.Model, body, provider.Request{Stream: envelope.Stream, Header: hdr, Files: files})
+		preq := provider.Request{Stream: envelope.Stream, Header: hdr, Files: files}
+		var res *router.Result
+		if job != nil {
+			preq.JobID = job.ID
+			res, err = rt.router.RouteTo(r.Context(), ep, envelope.Model, job.Provider, job.UpstreamModel, body, preq)
+		} else {
+			res, err = rt.router.Route(r.Context(), ep, envelope.Model, body, preq)
+		}
 		if res != nil {
 			rec.Fallbacks = len(res.Failed)
 			for _, a := range res.Failed {
@@ -190,6 +211,11 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 		var src io.Reader = resp.Body
 		if capture != nil {
 			src = io.TeeReader(resp.Body, capture)
+		}
+		var created *captureBuffer
+		if createsJob(ep) && resp.StatusCode == http.StatusOK {
+			created = &captureBuffer{max: maxJobObject}
+			src = io.TeeReader(src, created)
 		}
 		if resp.StatusCode == http.StatusOK && rt.guards.Applies(config.StageOutput, names) && textOutput(ep) && !binaryMedia(contentType) {
 			// Output guardrails see the whole response before the client.
@@ -243,6 +269,9 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 			})
 		}
 
+		if created != nil {
+			s.recordJob(context.WithoutCancel(r.Context()), p, envelope.Model, res.Target, created)
+		}
 		if resp.StatusCode == http.StatusOK {
 			rec.Tokens = *resp.Usage
 			rec.CostUSD = usage.Cost(rec.Tokens, res.Target.Price)
@@ -266,9 +295,14 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 }
 
 // textOutput reports whether an endpoint answers with text that output
-// guardrails check. Images and speech answer with media.
+// guardrails check. Images and speech answer with media, and video
+// endpoints with a job.
 func textOutput(ep provider.Endpoint) bool {
-	return ep != provider.ImageGenerations && ep != provider.ImageEdits && ep != provider.Speech
+	switch ep {
+	case provider.ImageGenerations, provider.ImageEdits, provider.Speech, provider.Videos, provider.VideoRemix:
+		return false
+	}
+	return true
 }
 
 // setGuardrailsHeader names the guardrails that acted.

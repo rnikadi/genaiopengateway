@@ -415,6 +415,8 @@ export const endpointNames = {
   'audio.translations': 'Audio translation',
   moderations: 'Moderation',
   rerank: 'Rerank',
+  videos: 'Videos',
+  'videos.remix': 'Video remix',
 };
 
 // priceText describes a target's price: tokens per million, and media

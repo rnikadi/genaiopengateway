@@ -13,5 +13,6 @@ models:
   transcribe: {targets: [{provider: up, model: whisper-1, price: {per_audio_minute: 0.006}}]}
   moderate: {targets: [{provider: up, model: omni-moderation-latest}]}
   rerank: {targets: [{provider: up, model: rerank-v3.5, price: {per_request: 0.002}}]}
+  video: {targets: [{provider: up, model: sora-2, price: {per_video_second: 0.1}}]}
 keys:
   - {name: conformance, key: conformance-key-0000000000}

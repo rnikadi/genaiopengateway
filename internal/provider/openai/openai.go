@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/rnikadi/genaiopengateway/internal/config"
@@ -31,6 +32,8 @@ var paths = map[provider.Endpoint]string{
 	provider.Translations:     "/audio/translations",
 	provider.Moderations:      "/moderations",
 	provider.Rerank:           "/rerank",
+	provider.Videos:           "/videos",
+	provider.VideoRemix:       "/videos/{id}/remix",
 }
 
 // Provider is an OpenAI-compatible upstream.
@@ -56,14 +59,19 @@ func (p *Provider) Send(ctx context.Context, req *provider.Request) (*provider.R
 	if req.Stream && req.Endpoint == provider.ChatCompletions {
 		body, injected = withStreamUsage(body)
 	}
+	if req.Endpoint == provider.VideoRemix {
+		// A remix takes the original job's model; the field is refused.
+		body = withoutModel(body)
+	}
 	if req.Files != nil {
 		var err error
 		if body, contentType, err = encodeMultipart(req.Body, req.Files); err != nil {
 			return nil, err
 		}
 	}
+	path := strings.Replace(paths[req.Endpoint], "{id}", url.PathEscape(req.JobID), 1)
 	ctx, cancel := context.WithTimeout(ctx, p.cfg.Timeout.Std())
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.cfg.BaseURL+paths[req.Endpoint], bytes.NewReader(body))
+	hreq, err := p.newRequest(ctx, http.MethodPost, path, bytes.NewReader(body))
 	if err != nil {
 		cancel()
 		return nil, err
@@ -71,12 +79,6 @@ func (p *Provider) Send(ctx context.Context, req *provider.Request) (*provider.R
 	hreq.Header.Set("Content-Type", contentType)
 	if req.Stream {
 		hreq.Header.Set("Accept", "text/event-stream")
-	}
-	if key := p.cfg.APIKey.Value(); key != "" {
-		hreq.Header.Set("Authorization", "Bearer "+key)
-	}
-	for k, v := range p.cfg.Headers {
-		hreq.Header.Set(k, v)
 	}
 
 	resp, err := p.client.Do(hreq)
@@ -130,6 +132,53 @@ func (p *Provider) Send(ctx context.Context, req *provider.Request) (*provider.R
 	readUsage(req.Endpoint, buf, out.Usage)
 	out.Body = io.NopCloser(bytes.NewReader(buf))
 	return out, nil
+}
+
+// Forward implements provider.Forwarder.
+func (p *Provider) Forward(ctx context.Context, method, path string) (*http.Response, error) {
+	ctx, cancel := context.WithTimeout(ctx, p.cfg.Timeout.Std())
+	hreq, err := p.newRequest(ctx, method, path, nil)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	resp, err := p.client.Do(hreq)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	resp.Body = &cancelOnClose{ReadCloser: resp.Body, cancel: cancel}
+	return resp, nil
+}
+
+// newRequest builds an upstream request with the provider's key and
+// headers.
+func (p *Provider) newRequest(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
+	hreq, err := http.NewRequestWithContext(ctx, method, p.cfg.BaseURL+path, body)
+	if err != nil {
+		return nil, err
+	}
+	if key := p.cfg.APIKey.Value(); key != "" {
+		hreq.Header.Set("Authorization", "Bearer "+key)
+	}
+	for k, v := range p.cfg.Headers {
+		hreq.Header.Set(k, v)
+	}
+	return hreq, nil
+}
+
+// withoutModel removes "model" from a JSON object body.
+func withoutModel(body []byte) []byte {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(body, &m) != nil {
+		return body
+	}
+	delete(m, "model")
+	out, err := json.Marshal(m)
+	if err != nil {
+		return body
+	}
+	return out
 }
 
 // withStreamUsage asks the upstream to send a final usage chunk, unless

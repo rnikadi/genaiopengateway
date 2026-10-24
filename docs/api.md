@@ -19,7 +19,9 @@ Request and response bodies follow the [OpenAI API reference](https://platform.o
 | `POST /v1/audio/transcriptions`, `POST /v1/audio/translations` | OpenAI speech to text, multipart. Streamed transcripts are refused while `output` guardrails apply to the key | v0.8 |
 | `POST /v1/moderations` | OpenAI moderations | v0.8 |
 | `POST /v1/rerank` | Rerank with `query` and `documents`, the shape of Cohere, Jina and vLLM | v0.8 |
-| `/v1/realtime`, `/v1/videos` | OpenAI contracts ([modalities.md](modalities.md)) | v0.8, next |
+| `POST /v1/videos`, `POST /v1/videos/{id}/remix` | OpenAI video jobs, JSON or multipart with `input_reference`; charged by the job's `seconds` when it is created | v0.8 |
+| `GET /v1/videos`, `GET`/`DELETE /v1/videos/{id}`, `GET /v1/videos/{id}/content` | The caller's video jobs, at the target that made them. Listing returns each job as last retrieved. Other teams get `404`; these calls are not charged and do not count toward limits | v0.8 |
+| `/v1/realtime` | OpenAI realtime over WebSocket ([modalities.md](modalities.md)) | v0.8, next |
 
 ### Authentication
 
@@ -61,9 +63,11 @@ OpenAI-style endpoints return `{"error": {"message": "...", "type": "<code>", "c
 | 401 | `invalid_api_key` | Key missing, unknown, revoked or expired |
 | 403 | `model_not_allowed` | Key, team or organization may not use this model |
 | 404 | `model_not_found` | Virtual model does not exist, or does not support this endpoint |
+| 404 | `not_found` | The video job does not exist or belongs to another team |
 | 413 | `request_too_large` | Body exceeds `limits.max_request_bytes` |
 | 429 | `rate_limit_exceeded` | A requests or tokens per minute limit was hit; `retry-after` is set |
 | 429 | `budget_exceeded` | A budget for the current period is spent |
+| 501 | `database_required` | Video jobs need `store` configured |
 | 502 | `all_targets_failed` | No target produced a response |
 | 503 | `limiter_unavailable` | Budget state could not be checked and budgets fail closed |
 

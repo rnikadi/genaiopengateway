@@ -372,6 +372,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/audio/translations", s.model(provider.Translations))
 	mux.HandleFunc("POST /v1/moderations", s.model(provider.Moderations))
 	mux.HandleFunc("POST /v1/rerank", s.model(provider.Rerank))
+	mux.HandleFunc("POST /v1/videos", s.model(provider.Videos))
+	mux.HandleFunc("GET /v1/videos", s.listVideos)
+	mux.HandleFunc("GET /v1/videos/{id}", s.videoJob(http.MethodGet, ""))
+	mux.HandleFunc("DELETE /v1/videos/{id}", s.videoJob(http.MethodDelete, ""))
+	mux.HandleFunc("GET /v1/videos/{id}/content", s.videoJob(http.MethodGet, "/content"))
+	mux.HandleFunc("POST /v1/videos/{id}/remix", s.model(provider.VideoRemix))
 	mux.HandleFunc("/mcp/{name}", s.serveMCP)
 	if s.store != nil {
 		mux.HandleFunc("GET /mcp/connect/callback", s.connectCallback)

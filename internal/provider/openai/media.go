@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"mime/multipart"
 	"net/textproto"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -79,7 +80,8 @@ func characters(body []byte) int64 {
 }
 
 // mediaUsage adds what a JSON response or stream event says about media
-// units to t: images returned, and seconds of audio transcribed.
+// units to t: images returned, seconds of audio transcribed, and seconds
+// of video a job makes.
 func mediaUsage(ep provider.Endpoint, data []byte, t *usage.Tokens) {
 	switch ep {
 	case provider.ImageGenerations, provider.ImageEdits:
@@ -112,6 +114,17 @@ func mediaUsage(ep provider.Endpoint, data []byte, t *usage.Tokens) {
 			t.AudioSeconds = v.Usage.Seconds
 		case v.Duration > 0:
 			t.AudioSeconds = v.Duration
+		}
+	case provider.Videos, provider.VideoRemix:
+		// OpenAI writes seconds as a string, such as "8".
+		var v struct {
+			Seconds json.RawMessage `json:"seconds"`
+		}
+		if json.Unmarshal(data, &v) != nil || len(v.Seconds) == 0 {
+			return
+		}
+		if n, err := strconv.ParseFloat(strings.Trim(string(v.Seconds), `"`), 64); err == nil && n > 0 {
+			t.VideoSeconds = n
 		}
 	}
 }

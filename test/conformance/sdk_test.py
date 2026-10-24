@@ -51,6 +51,19 @@ r = httpx.post(BASE + "/v1/rerank", headers={"Authorization": "Bearer conformanc
                json={"model": "rerank", "query": "q", "documents": ["a", "b"]})
 check("rerank", r.status_code == 200 and r.json()["results"][0]["index"] == 0)
 
+v = client.videos.create(model="video", prompt="a falcon", seconds="8")
+check("videos.create", v.id == "video_1" and v.status == "queued")
+v = client.videos.create(model="video", prompt="from a still", seconds="8", input_reference=("still.png", PNG, "image/png"))
+check("videos.create with input_reference (multipart)", v.id == "video_1")
+v = client.videos.retrieve("video_1")
+check("videos.retrieve", v.status == "completed" and v.progress == 100)
+check("videos.download_content", client.videos.download_content("video_1", variant="thumbnail").content == b"fake-variant=thumbnail")
+page = client.videos.list()
+check("videos.list", [x.id for x in page.data] == ["video_1"] and page.data[0].status == "completed")
+r = client.videos.remix("video_1", prompt="at night")
+check("videos.remix", r.id == "video_1-remix" and r.remixed_from_video_id == "video_1")
+check("videos.delete", client.videos.delete("video_1-remix").deleted is True)
+
 try:
     client.audio.speech.create(model="chat-missing", voice="alloy", input="x")
     check("unknown model is refused", False)
@@ -67,7 +80,7 @@ def usage():
 # Usage records are written in batches.
 for _ in range(50):
     rows = usage()
-    if len(rows) >= 9:
+    if len(rows) >= 11:
         break
     time.sleep(0.2)
 check("images metered", rows["images.generations"]["images"] == 2 and rows["images.edits"]["images"] == 1)
@@ -75,5 +88,7 @@ check("speech characters metered", rows["audio.speech"]["characters"] == len("he
 check("audio seconds metered", rows["audio.transcriptions"]["audio_seconds"] == 90 and rows["audio.translations"]["audio_seconds"] == 90)
 check("image cost", abs(rows["images.generations"]["cost_usd"] - 0.08) < 1e-9)
 check("transcription cost", abs(rows["audio.transcriptions"]["cost_usd"] - 0.009) < 1e-9)
+check("video seconds metered", rows["videos"]["video_seconds"] == 16 and rows["videos.remix"]["video_seconds"] == 4)
+check("video cost", abs(rows["videos"]["cost_usd"] - 1.6) < 1e-9)
 check("rerank cost", abs(rows["rerank"]["cost_usd"] - 0.002) < 1e-9)
 print("conformance: all checks passed")
