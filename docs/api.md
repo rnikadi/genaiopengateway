@@ -93,6 +93,7 @@ Base path `/admin/v1`. JSON in and out. Authenticate with `Authorization: Bearer
 | `GET /admin/v1/providers` | Providers with `type`, `base_url`, `region`, `project`, `location`, `auth`, `timeout`, `header_names`, the `models` using them and last-hour `health`. Never credentials |
 | `GET /admin/v1/guardrails` | Guardrail definitions: `type`, `action`, `stages`, `detect`, `patterns`, `model`, `unsafe_if`, `webhook_host`, `timeout`, `on_error`, and the `virtual_servers` that attach them |
 | `GET /admin/v1/alerts/webhooks` | Alert webhooks: `name`, `format`, `events`, `org`, `host` (no path), `signed`; and `budget_thresholds` (owners only) |
+| `POST /admin/v1/playground/chat/completions?team_id=` | Call a model as a team with an OpenAI chat completions body; the team's organization and team policies apply, usage is recorded under the team, and each call is audited as `playground.chat` (owners and the organization's admins, [playground.md](playground.md)) |
 | `GET /admin/v1/settings` | The gateway's own settings; secrets only as set or not set (owners only, [admin-ui-config.md](admin-ui-config.md)) |
 
 Organizations, teams and keys share the same policy fields, all optional:

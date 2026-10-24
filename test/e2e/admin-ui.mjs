@@ -124,6 +124,34 @@ await step('owner turns on a guardrail and sees it block', async () => {
   await ctx.close();
 });
 
+await step('owner calls a model as a team in the playground', async () => {
+  const { ctx, page } = await signIn('owner@example.com');
+  const org = (await adminAPI('GET', '/admin/v1/orgs?limit=500')).data.find((o) => o.name === orgName);
+  await page.click('nav >> text=Playground');
+  await page.selectOption('label:has-text("Organization") select', org.id);
+  try {
+    await page.waitForSelector('label:has-text("Team") option:has-text("guarded")', { state: 'attached', timeout: 10000 });
+  } catch (err) {
+    // Say what the page shows instead, so a failure in CI can be diagnosed.
+    const shown = await page.evaluate(() => ({
+      org: document.querySelector('label.inline select')?.value,
+      teams: [...document.querySelectorAll('label.inline')].map((l) => l.textContent),
+      errors: [...document.querySelectorAll('.notice.error, .error')].map((e) => e.textContent),
+      text: document.querySelector('main')?.innerText.slice(0, 600),
+    }));
+    console.log('playground shows', JSON.stringify(shown), 'expected org', org.id);
+    throw err;
+  }
+  await page.selectOption('label:has-text("Team") select', { label: 'guarded' });
+  await page.fill('textarea[placeholder=Message]', 'Mail jane@example.com');
+  await page.click('button:has-text("Send")');
+  // The team's guardrails apply in the playground as they do for its keys.
+  await page.waitForSelector('.notice.error:has-text("no-pii")');
+  const audit = await adminAPI('GET', `/admin/v1/audit?org_id=${org.id}`);
+  assert.equal(audit.data[0].action, 'playground.chat');
+  await ctx.close();
+});
+
 await step('owner approves an MCP tool', async () => {
   const { ctx, page } = await signIn('owner@example.com');
   await page.click('text=MCP');

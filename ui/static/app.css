@@ -187,3 +187,12 @@ ul.alerts .muted { margin-right: 8px; }
 .kv dt { font-size: 12px; color: var(--muted); }
 .kv dd { margin: 2px 0 0; overflow-wrap: anywhere; }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* playground */
+.conversation { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
+.msg { padding: 10px 12px; border-radius: var(--radius); border: 1px solid var(--line); max-width: 85%; }
+.msg.user { align-self: flex-end; background: var(--accent-soft); border-color: transparent; }
+.msg-text { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 2px; }
+.compose { display: flex; gap: 8px; align-items: flex-end; }
+.compose textarea { flex: 1; }
+textarea { width: 100%; font: inherit; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); resize: vertical; box-sizing: border-box; }

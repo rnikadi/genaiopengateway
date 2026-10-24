@@ -56,6 +56,7 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	h("GET /admin/v1/guardrails", s.listGuardrails)
 	h("GET /admin/v1/alerts/webhooks", s.listWebhooks)
 	h("GET /admin/v1/settings", s.settings)
+	h("POST /admin/v1/playground/chat/completions", s.playgroundChat)
 	h("GET /admin/v1/alerts", s.listAlerts)
 	h("POST /admin/v1/alerts/test", s.testAlert)
 	h("GET /admin/v1/mcp/connections", s.listMCPConnections)

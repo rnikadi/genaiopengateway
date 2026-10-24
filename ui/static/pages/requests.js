@@ -1,5 +1,5 @@
 import { guardrailColumns } from './guardrails.js';
-import { html, useState, useEffect, api, qs, useLoad, useSession, PageHeader, OrgPicker, defaultOrg, Table, Loading, ErrorBox, JSONView, when, usd, num } from '../lib.js';
+import { html, useState, useEffect, api, qs, useLoad, useSession, PageHeader, OrgPicker, defaultOrg, Table, Loading, ErrorBox, JSONView, Modal, Field, when, usd, num } from '../lib.js';
 
 // Requests lists recent model requests; those with a logged body link to
 // it (docs/body-logging.md).
@@ -8,6 +8,7 @@ export function Requests({ params }) {
   const [org, setOrg] = useState(params.get('org') ?? defaultOrg(s));
   const [list, setList] = useState({ items: [], more: false, loading: true });
   const [error, setError] = useState(null);
+  const [erasing, setErasing] = useState(false);
 
   const load = async (after) => {
     setError(null);
@@ -31,8 +32,11 @@ export function Requests({ params }) {
   };
 
   return html`
-    <${PageHeader} title="Requests" sub="Recent model requests, newest first. Bodies are stored only where a policy turns on log_bodies." />
+    <${PageHeader} title="Requests" sub="Recent model requests, newest first. Bodies are stored only where a policy turns on log_bodies.">
+      ${s.owner && html`<button class="secondary" onClick=${() => setErasing(true)}>Delete logged bodies</button>`}
+    <//>
     <div class="filters"><${OrgPicker} value=${org} onChange=${setOrg} /></div>
+    ${erasing && html`<${EraseBodies} initialOrg=${org} onClose=${() => setErasing(false)} onDone=${() => load()} />`}
     <${ErrorBox} error=${error} />
     ${list.loading ? html`<p class="muted">Loading…</p>` : html`<${Table}
       rows=${list.items}
@@ -49,6 +53,43 @@ export function Requests({ params }) {
       ]}
     />`}
     ${list.more && html`<p class="center"><button class="secondary" onClick=${() => load(list.items[list.items.length - 1].request_id)}>Load more</button></p>`}`;
+}
+
+// EraseBodies deletes an organization's logged bodies before a date, for
+// erasure requests (owners; audited).
+function EraseBodies({ initialOrg, onClose, onDone }) {
+  const s = useSession();
+  const [org, setOrg] = useState(initialOrg || Object.keys(s.orgNames)[0] || '');
+  const [before, setBefore] = useState(new Date(Date.now() + 86400000).toISOString().slice(0, 10));
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const go = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const d = await api('DELETE', '/admin/v1/requests' + qs({ org_id: org, before: new Date(before + 'T00:00:00Z').toISOString() }));
+      setResult(d.deleted);
+      onDone();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return html`<${Modal} title="Delete logged bodies" onClose=${onClose}>
+    <form class="form" onSubmit=${go}>
+      <${ErrorBox} error=${error} />
+      <${Field} label="Organization"><select value=${org} onChange=${(e) => setOrg(e.target.value)}>${Object.entries(s.orgNames).map(([id, name]) => html`<option value=${id}>${name}</option>`)}</select><//>
+      <${Field} label="Logged before" hint="Midnight UTC at the start of this day. Usage records stay; only the request and response bodies are deleted. This cannot be undone."><input type="date" required value=${before} onInput=${(e) => setBefore(e.target.value)} /><//>
+      ${result !== null && html`<p class="notice">Deleted ${num(result)} logged ${result === 1 ? 'body' : 'bodies'}.</p>`}
+      <footer>
+        <button type="button" class="secondary" onClick=${onClose}>${result === null ? 'Cancel' : 'Close'}</button>
+        ${result === null && html`<button type="submit" class="danger" disabled=${busy || !org}>Delete bodies</button>`}
+      </footer>
+    </form>
+  <//>`;
 }
 
 // RequestBody shows one logged body. Opening it is audited.
