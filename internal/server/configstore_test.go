@@ -136,7 +136,8 @@ func TestConfigObjectsRoles(t *testing.T) {
 }
 
 // A stored object the file has made invalid does not stop the gateway:
-// it starts with the file alone and reports the problem.
+// it starts with the file alone, reports the problem, and applies the
+// object once a reload fixes the file.
 func TestConfigObjectsInvalidAtStartup(t *testing.T) {
 	e := newAdminEnv(t, "")
 	e.call("PUT", "/admin/v1/config/models/extra", `{"targets": [{"provider": "up", "model": "m"}]}`, http.StatusCreated, nil)
@@ -161,5 +162,19 @@ providers: {other: {base_url: "http://127.0.0.1:1/v1"}}
 	rec := do(srv.Handler(), "GET", "/admin/v1/config", adminToken, "")
 	if !strings.Contains(rec.Body.String(), `"error":`) || !strings.Contains(rec.Body.String(), "up") {
 		t.Fatalf("list = %s", rec.Body)
+	}
+
+	// Once a reload brings the provider back, the stored model applies.
+	if err := srv.Reload(e.srv.file); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := srv.rt.Load().cfg.Models["extra"]; !ok {
+		t.Fatal("stored model not applied after the reload")
+	}
+	if rec := do(srv.Handler(), "GET", "/admin/v1/config", adminToken, ""); strings.Contains(rec.Body.String(), `"error":`) {
+		t.Fatalf("error still reported: %s", rec.Body)
 	}
 }
