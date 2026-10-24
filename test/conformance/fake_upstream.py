@@ -9,7 +9,7 @@ import json
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-UPSTREAM_MODELS = {"up-chat", "up-embed", "gpt-image-1", "tts-1", "whisper-1", "omni-moderation-latest", "rerank-v3.5"}
+UPSTREAM_MODELS = {"up-chat", "up-embed", "gpt-image-1", "tts-1", "whisper-1", "omni-moderation-latest", "rerank-v3.5", "sora-2"}
 
 
 def multipart_fields(content_type, body):
@@ -45,6 +45,12 @@ class Handler(BaseHTTPRequestHandler):
             body, files = json.loads(raw), {}
         if self.headers.get("Authorization") != "Bearer upstream-key":
             return self.reply(401, {"error": {"message": "bad upstream key"}})
+        if self.path.startswith("/v1/videos/") and self.path.endswith("/remix"):
+            # A remix takes only a prompt, as OpenAI's does.
+            if set(body) != {"prompt"}:
+                return self.reply(400, {"error": {"message": f"unexpected remix fields {sorted(body)}"}})
+            vid = self.path.split("/")[3]
+            return self.reply(200, video(vid + "-remix", "4", remixed_from_video_id=vid))
         if body.get("model") not in UPSTREAM_MODELS:
             return self.reply(400, {"error": {"message": f"unexpected model {body.get('model')!r}"}})
         path = self.path
@@ -71,9 +77,31 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"text": "hello world", "usage": {"type": "duration", "seconds": 90}})
         if path == "/v1/moderations":
             return self.reply(200, {"id": "m", "model": body["model"], "results": [{"flagged": False, "categories": {}, "category_scores": {}}]})
+        if path == "/v1/videos":
+            return self.reply(200, video("video_1", body.get("seconds", "4")))
         if path == "/v1/rerank":
             return self.reply(200, {"id": "r", "results": [{"index": 0, "relevance_score": 0.9}], "meta": {"billed_units": {"search_units": 1}}})
         return self.reply(404, {"error": {"message": "unknown path " + path}})
+
+    def do_GET(self):
+        if self.headers.get("Authorization") != "Bearer upstream-key":
+            return self.reply(401, {"error": {"message": "bad upstream key"}})
+        path, _, query = self.path.partition("?")
+        parts = path.split("/")
+        if len(parts) == 5 and parts[4] == "content":
+            return self.reply(200, b"fake-" + query.encode(), "video/mp4")
+        if len(parts) == 4 and parts[2] == "videos":
+            return self.reply(200, video(parts[3], "8", status="completed", progress=100))
+        return self.reply(404, {"error": {"message": "unknown path " + path}})
+
+    def do_DELETE(self):
+        parts = self.path.split("/")
+        return self.reply(200, {"id": parts[3], "object": "video.deleted", "deleted": True})
+
+
+def video(id, seconds, status="queued", progress=0, **extra):
+    return {"id": id, "object": "video", "model": "sora-2", "status": status, "progress": progress,
+            "created_at": 1, "size": "1280x720", "seconds": seconds, **extra}
 
 
 if __name__ == "__main__":

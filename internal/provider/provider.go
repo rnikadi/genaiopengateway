@@ -31,12 +31,16 @@ const (
 	Translations     Endpoint = "audio.translations"
 	Moderations      Endpoint = "moderations"
 	Rerank           Endpoint = "rerank"
+	// Videos creates a video job; VideoRemix makes a new job from one
+	// named by Request.JobID.
+	Videos     Endpoint = "videos"
+	VideoRemix Endpoint = "videos.remix"
 )
 
 // Multipart reports whether an endpoint takes multipart/form-data
 // requests, with files.
 func (e Endpoint) Multipart() bool {
-	return e == ImageEdits || e == Transcriptions || e == Translations
+	return e == ImageEdits || e == Transcriptions || e == Translations || e == Videos
 }
 
 // File is one file of a multipart request.
@@ -61,6 +65,8 @@ type Request struct {
 	// other fields as a JSON object: strings, and lists for repeated
 	// fields.
 	Files []File
+	// JobID is the upstream job a VideoRemix request starts from.
+	JobID string
 }
 
 // Response is an upstream response in the client's format. Body must be
@@ -81,6 +87,14 @@ type Provider interface {
 	// response was received; upstream error statuses are returned as
 	// responses.
 	Send(ctx context.Context, req *Request) (*Response, error)
+}
+
+// Forwarder is implemented by adapters that serve calls on upstream
+// objects, such as video jobs, which are not model requests. Path is
+// below the provider's base URL and may carry a query. The response
+// body must be closed.
+type Forwarder interface {
+	Forward(ctx context.Context, method, path string) (*http.Response, error)
 }
 
 // ModelSupporter is implemented by adapters whose endpoints depend on

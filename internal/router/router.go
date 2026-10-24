@@ -102,12 +102,26 @@ type Result struct {
 // retryable. The last target's response is returned even when it is
 // retryable, so clients see the real upstream error.
 func (r *Router) Route(ctx context.Context, ep provider.Endpoint, model string, body map[string]json.RawMessage, req provider.Request) (*Result, error) {
+	return r.route(ctx, ep, model, nil, body, req)
+}
+
+// RouteTo sends a request to one target of the model, named by its
+// provider and upstream model, such as the target that created a video
+// job.
+func (r *Router) RouteTo(ctx context.Context, ep provider.Endpoint, model, providerName, upstreamModel string, body map[string]json.RawMessage, req provider.Request) (*Result, error) {
+	return r.route(ctx, ep, model, func(t config.Target) bool { return t.Provider == providerName && t.Model == upstreamModel }, body, req)
+}
+
+func (r *Router) route(ctx context.Context, ep provider.Endpoint, model string, keep func(config.Target) bool, body map[string]json.RawMessage, req provider.Request) (*Result, error) {
 	m, ok := r.models[model]
 	if !ok {
 		return nil, ErrUnknownModel
 	}
 	var targets []config.Target
 	for _, t := range m.Targets {
+		if keep != nil && !keep(t) {
+			continue
+		}
 		if provider.SupportsModel(r.providers[t.Provider], ep, t.Model) {
 			targets = append(targets, t)
 		}
@@ -175,11 +189,18 @@ func (r *Router) send(ctx context.Context, t config.Target, req *provider.Reques
 	return s
 }
 
+// Forwarder returns a provider's adapter for calls on upstream objects,
+// or false when the provider is gone or does not serve them.
+func (r *Router) Forwarder(providerName string) (provider.Forwarder, bool) {
+	f, ok := r.providers[providerName].(provider.Forwarder)
+	return f, ok
+}
+
 // AllEndpoints lists every endpoint the gateway serves, in display order.
 var AllEndpoints = []provider.Endpoint{
 	provider.ChatCompletions, provider.Responses, provider.Messages, provider.GenerateContent, provider.Embeddings,
 	provider.ImageGenerations, provider.ImageEdits, provider.Speech, provider.Transcriptions, provider.Translations,
-	provider.Moderations, provider.Rerank,
+	provider.Moderations, provider.Rerank, provider.Videos,
 }
 
 // Endpoints lists what a provider serves for an upstream model.

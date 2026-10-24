@@ -15,6 +15,8 @@ const (
 	codeModelNotFound    = "model_not_found"
 	codeTooLarge         = "request_too_large"
 	codeAllTargetsFailed = "all_targets_failed"
+	codeNotFound         = "not_found"
+	codeNoDatabase       = "database_required"
 )
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

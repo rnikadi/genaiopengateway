@@ -134,7 +134,7 @@ Stream checks that release text as it arrives and cut the stream off on a match 
 
 ## Media endpoints
 
-On the media endpoints ([modalities.md](modalities.md)) guardrails check text only. `input` checks see image prompts, speech input, moderation input, and rerank queries and documents. `output` checks see transcripts and translations, as JSON or as text, SRT or WebVTT; a streamed transcript is refused while an `output` guardrail applies, since its text reaches the client as it is spoken. Images and audio are not text and pass unchecked.
+On the media endpoints ([modalities.md](modalities.md)) guardrails check text only. `input` checks see image and video prompts, speech input, moderation input, and rerank queries and documents. `output` checks see transcripts and translations, as JSON or as text, SRT or WebVTT; a streamed transcript is refused while an `output` guardrail applies, since its text reaches the client as it is spoken. Images, audio and video are not text and pass unchecked.
 
 ## What is recorded
 
