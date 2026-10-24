@@ -128,3 +128,45 @@ func TestSupports(t *testing.T) {
 		t.Fatal("wrong endpoint support")
 	}
 }
+
+func TestVideoRemixAndForward(t *testing.T) {
+	p := newProvider(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer upstream-secret" {
+			t.Errorf("no credentials on %s", r.URL.Path)
+		}
+		switch r.Method + " " + r.URL.RequestURI() {
+		case "POST /v1/videos/video%2F1/remix":
+			// A remix takes only the prompt.
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if _, ok := body["model"]; ok || body["prompt"] != "at night" {
+				t.Errorf("remix body = %v", body)
+			}
+			_, _ = io.WriteString(w, `{"id":"video_2","object":"video","seconds":"8"}`)
+		case "GET /v1/videos/video_2/content?variant=thumbnail":
+			w.Header().Set("Content-Type", "image/webp")
+			_, _ = io.WriteString(w, "WEBP")
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.RequestURI())
+			http.NotFound(w, r)
+		}
+	})
+	resp, err := p.Send(context.Background(), &provider.Request{Endpoint: provider.VideoRemix, JobID: "video/1", Body: []byte(`{"model":"sora-2","prompt":"at night"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	// Seconds come as a string.
+	if resp.StatusCode != 200 || resp.Usage.VideoSeconds != 8 {
+		t.Fatalf("status %d, usage %+v", resp.StatusCode, *resp.Usage)
+	}
+	got, err := p.Forward(context.Background(), http.MethodGet, "/videos/video_2/content?variant=thumbnail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer got.Body.Close()
+	if b, _ := io.ReadAll(got.Body); string(b) != "WEBP" || got.Header.Get("Content-Type") != "image/webp" {
+		t.Fatalf("forward = %q %v", b, got.Header)
+	}
+}
