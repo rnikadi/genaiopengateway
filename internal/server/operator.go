@@ -231,11 +231,12 @@ func (s *Server) sessionOperator(r *http.Request) (*operator, error) {
 }
 
 // sameOrigin is the CSRF check for requests authenticated by cookie that
-// change something: browsers do not let other sites send a JSON content
-// type or forge Origin.
+// change something: browsers do not let other sites forge Origin, nor
+// send a JSON content type. Multipart is allowed, on Origin alone, for
+// the playground's audio uploads.
 func sameOrigin(r *http.Request) bool {
 	mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if mt != "application/json" {
+	if mt != "application/json" && mt != "multipart/form-data" {
 		return false
 	}
 	scheme := "http"

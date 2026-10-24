@@ -13,6 +13,16 @@ A page where an operator picks a team and a model, writes messages and sees the 
 
 API: `POST /admin/v1/playground/chat/completions?team_id=…` with an OpenAI chat completions body; the response is that endpoint's response, streamed when `stream` is true. The usual admin CSRF rules apply to cookie requests.
 
+The same holds for the media tabs ([modalities.md](modalities.md)), each audited under its own action:
+
+| Tab | API | Audit action |
+| --- | --- | --- |
+| Image | `POST /admin/v1/playground/images/generations` | `playground.image` |
+| Text to speech | `POST /admin/v1/playground/audio/speech` | `playground.speech` |
+| Transcription | `POST /admin/v1/playground/audio/transcriptions` (multipart) | `playground.transcription` |
+
+The transcription upload is multipart, which a cookie request may send when its `Origin` is the gateway's own; browsers do not let other sites forge `Origin`. Every model on an `openai` provider lists every endpoint, so each tab keeps its own model choice. The page shows the generated images, plays the speech, and prices each call at the target's media prices.
+
 The page lists the models the team may use that serve chat completions, keeps the conversation in the page only, and shows `X-Gateway-Target`, `X-Gog-Guardrails`, the usage the upstream reported, and the cost at the target's configured price.
 
 ## Other actions

@@ -62,3 +62,53 @@ guardrails:
 		t.Fatalf("metered under the team: %+v, %v", rows, err)
 	}
 }
+
+// The playground's image, speech and transcription tabs take the same
+// path as chat.
+func TestPlaygroundMedia(t *testing.T) {
+	up := newMediaUpstream(t)
+	e := newAdminEnvConfig(t, `
+admin: {token: `+adminToken+`}
+store: {driver: sqlite, dsn: unused}
+providers: {up: {base_url: "`+up.URL+`", api_key: upstream-key}}
+models:
+  image: {targets: [{provider: up, model: gpt-image-1, price: {per_image: 0.04}}]}
+  speech: {targets: [{provider: up, model: tts-1}]}
+  transcribe: {targets: [{provider: up, model: whisper-1}]}
+`)
+	var org, team idResp
+	e.call("POST", "/admin/v1/orgs", `{"name":"acme"}`, 201, &org)
+	e.call("POST", "/admin/v1/orgs/"+org.ID+"/teams", `{"name":"studio"}`, 201, &team)
+	admin := e.session("lead@example.com", store.Grant{Role: config.RoleAdmin, OrgID: org.ID})
+	q := "?team_id=" + team.ID
+
+	if rec := e.browser(admin, "POST", "/admin/v1/playground/images/generations"+q, `{"model":"image","prompt":"a falcon"}`); rec.Code != 200 || !strings.Contains(rec.Body.String(), "b64_json") {
+		t.Fatalf("image = %d: %s", rec.Code, rec.Body)
+	}
+	if rec := e.browser(admin, "POST", "/admin/v1/playground/audio/speech"+q, `{"model":"speech","input":"hi","voice":"alloy"}`); rec.Code != 200 || rec.Header().Get("Content-Type") != "audio/mpeg" {
+		t.Fatalf("speech = %d %v", rec.Code, rec.Header())
+	}
+	body, ct := multipartBody(t, map[string]string{"model": "transcribe"}, "RIFFaudio")
+	if rec := e.browser(admin, "POST", "/admin/v1/playground/audio/transcriptions"+q, body, "Content-Type", ct); rec.Code != 200 || up.file != "RIFFaudio" {
+		t.Fatalf("transcription = %d: %s", rec.Code, rec.Body)
+	}
+	// Uploads from another site, and other content types, are refused.
+	if rec := e.browser(admin, "POST", "/admin/v1/playground/audio/transcriptions"+q, body, "Content-Type", ct, "Origin", "https://evil.example"); rec.Code != 403 {
+		t.Fatalf("cross-site upload = %d", rec.Code)
+	}
+	if rec := e.browser(admin, "POST", "/admin/v1/playground/audio/speech"+q, `{"model":"speech","input":"hi"}`, "Content-Type", "text/plain"); rec.Code != 403 {
+		t.Fatalf("text/plain = %d", rec.Code)
+	}
+
+	e.flush()
+	audit, _, _ := e.srv.store.ListAudit(context.Background(), org.ID, store.Page{})
+	actions := map[string]bool{}
+	for _, a := range audit {
+		actions[a.Action] = true
+	}
+	for _, want := range []string{"playground.image", "playground.speech", "playground.transcription"} {
+		if !actions[want] {
+			t.Fatalf("audit actions = %v, missing %s", actions, want)
+		}
+	}
+}

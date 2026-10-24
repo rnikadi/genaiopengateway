@@ -14,6 +14,7 @@ import (
 
 	"github.com/rnikadi/genaiopengateway/internal/auth"
 	"github.com/rnikadi/genaiopengateway/internal/policy"
+	"github.com/rnikadi/genaiopengateway/internal/provider"
 	"github.com/rnikadi/genaiopengateway/internal/store"
 )
 
@@ -59,7 +60,10 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	h("GET /admin/v1/config", s.listConfig)
 	h("PUT /admin/v1/config/{kind}/{name}", s.putConfig)
 	h("DELETE /admin/v1/config/{kind}/{name}", s.deleteConfig)
-	h("POST /admin/v1/playground/chat/completions", s.playgroundChat)
+	h("POST /admin/v1/playground/chat/completions", s.playground(provider.ChatCompletions))
+	h("POST /admin/v1/playground/images/generations", s.playground(provider.ImageGenerations))
+	h("POST /admin/v1/playground/audio/speech", s.playground(provider.Speech))
+	h("POST /admin/v1/playground/audio/transcriptions", s.playground(provider.Transcriptions))
 	h("GET /admin/v1/alerts", s.listAlerts)
 	h("POST /admin/v1/alerts/test", s.testAlert)
 	h("GET /admin/v1/mcp/connections", s.listMCPConnections)
