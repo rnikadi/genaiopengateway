@@ -94,6 +94,23 @@ jobs:
         working-directory: deploy/compose
         run: docker compose -f compose.yaml -f compose.sso.yaml logs
 
+  conformance:
+    # The official OpenAI Python SDK against the gateway, one call per endpoint.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          check-latest: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: OpenAI SDK conformance
+        run: |
+          pip install openai==2.8.1
+          test/conformance/run.sh
+
   helm:
     # Template checks, then the chart installed with 2 replicas into kind.
     runs-on: ubuntu-latest

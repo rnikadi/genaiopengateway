@@ -9,7 +9,13 @@ Each adapter declares the endpoints it serves and implements one method per endp
 - **Passthrough endpoints** (the provider's own API shape, for example `openai` serving `/v1/chat/completions` or `anthropic` serving `/v1/messages`) forward the raw body with only `model` rewritten.
 - **Translated endpoints** (for example `anthropic` serving `/v1/chat/completions`) convert the request, the response, every streaming event and errors.
 
-Every adapter must report usage (`input_tokens`, `output_tokens`, `cached_input_tokens`, `reasoning_tokens`) from responses and streams so metering works.
+Every adapter must report usage (`input_tokens`, `output_tokens`, `cached_input_tokens`, `reasoning_tokens`) from responses and streams so metering works, and on media endpoints the units they are billed by.
+
+## Media endpoints on `openai`
+
+The `openai` type also passes through images, speech, transcription, translation, moderation and rerank ([modalities.md](modalities.md)), each at the client's path below `base_url`: `/images/generations`, `/images/edits`, `/audio/speech`, `/audio/transcriptions`, `/audio/translations`, `/moderations` and `/rerank`. Multipart requests are re-encoded with the target's model name and the client's files. Usage counts images from `data` or the completed stream events, characters from a speech request's `input`, and audio seconds from `usage.seconds` or `duration`; tokens are read from `usage` when the upstream reports them.
+
+A rerank service with the Cohere v2 shape is an `openai` provider whose `base_url` ends in `/v2`, such as `https://api.cohere.com/v2`; Jina and vLLM serve `/v1/rerank`.
 
 ## Anthropic translation rules (chat completions)
 

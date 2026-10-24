@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/provider"
@@ -20,9 +21,16 @@ import (
 const maxBufferedBody = 64 << 20
 
 var paths = map[provider.Endpoint]string{
-	provider.ChatCompletions: "/chat/completions",
-	provider.Embeddings:      "/embeddings",
-	provider.Responses:       "/responses",
+	provider.ChatCompletions:  "/chat/completions",
+	provider.Embeddings:       "/embeddings",
+	provider.Responses:        "/responses",
+	provider.ImageGenerations: "/images/generations",
+	provider.ImageEdits:       "/images/edits",
+	provider.Speech:           "/audio/speech",
+	provider.Transcriptions:   "/audio/transcriptions",
+	provider.Translations:     "/audio/translations",
+	provider.Moderations:      "/moderations",
+	provider.Rerank:           "/rerank",
 }
 
 // Provider is an OpenAI-compatible upstream.
@@ -44,9 +52,15 @@ func (p *Provider) Supports(e provider.Endpoint) bool {
 
 // Send implements provider.Provider.
 func (p *Provider) Send(ctx context.Context, req *provider.Request) (*provider.Response, error) {
-	body, injected := req.Body, false
+	body, injected, contentType := req.Body, false, "application/json"
 	if req.Stream && req.Endpoint == provider.ChatCompletions {
 		body, injected = withStreamUsage(body)
+	}
+	if req.Files != nil {
+		var err error
+		if body, contentType, err = encodeMultipart(req.Body, req.Files); err != nil {
+			return nil, err
+		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, p.cfg.Timeout.Std())
 	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.cfg.BaseURL+paths[req.Endpoint], bytes.NewReader(body))
@@ -54,7 +68,7 @@ func (p *Provider) Send(ctx context.Context, req *provider.Request) (*provider.R
 		cancel()
 		return nil, err
 	}
-	hreq.Header.Set("Content-Type", "application/json")
+	hreq.Header.Set("Content-Type", contentType)
 	if req.Stream {
 		hreq.Header.Set("Accept", "text/event-stream")
 	}
@@ -77,17 +91,26 @@ func (p *Provider) Send(ctx context.Context, req *provider.Request) (*provider.R
 		out.Body = rc
 		return out, nil
 	}
-	if req.Stream {
-		out.Body = sse.Tap(rc, func(data []byte) {
-			if t, ok := usage.FromOpenAI(data); ok {
-				*out.Usage = t
-			}
-		})
+	if req.Endpoint == provider.Speech {
+		out.Usage.Characters = characters(req.Body)
+	}
+	mediaType := resp.Header.Get("Content-Type")
+	if req.Stream || strings.HasPrefix(mediaType, "text/event-stream") {
+		limit := 1 << 20
+		if req.Endpoint == provider.ImageGenerations || req.Endpoint == provider.ImageEdits {
+			limit = maxImageEvent
+		}
+		out.Body = sse.TapLimit(rc, func(data []byte) { readUsage(req.Endpoint, data, out.Usage) }, limit)
 		if injected {
 			// The client did not ask for the usage chunk; code that
 			// reads choices[0] of every chunk would fail on it.
 			out.Body = sse.Drop(out.Body, usageOnlyChunk)
 		}
+		return out, nil
+	}
+	if req.Endpoint == provider.Speech || ((req.Endpoint == provider.Transcriptions || req.Endpoint == provider.Translations) && !strings.Contains(mediaType, "json")) {
+		// Audio, and transcripts as text: nothing to read usage from.
+		out.Body = rc
 		return out, nil
 	}
 	// Buffer non-streaming bodies to read usage before replying.
@@ -104,9 +127,7 @@ func (p *Provider) Send(ctx context.Context, req *provider.Request) (*provider.R
 		return out, nil
 	}
 	_ = rc.Close()
-	if t, ok := usage.FromOpenAI(buf); ok {
-		*out.Usage = t
-	}
+	readUsage(req.Endpoint, buf, out.Usage)
 	out.Body = io.NopCloser(bytes.NewReader(buf))
 	return out, nil
 }

@@ -161,6 +161,15 @@ function ProviderForm({ spec, onChange }) {
     <${Field} label="Timeout" hint="For example 60s. Empty uses the default."><input value=${spec.timeout || ''} onInput=${set('timeout')} /><//>`;
 }
 
+// mediaPrices are the price fields of media endpoints (docs/modalities.md).
+const mediaPrices = [
+  ['per_image', 'USD per image'],
+  ['per_mchars', 'USD per million characters (speech)'],
+  ['per_audio_minute', 'USD per audio minute (transcription)'],
+  ['per_video_second', 'USD per video second'],
+  ['per_request', 'USD per request'],
+];
+
 function ModelForm({ spec, providers, onChange }) {
   const targets = spec.targets?.length ? spec.targets : [{ provider: '', model: '' }];
   const setTarget = (i, patch) => onChange({ ...spec, targets: targets.map((t, n) => (n === i ? { ...t, ...patch } : t)) });
@@ -185,6 +194,12 @@ function ModelForm({ spec, providers, onChange }) {
         <${Field} label="Input, USD per million tokens"><input type="number" min="0" step="any" value=${t.price?.input_per_mtok ?? ''} onInput=${(e) => setPrice(i, 'input_per_mtok', e.target.value)} /><//>
         <${Field} label="Output, USD per million tokens"><input type="number" min="0" step="any" value=${t.price?.output_per_mtok ?? ''} onInput=${(e) => setPrice(i, 'output_per_mtok', e.target.value)} /><//>
       </div>
+      <details open=${mediaPrices.some(([k]) => t.price?.[k])}>
+        <summary class="small">Media prices: images, speech, audio, video, requests</summary>
+        <div class="row">
+          ${mediaPrices.map(([k, label]) => html`<${Field} label=${label} key=${k}><input type="number" min="0" step="any" value=${t.price?.[k] ?? ''} onInput=${(e) => setPrice(i, k, e.target.value)} /><//>`)}
+        </div>
+      </details>
       ${targets.length > 1 && html`<button type="button" class="secondary small" onClick=${() => onChange({ ...spec, targets: targets.filter((_, n) => n !== i) })}>Remove target</button>`}
     </div>`)}
     <button type="button" class="secondary" onClick=${() => onChange({ ...spec, targets: [...targets, { provider: '', model: '' }] })}>Add a fallback target</button>`;

@@ -299,6 +299,16 @@ type Price struct {
 	InputPerMTok       float64 `yaml:"input_per_mtok" json:"input_per_mtok"`
 	OutputPerMTok      float64 `yaml:"output_per_mtok" json:"output_per_mtok"`
 	CachedInputPerMTok float64 `yaml:"cached_input_per_mtok" json:"cached_input_per_mtok"`
+	// Media prices (docs/modalities.md); they add to the token prices.
+	PerImage       float64 `yaml:"per_image" json:"per_image,omitempty"`
+	PerMChars      float64 `yaml:"per_mchars" json:"per_mchars,omitempty"`
+	PerAudioMinute float64 `yaml:"per_audio_minute" json:"per_audio_minute,omitempty"`
+	PerVideoSecond float64 `yaml:"per_video_second" json:"per_video_second,omitempty"`
+	PerRequest     float64 `yaml:"per_request" json:"per_request,omitempty"`
+}
+
+func (p Price) negative() bool {
+	return min(p.InputPerMTok, p.OutputPerMTok, p.CachedInputPerMTok, p.PerImage, p.PerMChars, p.PerAudioMinute, p.PerVideoSecond, p.PerRequest) < 0
 }
 
 // IsZero reports whether no price is configured.
@@ -585,7 +595,7 @@ func (c *Config) validate() error {
 			if t.Model == "" {
 				add("model %q target %d: model is required", name, i)
 			}
-			if t.Price.InputPerMTok < 0 || t.Price.OutputPerMTok < 0 || t.Price.CachedInputPerMTok < 0 {
+			if t.Price.negative() {
 				add("model %q target %d: prices must not be negative", name, i)
 			}
 		}

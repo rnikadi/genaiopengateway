@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -76,6 +77,17 @@ type capturedBody struct {
 	responseContentType string
 }
 
+// binaryMedia reports whether a content type is media bytes rather than
+// text or JSON.
+func binaryMedia(contentType string) bool {
+	for _, prefix := range []string{"audio/", "image/", "video/", "application/octet-stream"} {
+		if strings.HasPrefix(contentType, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // logBodies reports whether a principal's requests are logged now.
 func (s *Server) logBodies(p *auth.Principal) bool {
 	return s.bodies != nil && s.rt.Load().bodies != nil && p.LogBodies()
@@ -94,6 +106,10 @@ func (s *Server) writeBodies(ctx context.Context, batch []capturedBody) error {
 		resp := c.response
 		if c.Kind == "model" {
 			resp = bodylog.Assemble(c.responseContentType, resp)
+		}
+		if binaryMedia(c.responseContentType) {
+			// Audio, images and video are not logged, only noted.
+			resp, _ = json.Marshal(map[string]any{"omitted": c.responseContentType, "bytes": len(c.response)})
 		}
 		req, counts, truncReq := bl.redactor.Body(c.request, bl.max)
 		resp, respCounts, truncResp := bl.redactor.Body(resp, bl.max)

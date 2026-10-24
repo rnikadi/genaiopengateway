@@ -8,22 +8,38 @@ import (
 	"github.com/rnikadi/genaiopengateway/internal/config"
 )
 
-// Tokens counts the token units of one request. InputTokens includes
-// CachedInputTokens; OutputTokens includes ReasoningTokens.
+// Tokens counts what one request consumed: tokens, and for media
+// endpoints the units they are billed by (docs/modalities.md).
+// InputTokens includes CachedInputTokens; OutputTokens includes
+// ReasoningTokens.
 type Tokens struct {
 	InputTokens       int64 `json:"input_tokens"`
 	OutputTokens      int64 `json:"output_tokens"`
 	CachedInputTokens int64 `json:"cached_input_tokens"`
 	ReasoningTokens   int64 `json:"reasoning_tokens"`
+	// Images generated or edited.
+	Images int64 `json:"images"`
+	// Characters of text turned into speech.
+	Characters int64 `json:"characters"`
+	// AudioSeconds of audio transcribed or translated.
+	AudioSeconds float64 `json:"audio_seconds"`
+	// VideoSeconds of video requested.
+	VideoSeconds float64 `json:"video_seconds"`
 	// Reported is false when the upstream returned no usage at all.
 	Reported bool `json:"-"`
+}
+
+// Media reports whether any media unit was counted.
+func (t Tokens) Media() bool {
+	return t.Images > 0 || t.Characters > 0 || t.AudioSeconds > 0 || t.VideoSeconds > 0
 }
 
 // Total returns input plus output tokens.
 func (t Tokens) Total() int64 { return t.InputTokens + t.OutputTokens }
 
-// Cost returns the USD cost of t at price p. Cached input tokens use the
-// cached price when one is set, otherwise the full input price.
+// Cost returns the USD cost of one request that consumed t, at price p.
+// Cached input tokens use the cached price when one is set, otherwise
+// the full input price.
 func Cost(t Tokens, p config.Price) float64 {
 	cachedPrice := p.CachedInputPerMTok
 	if cachedPrice == 0 {
@@ -33,9 +49,14 @@ func Cost(t Tokens, p config.Price) float64 {
 	if uncached < 0 {
 		uncached = 0
 	}
-	return (float64(uncached)*p.InputPerMTok +
-		float64(t.CachedInputTokens)*cachedPrice +
-		float64(t.OutputTokens)*p.OutputPerMTok) / 1e6
+	return (float64(uncached)*p.InputPerMTok+
+		float64(t.CachedInputTokens)*cachedPrice+
+		float64(t.OutputTokens)*p.OutputPerMTok+
+		float64(t.Characters)*p.PerMChars)/1e6 +
+		float64(t.Images)*p.PerImage +
+		t.AudioSeconds/60*p.PerAudioMinute +
+		t.VideoSeconds*p.PerVideoSecond +
+		p.PerRequest
 }
 
 // openAIUsage covers the usage objects of chat completions, embeddings

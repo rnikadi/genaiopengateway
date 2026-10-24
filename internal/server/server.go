@@ -365,6 +365,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/responses", s.model(provider.Responses))
 	mux.HandleFunc("POST /v1/messages", s.model(provider.Messages))
 	mux.HandleFunc("POST /v1beta/models/{action}", s.model(provider.GenerateContent))
+	mux.HandleFunc("POST /v1/images/generations", s.model(provider.ImageGenerations))
+	mux.HandleFunc("POST /v1/images/edits", s.model(provider.ImageEdits))
+	mux.HandleFunc("POST /v1/audio/speech", s.model(provider.Speech))
+	mux.HandleFunc("POST /v1/audio/transcriptions", s.model(provider.Transcriptions))
+	mux.HandleFunc("POST /v1/audio/translations", s.model(provider.Translations))
+	mux.HandleFunc("POST /v1/moderations", s.model(provider.Moderations))
+	mux.HandleFunc("POST /v1/rerank", s.model(provider.Rerank))
 	mux.HandleFunc("/mcp/{name}", s.serveMCP)
 	if s.store != nil {
 		mux.HandleFunc("GET /mcp/connect/callback", s.connectCallback)

@@ -22,7 +22,30 @@ const (
 	// GenerateContent is Google's generateContent and
 	// streamGenerateContent, served by passthrough.
 	GenerateContent Endpoint = "generate_content"
+
+	// Media endpoints (docs/modalities.md).
+	ImageGenerations Endpoint = "images.generations"
+	ImageEdits       Endpoint = "images.edits"
+	Speech           Endpoint = "audio.speech"
+	Transcriptions   Endpoint = "audio.transcriptions"
+	Translations     Endpoint = "audio.translations"
+	Moderations      Endpoint = "moderations"
+	Rerank           Endpoint = "rerank"
 )
+
+// Multipart reports whether an endpoint takes multipart/form-data
+// requests, with files.
+func (e Endpoint) Multipart() bool {
+	return e == ImageEdits || e == Transcriptions || e == Translations
+}
+
+// File is one file of a multipart request.
+type File struct {
+	Field       string
+	Filename    string
+	ContentType string
+	Data        []byte
+}
 
 // Request is a client request already resolved to one target. Body is
 // the client's JSON with "model" rewritten to the upstream model.
@@ -34,6 +57,10 @@ type Request struct {
 	// Header carries client headers an adapter may forward, such as
 	// anthropic-version on passthrough.
 	Header http.Header
+	// Files are the files of a multipart request. Body then holds its
+	// other fields as a JSON object: strings, and lists for repeated
+	// fields.
+	Files []File
 }
 
 // Response is an upstream response in the client's format. Body must be

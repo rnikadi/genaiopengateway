@@ -14,7 +14,12 @@ Request and response bodies follow the [OpenAI API reference](https://platform.o
 | `POST /v1/responses` | OpenAI Responses; served only by `openai` providers | v0.1 |
 | `POST /v1/messages` | Anthropic Messages passthrough; served by `anthropic` providers and by Claude models on `vertex` and `bedrock` | v0.1 |
 | `POST /v1beta/models/{model}:generateContent`, `:streamGenerateContent` | Google's generateContent, for the Google GenAI SDK and Gemini CLI; served by `gemini` and `vertex` providers. `{model}` is a virtual model, the key may come in `x-goog-api-key`, streams are always server-sent events, and errors use Google's shape ([cloud-providers.md](cloud-providers.md)) | v0.5 |
-| `/v1/audio/*`, `/v1/images/*`, `/v1/realtime`, `/v1/videos` | OpenAI contracts | v0.8 |
+| `POST /v1/images/generations`, `POST /v1/images/edits` | OpenAI images; edits take multipart; `stream` gives server-sent events. Served by `openai` providers ([modalities.md](modalities.md)) | v0.8 |
+| `POST /v1/audio/speech` | OpenAI text to speech; returns audio, or events with `stream_format: sse` | v0.8 |
+| `POST /v1/audio/transcriptions`, `POST /v1/audio/translations` | OpenAI speech to text, multipart. Streamed transcripts are refused while `output` guardrails apply to the key | v0.8 |
+| `POST /v1/moderations` | OpenAI moderations | v0.8 |
+| `POST /v1/rerank` | Rerank with `query` and `documents`, the shape of Cohere, Jina and vLLM | v0.8 |
+| `/v1/realtime`, `/v1/videos` | OpenAI contracts ([modalities.md](modalities.md)) | v0.8, next |
 
 ### Authentication
 
