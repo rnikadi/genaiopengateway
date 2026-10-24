@@ -175,3 +175,20 @@ func TestCredentialFailure(t *testing.T) {
 		t.Errorf("user credentials: %v", err)
 	}
 }
+
+func TestImagenOnVertex(t *testing.T) {
+	p, rec := start(t, &fakeTokens{}, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"predictions":[{"bytesBase64Encoded":"aQ==","mimeType":"image/png"}]}`)
+	})
+	if !p.SupportsModel(provider.ImageGenerations, "imagen-4.0-generate-001") || p.SupportsModel(provider.ChatCompletions, "imagen-4.0-generate-001") ||
+		!p.SupportsModel(provider.Speech, "google/gemini-2.5-flash-preview-tts") || p.SupportsModel(provider.ImageGenerations, "anthropic/claude-sonnet-4-5") {
+		t.Fatal("model support does not follow the model id")
+	}
+	resp, body := send(t, p, provider.ImageGenerations, "imagen-4.0-generate-001", false, `{"prompt":"a falcon"}`, nil)
+	if rec.path != "/v1/projects/acme-ai/locations/europe-west4/publishers/google/models/imagen-4.0-generate-001:predict" || rec.header.Get("Authorization") != "Bearer tok1" {
+		t.Fatalf("request %s %v", rec.path, rec.header)
+	}
+	if resp.StatusCode != 200 || !strings.Contains(body, `"b64_json":"aQ=="`) || resp.Usage.Images != 1 {
+		t.Fatalf("%d %s", resp.StatusCode, body)
+	}
+}

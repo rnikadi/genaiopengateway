@@ -127,6 +127,8 @@ Cache writes are counted at the input price, as for Anthropic.
 
 **Claude through `/v1/messages`** uses InvokeModel (`/model/{id}/invoke` and `invoke-with-response-stream`) with the body unchanged except that `model` is removed and `anthropic_version: bedrock-2023-05-31` is set. Stream chunks arrive as event stream frames carrying Anthropic events, and are re-emitted as Anthropic SSE, so Anthropic SDKs and Claude Code work unchanged.
 
+**Images and speech** ([modalities.md](modalities.md)) follow the model id. `imagen-*` models on `gemini` and `vertex` serve `/v1/images/generations` through Imagen's `:predict`, with `size` mapped to the nearest aspect ratio. `*-tts` models serve `/v1/audio/speech` through `generateContent`, with `voice` as the Gemini voice name and the audio answered as WAV, or raw PCM with `response_format: pcm`. On `bedrock`, `amazon.nova-canvas-*` and `amazon.titan-image-*` models serve `/v1/images/generations` through InvokeModel, with `size` as `width` and `height`. Each answers in OpenAI's shape, `data[].b64_json` for images, and is metered as on `openai` targets.
+
 On Bedrock, `/v1/messages` is served for model ids and inference profile ids that contain `anthropic.`; an application inference profile ARN does not show its model, so use it through chat completions. `anthropic-beta` headers are sent as `anthropic_beta` in the body, as Bedrock expects.
 
 **Embeddings** use InvokeModel with the model's own body: Titan Text Embeddings V2 (one input per call, so an input array becomes parallel calls) and Cohere Embed (arrays in one call). `dimensions` maps to Titan's `dimensions` and Cohere's `output_dimension`. Inputs must be strings (at most 2048, and 96 for Cohere), Cohere texts are embedded as `search_document`, and only the `float` encoding is served. Token counts come from the `x-amzn-bedrock-input-token-count` header.
@@ -139,6 +141,7 @@ On Bedrock, `/v1/messages` is served for model ids and inference profile ids tha
 - Gemini: thought signatures round-trip through `extra_content`, and `tool` messages find their function names.
 - Vertex: URL per location and publisher, Claude body changes, and token refresh with a fake token source.
 - Bedrock: SigV4 headers against a fixed vector, a bearer key, event stream decoding from recorded frames, and embeddings token counts.
+- Images and speech: Imagen requests and aspect ratios, filtered images left out, WAV and PCM answers from Gemini TTS, Nova Canvas sizes and errors, and model support by id.
 - Live tests run only when cloud credentials are present, never in pull request CI.
 
 ## Not in scope
@@ -147,6 +150,7 @@ On Bedrock, `/v1/messages` is served for model ids and inference profile ids tha
 | --- | --- |
 | Embeddings on Gemini and Vertex | Different endpoints and no token counts on the Gemini API. The `openai` type with Gemini's compatible endpoint covers them meanwhile. |
 | Bedrock Guardrails, Knowledge Bases and Agents | Cloud features outside a model call. Bedrock Guardrails can still be attached to an inference profile on the AWS side. |
+| Video and rerank on Vertex AI, Gemini and Bedrock, and image edits on them | Their jobs, outputs and request shapes do not map onto OpenAI's (issue #35). `openai` targets serve them. |
 | Fetching image URLs for the client | It would let clients make the gateway fetch any URL. Clients send data URLs. |
 | Provisioned throughput settings | Picked through the model id or ARN, which already works. |
 | Azure OpenAI with Entra ID tokens | Azure's v1 API works with the `openai` type and an API key today. Entra ID auth can be added if asked. |

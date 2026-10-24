@@ -54,13 +54,36 @@ func NewUpstream(cfg config.Provider, client *http.Client, up Upstream) *Provide
 
 // Supports implements provider.Provider.
 func (p *Provider) Supports(e provider.Endpoint) bool {
+	return e == provider.ChatCompletions || e == provider.GenerateContent || e == provider.ImageGenerations || e == provider.Speech
+}
+
+// SupportsModel implements provider.ModelSupporter: Imagen models make
+// images, text to speech models speak, and other models chat.
+func (p *Provider) SupportsModel(e provider.Endpoint, model string) bool {
+	switch {
+	case isImagen(model):
+		return e == provider.ImageGenerations
+	case isTTS(model):
+		return e == provider.Speech
+	}
 	return e == provider.ChatCompletions || e == provider.GenerateContent
 }
 
+func isImagen(model string) bool {
+	return strings.HasPrefix(strings.TrimPrefix(model, "models/"), "imagen-")
+}
+
+func isTTS(model string) bool { return strings.HasSuffix(model, "-tts") }
+
 // Send implements provider.Provider.
 func (p *Provider) Send(ctx context.Context, req *provider.Request) (*provider.Response, error) {
-	if req.Endpoint == provider.ChatCompletions {
+	switch req.Endpoint {
+	case provider.ChatCompletions:
 		return p.chat(ctx, req)
+	case provider.ImageGenerations:
+		return p.images(ctx, req)
+	case provider.Speech:
+		return p.speech(ctx, req)
 	}
 	// The gateway adds model and stream to the body; Google's API takes
 	// them from the URL.
@@ -104,6 +127,11 @@ func (p *Provider) post(ctx context.Context, model string, body []byte, stream b
 	if stream {
 		method = "streamGenerateContent"
 	}
+	return p.call(ctx, model, method, body, stream)
+}
+
+// call sends a request to a model's method.
+func (p *Provider) call(ctx context.Context, model, method string, body []byte, stream bool) (*provider.Response, error) {
 	u := p.cfg.BaseURL + "/v1beta/models/" + url.PathEscape(strings.TrimPrefix(model, "models/")) + ":" + method
 	if p.up.URL != nil {
 		u = p.up.URL(model, method)
