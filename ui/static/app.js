@@ -14,6 +14,7 @@ import { Providers } from './pages/providers.js';
 import { Alerts } from './pages/alerts.js';
 import { Settings } from './pages/settings.js';
 import { Playground } from './pages/playground.js';
+import { Config } from './pages/config.js';
 
 const routes = [
   [/^\/$/, Overview, 'overview'],
@@ -30,6 +31,7 @@ const routes = [
   [/^\/alerts$/, Alerts, 'alerts'],
   [/^\/settings$/, Settings, 'settings'],
   [/^\/playground$/, Playground, 'playground'],
+  [/^\/config$/, Config, 'config'],
   [/^\/audit$/, Audit, 'audit'],
 ];
 
@@ -45,6 +47,7 @@ const nav = [
   ['providers', '#/providers', 'Providers'],
   ['alerts', '#/alerts', 'Alerts'],
   ['audit', '#/audit', 'Audit log'],
+  ['config', '#/config', 'Configuration', 'owner'],
   ['settings', '#/settings', 'Settings', 'owner'],
 ];
 
