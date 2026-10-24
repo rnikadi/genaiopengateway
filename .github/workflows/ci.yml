@@ -27,8 +27,8 @@ jobs:
       GOG_TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/gog_test?sslmode=disable
       GOG_TEST_VALKEY_ADDR: localhost:6379
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
           check-latest: true
@@ -50,10 +50,10 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
       - name: Build for every release platform
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -62,8 +62,8 @@ jobs:
   binaries:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
           check-latest: true
@@ -74,13 +74,13 @@ jobs:
     # The Docker Compose setup with Dex, driven by a browser.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Start the Compose setup with sign-in
         working-directory: deploy/compose
         run: |
           docker compose -f compose.yaml -f compose.sso.yaml up -d --build --wait --wait-timeout 300
           timeout 60 sh -c 'until curl -sf localhost:8080/readyz && curl -sf localhost:5556/dex/.well-known/openid-configuration >/dev/null; do sleep 1; done'
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Admin UI browser test
@@ -98,12 +98,12 @@ jobs:
     # The official OpenAI Python SDK against the gateway, one call per endpoint.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
           check-latest: true
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: OpenAI SDK conformance
@@ -115,8 +115,8 @@ jobs:
     # Template checks, then the chart installed with 2 replicas into kind.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: azure/setup-helm@v4
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
         with:
           version: v3.19.0
       - name: Install kubeconform
