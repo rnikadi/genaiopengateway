@@ -402,3 +402,40 @@ func TestSupportsModel(t *testing.T) {
 		t.Errorf("arn url %s", got)
 	}
 }
+
+func TestNovaCanvasImages(t *testing.T) {
+	f := &fake{t: t, answer: func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"images":["aQ==","aQ=="]}`)
+	}}
+	p := f.start("")
+	if !p.SupportsModel(provider.ImageGenerations, "amazon.nova-canvas-v1:0") || p.SupportsModel(provider.ChatCompletions, "amazon.titan-image-generator-v2:0") {
+		t.Fatal("image models must serve images only")
+	}
+	resp, err := p.Send(context.Background(), &provider.Request{Endpoint: provider.ImageGenerations, Model: "amazon.nova-canvas-v1:0",
+		Body: []byte(`{"model":"amazon.nova-canvas-v1:0","prompt":"a falcon","n":2,"size":"1280x720"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := io.ReadAll(resp.Body)
+	if f.paths[0] != "/model/amazon.nova-canvas-v1%3A0/invoke" {
+		t.Fatalf("path %s", f.paths[0])
+	}
+	cfg, _ := f.bodies[0]["imageGenerationConfig"].(map[string]any)
+	if f.bodies[0]["taskType"] != "TEXT_IMAGE" || cfg["width"] != 1280.0 || cfg["height"] != 720.0 || cfg["numberOfImages"] != 2.0 {
+		t.Fatalf("body %v", f.bodies[0])
+	}
+	if resp.StatusCode != 200 || strings.Count(string(out), `"b64_json"`) != 2 || resp.Usage.Images != 2 {
+		t.Fatalf("%d %s", resp.StatusCode, out)
+	}
+
+	f.answer = func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Amzn-Errortype", "ValidationException")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"message":"prompt blocked"}`)
+	}
+	resp, _ = p.Send(context.Background(), &provider.Request{Endpoint: provider.ImageGenerations, Model: "amazon.nova-canvas-v1:0", Body: []byte(`{"prompt":"x"}`)})
+	out, _ = io.ReadAll(resp.Body)
+	if resp.StatusCode != 400 || !strings.Contains(string(out), "prompt blocked") {
+		t.Fatalf("error = %d %s", resp.StatusCode, out)
+	}
+}

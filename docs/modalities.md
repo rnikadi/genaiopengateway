@@ -24,11 +24,18 @@ All of them use the OpenAI API shape, the one SDKs and most self-hosted servers 
 
 The `openai` provider type serves every endpoint above, so it covers OpenAI, Azure OpenAI's v1 API, and OpenAI-compatible servers: vLLM (transcriptions, rerank), Speaches and Kokoro (speech and transcription), LocalAI, and rerank services with the Cohere and Jina request shape (`/v1/rerank` with `query` and `documents`). Each path is the client's path below the provider's `base_url`.
 
-Native translations come after, each in its own pull request, because each is a separate upstream API:
+Native translations come after, each in the adapter that already serves the cloud, so a virtual model can mix OpenAI and cloud targets and fall back between them:
 
-1. Vertex AI: Imagen for images, Veo for videos.
-2. Amazon Bedrock: Nova Canvas and Titan Image for images, Nova Reel for videos (an async invocation with S3 output).
-3. Gemini API: Imagen and Veo, and Gemini text to speech.
+| Endpoint | Vertex AI | Gemini API | Bedrock |
+| --- | --- | --- | --- |
+| `images.generations` | Imagen (`imagen-*`) through `:predict` | Imagen through `:predict` | Nova Canvas and Titan Image (`amazon.nova-canvas-*`, `amazon.titan-image-*`) through InvokeModel |
+| `audio.speech` | Gemini TTS (`*-tts`) through `generateContent` | Gemini TTS through `generateContent` | not offered |
+
+- **Images**: `prompt` and `n` carry over. `size` becomes Imagen's nearest `aspectRatio`, or Bedrock's `width` and `height`; `auto` uses the model's default. The answer is OpenAI's `data[].b64_json`, so images are counted as for `openai` targets. Image edits stay on `openai` targets.
+- **Speech**: `input` is the text and `voice` is passed through as the Gemini voice name, such as `Kore`; OpenAI voice names are not mapped, since they sound different. Gemini returns 24 kHz PCM, which the gateway answers as WAV, or raw with `response_format: pcm`; other formats get `400`. Characters are counted as for `openai` targets, and the tokens Gemini reports are recorded too, since Google prices TTS by token.
+- Which endpoint a cloud target serves follows from its model id, as chat and embeddings already do.
+
+Native video (Veo, Nova Reel) and cloud rerank stay in issue #35: their jobs and outputs (Google operations, S3 and Cloud Storage outputs) do not map onto the OpenAI shapes without a store of their own.
 
 Realtime APIs other than OpenAI's (Gemini Live, Nova Sonic) and WebRTC are not in this design: WebRTC media goes from the client straight to the provider, so the gateway could neither meter nor guard it.
 
@@ -127,7 +134,7 @@ Each step is one pull request with its tests, docs and conformance cases. The or
 2. Video jobs.
 3. Realtime over WebSocket.
 4. Playground tabs.
-5. Native Vertex AI, Bedrock and Gemini images, video and speech.
+5. Native Vertex AI, Bedrock and Gemini images and speech.
 
 ## Testing
 

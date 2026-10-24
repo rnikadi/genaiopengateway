@@ -93,15 +93,17 @@ func Split(model string) (publisher, name string) {
 
 // Supports implements provider.Provider.
 func (p *Provider) Supports(e provider.Endpoint) bool {
-	return e == provider.ChatCompletions || e == provider.Messages || e == provider.GenerateContent
+	return e == provider.ChatCompletions || e == provider.Messages || e == provider.GenerateContent ||
+		e == provider.ImageGenerations || e == provider.Speech
 }
 
 // SupportsModel implements provider.ModelSupporter: Messages is served
-// for Claude models and generateContent for Gemini models.
+// for Claude models, and Google's models serve what the gemini adapter
+// serves for them: chat, Imagen images or text to speech.
 func (p *Provider) SupportsModel(e provider.Endpoint, model string) bool {
-	switch pub, _ := Split(model); pub {
+	switch pub, name := Split(model); pub {
 	case google_:
-		return p.gemini.Supports(e)
+		return p.gemini.SupportsModel(e, name)
 	case anthropic_:
 		return p.claude.Supports(e)
 	}

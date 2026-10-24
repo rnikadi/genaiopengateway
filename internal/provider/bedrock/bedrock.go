@@ -1,7 +1,7 @@
 // Package bedrock adapts Amazon Bedrock: chat completions through the
 // Converse API for every model, /v1/messages for Claude through
-// InvokeModel, and embeddings for Titan and Cohere
-// (docs/cloud-providers.md).
+// InvokeModel, embeddings for Titan and Cohere, and images for Nova
+// Canvas and Titan Image (docs/cloud-providers.md, docs/modalities.md).
 package bedrock
 
 import (
@@ -88,16 +88,19 @@ func isEmbedding(model string) bool {
 
 // Supports implements provider.Provider.
 func (p *Provider) Supports(e provider.Endpoint) bool {
-	return e == provider.ChatCompletions || e == provider.Messages || e == provider.Embeddings
+	return e == provider.ChatCompletions || e == provider.Messages || e == provider.Embeddings || e == provider.ImageGenerations
 }
 
 // SupportsModel implements provider.ModelSupporter: Messages is served
 // for Claude models, embeddings for Titan and Cohere embedding models,
-// and chat completions for every other model.
+// images for Nova Canvas and Titan Image, and chat completions for
+// every other model.
 func (p *Provider) SupportsModel(e provider.Endpoint, model string) bool {
 	switch e {
 	case provider.ChatCompletions:
-		return !isEmbedding(model)
+		return !isEmbedding(model) && !isImageModel(model)
+	case provider.ImageGenerations:
+		return isImageModel(model)
 	case provider.Messages:
 		return isClaude(model)
 	case provider.Embeddings:
@@ -113,6 +116,8 @@ func (p *Provider) Send(ctx context.Context, req *provider.Request) (*provider.R
 		return p.chat(ctx, req)
 	case provider.Embeddings:
 		return p.embed(ctx, req)
+	case provider.ImageGenerations:
+		return p.images(ctx, req)
 	}
 	resp, err := p.claude.Send(ctx, req)
 	if err != nil || resp.StatusCode == http.StatusOK {
