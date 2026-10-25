@@ -31,6 +31,17 @@ func NewIndex(max int) *Index {
 	return &Index{max: max, order: list.New(), byCtx: map[string][]*list.Element{}, now: time.Now}
 }
 
+// SetMax changes how many vectors the index holds, dropping the oldest
+// when it shrinks.
+func (x *Index) SetMax(max int) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	x.max = max
+	for x.order.Len() > x.max {
+		x.remove(x.order.Back())
+	}
+}
+
 // Add records that the question v, in context ctx, is answered by the
 // entry at key until ttl passes.
 func (x *Index) Add(ctx, key string, v []float32, ttl time.Duration) {

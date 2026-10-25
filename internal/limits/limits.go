@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/rnikadi/genaiopengateway/internal/auth"
@@ -43,16 +44,29 @@ type Window struct {
 // Limiter checks and charges limits against a backend.
 type Limiter struct {
 	b              Backend
-	failOpenRate   bool
-	failOpenBudget bool
+	failOpenRate   atomic.Bool
+	failOpenBudget atomic.Bool
 	now            func() time.Time
 }
 
 // New returns a limiter. failOpenRate and failOpenBudget decide whether
 // requests pass when the backend is unreachable.
 func New(b Backend, failOpenRate, failOpenBudget bool) *Limiter {
-	return &Limiter{b: b, failOpenRate: failOpenRate, failOpenBudget: failOpenBudget, now: time.Now}
+	l := &Limiter{b: b, now: time.Now}
+	l.SetFailOpen(failOpenRate, failOpenBudget)
+	return l
 }
+
+// SetFailOpen changes whether requests pass when the backend is
+// unreachable, for rate limits and for budgets.
+func (l *Limiter) SetFailOpen(rate, budget bool) {
+	l.failOpenRate.Store(rate)
+	l.failOpenBudget.Store(budget)
+}
+
+// FailOpenRate reports whether rate limits pass when the backend is
+// unreachable.
+func (l *Limiter) FailOpenRate() bool { return l.failOpenRate.Load() }
 
 var (
 	levelNames  = [3]string{"organization", "team", "key"}
@@ -105,7 +119,7 @@ func (l *Limiter) Admit(ctx context.Context, p *auth.Principal) Decision {
 		if pol.RPM > 0 {
 			n, err := l.b.Add(ctx, minuteKey("rpm", ids[i], window), 1, 2*time.Minute)
 			if err != nil {
-				return l.unavailable(d, l.failOpenRate, err)
+				return l.unavailable(d, l.failOpenRate.Load(), err)
 			}
 			d.Requests = tighter(d.Requests, Window{pol.RPM, pol.RPM - int64(n), reset})
 			if int64(n) > pol.RPM {
@@ -115,7 +129,7 @@ func (l *Limiter) Admit(ctx context.Context, p *auth.Principal) Decision {
 		if pol.TPM > 0 {
 			v, err := l.b.Get(ctx, minuteKey("tpm", ids[i], window))
 			if err != nil {
-				return l.unavailable(d, l.failOpenRate, err)
+				return l.unavailable(d, l.failOpenRate.Load(), err)
 			}
 			d.Tokens = tighter(d.Tokens, Window{pol.TPM, pol.TPM - int64(v[0]), reset})
 			if int64(v[0]) >= pol.TPM {
@@ -126,7 +140,7 @@ func (l *Limiter) Admit(ctx context.Context, p *auth.Principal) Decision {
 			key, _ := spendKey(ids[i], b.Period, now)
 			v, err := l.b.Get(ctx, key)
 			if err != nil {
-				return l.unavailable(d, l.failOpenBudget, err)
+				return l.unavailable(d, l.failOpenBudget.Load(), err)
 			}
 			if v[0] >= b.AmountUSD {
 				return reject(d, i, "budget", CodeBudget, fmt.Sprintf("%s %s budget of $%s is spent", levelNames[i], b.Period, strconv.FormatFloat(b.AmountUSD, 'f', -1, 64)), 0)

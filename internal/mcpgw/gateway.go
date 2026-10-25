@@ -136,7 +136,10 @@ func (g *Gateway) Reload(cfg config.MCP) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	for name, u := range g.upstreams {
-		if next, ok := cfg.Servers[name]; ok && reflect.DeepEqual(next, u.cfg) {
+		// Refresh interval and session cap are set when an upstream is
+		// made, so a change to either remakes them all.
+		same := cfg.RefreshInterval == g.cfg.RefreshInterval && cfg.MaxUserSessions == g.cfg.MaxUserSessions
+		if next, ok := cfg.Servers[name]; ok && same && reflect.DeepEqual(next, u.cfg) {
 			continue
 		}
 		g.loops[name]()

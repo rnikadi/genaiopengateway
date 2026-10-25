@@ -274,7 +274,11 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) error {
 	if created {
 		action, status = "config.create", http.StatusCreated
 	}
-	if err := s.audit(ctx, action, kind, name, "", nil); err != nil {
+	var before map[string]any
+	if prev != nil {
+		before, _ = maskedSpec(prev)
+	}
+	if err := s.audit(ctx, action, kind, name, "", map[string]any{"changed": changedPaths(before, spec)}); err != nil {
 		return err
 	}
 	masked, err := maskedSpec(row)
@@ -315,6 +319,12 @@ func (s *Server) deleteConfig(w http.ResponseWriter, r *http.Request) error {
 }
 
 func checkObjectRef(kind, name string) error {
+	if kind == config.KindSettings {
+		if name != config.SettingsName {
+			return &apiError{http.StatusNotFound, "not_found", fmt.Sprintf("settings are named %q", config.SettingsName)}
+		}
+		return nil
+	}
 	if !slices.Contains(config.Kinds, kind) {
 		return &apiError{http.StatusNotFound, "not_found", fmt.Sprintf("unknown kind %q", kind)}
 	}
@@ -482,4 +492,47 @@ func joinPath(path []string) string {
 		out += p
 	}
 	return out
+}
+
+// changedPaths lists the dotted paths whose values differ between two
+// specs, sorted. Secrets compare as "set", so a new secret value shows
+// only when one is added or removed.
+func changedPaths(before, after map[string]any) []string {
+	flat := func(spec map[string]any) map[string]string {
+		out := map[string]string{}
+		var walk func(prefix string, v any)
+		walk = func(prefix string, v any) {
+			if m, ok := v.(map[string]any); ok && len(m) > 0 {
+				for k, sub := range m {
+					p := k
+					if prefix != "" {
+						p = prefix + "." + k
+					}
+					walk(p, sub)
+				}
+				return
+			}
+			if prefix == "" {
+				return
+			}
+			b, _ := json.Marshal(v)
+			out[prefix] = string(b)
+		}
+		walk("", spec)
+		return out
+	}
+	a, b := flat(before), flat(after)
+	changed := []string{}
+	for k, v := range b {
+		if a[k] != v {
+			changed = append(changed, k)
+		}
+	}
+	for k := range a {
+		if _, ok := b[k]; !ok {
+			changed = append(changed, k)
+		}
+	}
+	slices.Sort(changed)
+	return changed
 }

@@ -79,7 +79,7 @@ A new field without one fails the test, with the path in the message. The browse
 
 ## Admin API
 
-- `GET /admin/v1/settings` gains `fields`, one entry per runtime setting with `path`, `value`, `default`, `source` (`default`, `file` or `stored`) and `restart: false`. Secrets are reported as set or not set.
+- `GET /admin/v1/settings` gains `fields`, one entry per runtime setting with `path`, `value`, `default`, and `source` (`default`, `file` or `stored`), plus `stored` (the stored spec, secrets masked), `startup` (the startup settings) and `detectors` (built-in PII detectors). Secrets are reported as set or not set.
 - Writes use the existing object API: `PUT /admin/v1/config/settings/gateway` with the full stored spec, and `DELETE` to reset everything. The UI sends the stored fields with the section's changes applied, so resetting a field means leaving it out.
 
 ## Testing

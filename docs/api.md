@@ -111,9 +111,9 @@ Base path `/admin/v1`. JSON in and out. Authenticate with `Authorization: Bearer
 | `GET /admin/v1/alerts/webhooks` | Alert webhooks: `name`, `format`, `events`, `org`, `host` (no path), `signed`; and `budget_thresholds` (owners only) |
 | `POST /admin/v1/playground/chat/completions?team_id=` | Call a model as a team with an OpenAI chat completions body; the team's organization and team policies apply, usage is recorded under the team, and each call is audited as `playground.chat` (owners and the organization's admins, [playground.md](playground.md)) |
 | `GET /admin/v1/config` | Configuration objects from the file and the store, stored secrets as `"set"` (owners only, [admin-ui-config-editing.md](admin-ui-config-editing.md)) |
-| `PUT /admin/v1/config/{kind}/{name}` | Create or replace a stored provider, model, guardrail, MCP server, virtual MCP server or alert webhook; the body is its spec as in `config.yaml`. `400` when the merged config would be invalid, `409` when the file defines the name (owners only, audited) |
+| `PUT /admin/v1/config/{kind}/{name}` | Create or replace a stored provider, model, guardrail, MCP server, virtual MCP server or alert webhook, or the gateway settings (`settings/gateway`, [admin-ui-settings.md](admin-ui-settings.md)); the body is its spec as in `config.yaml`. `400` when the merged config would be invalid, `409` when the file defines the name (owners only, audited) |
 | `DELETE /admin/v1/config/{kind}/{name}` | Delete a stored object; refused while something refers to it (owners only, audited) |
-| `GET /admin/v1/settings` | The gateway's own settings; secrets only as set or not set (owners only, [admin-ui-config.md](admin-ui-config.md)) |
+| `GET /admin/v1/settings` | The gateway's own settings; secrets only as set or not set. `fields` lists each runtime setting with `path`, `value`, `default` and `source` (`default`, `file` or `stored`); `stored` is the stored settings spec, `startup` the settings read only at startup (owners only, [admin-ui-settings.md](admin-ui-settings.md)) |
 
 Organizations, teams and keys share the same policy fields, all optional:
 
