@@ -17,6 +17,7 @@
 | [Batch and files](batch.md) | The Batch API through the gateway: checked uploads, ownership, charging once, the Jobs page |
 | [Response cache](cache.md) | Exact and semantic caching per team: keys, guardrails, metering, the admin UI |
 | [Admin UI: editing configuration](admin-ui-config-editing.md) | Providers, models, guardrails, MCP servers and webhooks stored through the admin API |
+| [Admin UI: every setting in the UI](admin-ui-settings.md) | Gateway settings edited on the Settings page, forms for every object, and the check that keeps the UI complete |
 | [Per-user MCP credentials](mcp-user-credentials.md) | Connecting each user's upstream account, token storage and refresh |
 | [Body logging](body-logging.md) | Opt-in request and response logging, redaction, retention, access |
 | [Alerts](alerts.md) | Budget thresholds and other events, webhooks and Slack |

@@ -106,6 +106,17 @@ func NewMemory(maxBytes int64) *Memory {
 	return &Memory{max: maxBytes, order: list.New(), items: map[string]*list.Element{}, now: time.Now}
 }
 
+// SetMax changes how many bytes the store holds, dropping the least
+// recently used entries when it shrinks.
+func (m *Memory) SetMax(maxBytes int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.max = maxBytes
+	for m.used > m.max {
+		m.remove(m.order.Back())
+	}
+}
+
 // Get implements Store.
 func (m *Memory) Get(_ context.Context, key string) (*Entry, error) {
 	m.mu.Lock()

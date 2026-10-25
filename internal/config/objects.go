@@ -41,6 +41,7 @@ var SecretFields = map[string][][]string{
 	KindGuardrails:    {{"url"}, {"secret"}},
 	KindMCPServers:    {{"headers", "*"}, {"user_auth", "client_secret"}},
 	KindAlertWebhooks: {{"url"}, {"secret"}},
+	KindSettings:      {{"sso", "oidc", "client_secret"}},
 }
 
 // objectName is what a stored object may be called: it appears in URLs,
@@ -92,6 +93,13 @@ func ParseWith(raw []byte, objects []Object) (*Config, []Object, error) {
 			}
 			if !added {
 				shadowed = append(shadowed, o)
+			}
+		}
+	}
+	for _, o := range objects {
+		if o.Kind == KindSettings {
+			if err := addSettings(root, o); err != nil {
+				return nil, nil, err
 			}
 		}
 	}
@@ -183,6 +191,7 @@ var specTypes = map[string]func() any{
 	KindMCPServers:        func() any { return new(MCPServer) },
 	KindMCPVirtualServers: func() any { return new(VirtualServer) },
 	KindAlertWebhooks:     func() any { return new(Webhook) },
+	KindSettings:          func() any { return new(Settings) },
 }
 
 // CheckSpec reports a spec that is not a JSON object of the kind's

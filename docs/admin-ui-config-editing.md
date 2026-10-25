@@ -43,7 +43,7 @@ Before a write is stored, the merged config is built as the gateway would run it
 
 ## UI
 
-A **Configuration** page for owners has a tab per kind listing objects from the file (labelled "From config file", read-only) and from the store, with **New**, **Edit** and **Delete**. Providers and models have a form for their common fields; every kind has **Edit as JSON** for the whole spec. Validation errors from the API are shown on the form. The Providers and Models pages link to it for owners.
+A **Configuration** page for owners has a tab per kind listing objects from the file (labelled "From config file", read-only) and from the store, with **New**, **Edit** and **Delete**. Every kind has a form for all its fields, and **Edit as JSON** for the whole spec. Gateway-wide settings are a stored object too (kind `settings`, named `gateway`), edited on the Settings page; see [admin-ui-settings.md](admin-ui-settings.md). Validation errors from the API are shown on the form. The Providers and Models pages link to it for owners.
 
 ## Not in this phase
 

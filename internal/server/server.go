@@ -191,6 +191,11 @@ func (s *Server) install(cfg *config.Config) error {
 		return err
 	}
 	s.rt.Store(next)
+	s.limiter.SetFailOpen(cfg.Limiter.FailOpenRateLimits, cfg.Limiter.FailOpenBudgets)
+	if m, ok := s.cache.(*cache.Memory); ok {
+		m.SetMax(cfg.Cache.MaxMemoryBytes)
+	}
+	s.cacheIndex.SetMax(cfg.Cache.Semantic.MaxEntries)
 	s.mcp.Reload(cfg.MCP)
 	s.rebuildKeys()
 	return nil
@@ -222,9 +227,7 @@ func (s *Server) Start(ctx context.Context) {
 	go s.bodyPruneLoop(ctx)
 	go s.connectionsLoop(ctx)
 	go s.batchPollLoop(ctx)
-	if retention := s.rt.Load().cfg.Store.UsageRetention.Std(); retention > 0 {
-		go s.pruneLoop(ctx, retention)
-	}
+	go s.pruneLoop(ctx)
 }
 
 // Close flushes queued usage records and releases background resources.
@@ -329,34 +332,43 @@ func (s *Server) snapshotAge() float64 {
 	return time.Since(time.Unix(0, last)).Seconds()
 }
 
-func (s *Server) pruneLoop(ctx context.Context, retention time.Duration) {
-	t := time.NewTicker(24 * time.Hour)
+// pruneLoop deletes records older than store.usage_retention every
+// hour, reading the setting each time so a change from the admin UI
+// applies without a restart. Zero keeps everything.
+func (s *Server) pruneLoop(ctx context.Context) {
+	t := time.NewTicker(time.Hour)
 	defer t.Stop()
 	for {
-		before := time.Now().Add(-retention)
-		n, err := s.store.PruneUsage(ctx, before)
-		if err != nil {
-			s.log.Error("pruning usage failed", "err", err)
-		} else if n > 0 {
-			s.log.Info("pruned usage records", "rows", n)
-		}
-		n, err = s.store.PruneMCPCalls(ctx, before)
-		if err != nil {
-			s.log.Error("pruning MCP call records failed", "err", err)
-		} else if n > 0 {
-			s.log.Info("pruned MCP call records", "rows", n)
-		}
-		n, err = s.store.PruneGuardrailEvents(ctx, before)
-		if err != nil {
-			s.log.Error("pruning guardrail events failed", "err", err)
-		} else if n > 0 {
-			s.log.Info("pruned guardrail events", "rows", n)
+		if retention := s.rt.Load().cfg.Store.UsageRetention.Std(); retention > 0 {
+			s.prune(ctx, time.Now().Add(-retention))
 		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 		}
+	}
+}
+
+// prune deletes usage, MCP call and guardrail event records from before.
+func (s *Server) prune(ctx context.Context, before time.Time) {
+	n, err := s.store.PruneUsage(ctx, before)
+	if err != nil {
+		s.log.Error("pruning usage failed", "err", err)
+	} else if n > 0 {
+		s.log.Info("pruned usage records", "rows", n)
+	}
+	n, err = s.store.PruneMCPCalls(ctx, before)
+	if err != nil {
+		s.log.Error("pruning MCP call records failed", "err", err)
+	} else if n > 0 {
+		s.log.Info("pruned MCP call records", "rows", n)
+	}
+	n, err = s.store.PruneGuardrailEvents(ctx, before)
+	if err != nil {
+		s.log.Error("pruning guardrail events failed", "err", err)
+	} else if n > 0 {
+		s.log.Info("pruned guardrail events", "rows", n)
 	}
 }
 

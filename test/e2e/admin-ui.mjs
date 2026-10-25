@@ -226,6 +226,48 @@ await step('owner opens batches and video jobs', async () => {
   await ctx.close();
 });
 
+await step('owner changes a gateway setting and resets it', async () => {
+  // Start from the file's settings, even after an earlier run failed here.
+  if ((await adminAPI('GET', '/admin/v1/settings')).fields.some((f) => f.source === 'stored')) {
+    await adminAPI('DELETE', '/admin/v1/config/settings/gateway');
+  }
+  const { ctx, page } = await signIn('owner@example.com');
+  await page.click('nav >> text=Settings');
+  const field = (path) => page.locator(`[data-setting="${path}"]`);
+  await field('limits.max_realtime_session').locator('.badge:has-text("Default")').waitFor();
+  assert.ok(await field('limits.max_realtime_session').locator('text=Default: 30m').count(), 'the default is shown');
+  await field('limits.max_realtime_session').locator('input').fill('45m');
+  await page.locator('section:has(h2:has-text("Request limits")) button[type=submit]').click();
+  await field('limits.max_realtime_session').locator('.badge:has-text("Set here")').waitFor();
+  const stored = (await adminAPI('GET', '/admin/v1/settings')).fields.find((f) => f.path === 'limits.max_realtime_session');
+  assert.deepEqual([stored.value, stored.source], ['45m', 'stored']);
+  // A bad value is refused with the reason, and nothing is saved.
+  await field('mcp.refresh_interval').locator('input').fill('soon');
+  await page.locator('section:has(h2:has-text("MCP")) button[type=submit]').click();
+  await page.waitForSelector('section:has(h2:has-text("MCP")) .notice.error:has-text("invalid duration")');
+  await field('limits.max_realtime_session').locator('button:has-text("Reset")').click();
+  await field('limits.max_realtime_session').locator('.badge:has-text("Default")').waitFor();
+  assert.ok(!(await adminAPI('GET', '/admin/v1/settings')).stored.limits, 'the reset removes the stored value');
+  await ctx.close();
+});
+
+await step('owner adds a guardrail with the form', async () => {
+  const { ctx, page } = await signIn('owner@example.com');
+  const name = `e2e-regex-${run}`;
+  await page.click('nav >> text=Configuration');
+  await page.click('[role=tab]:has-text("Guardrails")');
+  await page.click('button:has-text("New guardrail")');
+  await page.fill('.modal label:has-text("Name") input', name);
+  await page.selectOption('.modal [data-setting="guardrails.type"] select', 'regex');
+  await page.fill('.modal [data-setting="guardrails.patterns"] textarea', 'ticket-[0-9]+');
+  await page.click('.modal button[type=submit]');
+  await page.waitForSelector(`td code:has-text("${name}")`);
+  const obj = (await adminAPI('GET', '/admin/v1/config')).data.find((o) => o.name === name);
+  assert.deepEqual(obj.spec, { type: 'regex', action: 'block', stages: ['input'], patterns: ['ticket-[0-9]+'] });
+  await adminAPI('DELETE', `/admin/v1/config/guardrails/${name}`);
+  await ctx.close();
+});
+
 await step('owner adds a provider and a model from the UI', async () => {
   const { ctx, page } = await signIn('owner@example.com');
   const provider = `e2e-${run}`;

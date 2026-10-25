@@ -1,17 +1,19 @@
 package server
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"maps"
 	"net/http"
 	"net/url"
 	"slices"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/policy"
 	"github.com/rnikadi/genaiopengateway/internal/provider"
+	"github.com/rnikadi/genaiopengateway/internal/redact"
 	"github.com/rnikadi/genaiopengateway/internal/router"
 	"github.com/rnikadi/genaiopengateway/internal/store"
 )
@@ -287,8 +289,68 @@ func (s *Server) settings(w http.ResponseWriter, r *http.Request) error {
 		mcp["oauth"] = map[string]any{"issuer": o.Issuer, "audience": o.Audience, "organization": o.Organization, "team_claim": o.TeamClaim, "scopes": o.Scopes}
 	}
 	out["mcp"] = mcp
+	fields, stored, err := s.settingFields(r.Context(), cfg)
+	if err != nil {
+		return err
+	}
+	out["fields"], out["stored"], out["startup"], out["detectors"] = fields, stored, config.StartupPaths, redact.Builtins
 	writeJSON(w, http.StatusOK, out)
 	return nil
+}
+
+// settingField is one gateway setting as the Settings page edits it
+// (docs/admin-ui-settings.md).
+type settingField struct {
+	Path    string `json:"path"`
+	Value   any    `json:"value"`
+	Default any    `json:"default"`
+	// Source is where the value comes from: default, file or stored.
+	Source string `json:"source"`
+}
+
+// defaultSettings are the settings of a config file that sets nothing.
+var defaultSettings = func() map[string]any {
+	c, err := config.Parse([]byte("{}"))
+	if err != nil {
+		panic(err)
+	}
+	return config.SettingsOf(c).Flatten()
+}()
+
+// settingFields reports every gateway setting with its value, default
+// and source, and the stored settings spec (secrets as "set").
+func (s *Server) settingFields(ctx context.Context, cfg *config.Config) ([]settingField, map[string]any, error) {
+	stored := map[string]any{}
+	if s.store != nil {
+		row, err := s.store.GetConfigObject(ctx, config.KindSettings, config.SettingsName)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+		case err != nil:
+			return nil, nil, err
+		default:
+			if stored, err = maskedSpec(row); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	raw, _ := json.Marshal(stored)
+	inStore := config.FilePaths(raw)
+	s.cfgMu.Lock()
+	inFile := config.FilePaths(s.file.Raw)
+	s.cfgMu.Unlock()
+	values := config.SettingsOf(cfg).Flatten()
+	fields := []settingField{}
+	for _, p := range config.SettingPaths() {
+		f := settingField{Path: p, Value: values[p], Default: defaultSettings[p], Source: "default"}
+		switch {
+		case inStore[p]:
+			f.Source = "stored"
+		case inFile[p]:
+			f.Source = "file"
+		}
+		fields = append(fields, f)
+	}
+	return fields, stored, nil
 }
 
 // host returns only the scheme and host of a secret URL: paths and
@@ -306,20 +368,4 @@ func host(u config.Secret) string {
 
 // duration formats a configured duration the way config files write
 // them: 30d, 5m, 1h30m, 2s.
-func duration(d config.Duration) string {
-	std := d.Std()
-	switch {
-	case std == 0:
-		return ""
-	case std%(24*time.Hour) == 0:
-		return strconv.Itoa(int(std/(24*time.Hour))) + "d"
-	}
-	s := std.String()
-	if strings.HasSuffix(s, "m0s") {
-		s = strings.TrimSuffix(s, "0s")
-	}
-	if strings.HasSuffix(s, "h0m") {
-		s = strings.TrimSuffix(s, "0m")
-	}
-	return s
-}
+func duration(d config.Duration) string { return d.Format() }

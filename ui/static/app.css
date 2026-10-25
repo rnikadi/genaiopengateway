@@ -200,3 +200,5 @@ ul.alerts .muted { margin-right: 8px; }
 .panel audio { display: block; width: 100%; margin: 12px 0; }
 textarea.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 textarea { width: 100%; font: inherit; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); resize: vertical; box-sizing: border-box; }
+.inline-row { display: flex; gap: 6px; align-items: center; }
+.setting > small .link { padding: 0; }

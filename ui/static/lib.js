@@ -157,8 +157,10 @@ export function Modal({ title, onClose, children }) {
   </div>`;
 }
 
-export function Field({ label, hint, children }) {
-  return html`<label class="field"><span>${label}</span>${children}${hint && html`<small class="muted">${hint}</small>`}</label>`;
+// Field is a labelled control. setting names the config path it edits,
+// which ui/coverage_test.go looks for (ADR 0027).
+export function Field({ label, hint, setting, children }) {
+  return html`<label class="field" data-setting=${setting}><span>${label}</span>${children}${hint && html`<small class="muted">${hint}</small>`}</label>`;
 }
 
 export function Card({ label, value, sub, href }) {
