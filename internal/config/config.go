@@ -503,7 +503,7 @@ func Load(path string) (*Config, error) {
 // Parse decodes and validates config bytes. ${VAR} references in values
 // are replaced from the environment; an unset variable is an error.
 func Parse(raw []byte) (*Config, error) {
-	c, _, err := ParseWith(raw, nil)
+	c, err := ParseWith(raw, nil)
 	return c, err
 }
 

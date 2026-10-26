@@ -37,7 +37,7 @@ mcp:          {public_url, refresh_interval, max_user_sessions, oauth: {issuer, 
 
 A startup field in the spec is refused with `400`. `sso.oidc.client_secret` is a secret and is stored encrypted, as provider keys are.
 
-**Precedence.** A field set in the UI wins over the config file. The config file supplies the first values, and the defaults fill in the rest. Named objects keep the opposite rule from ADR 0023, where the file wins on a name clash, because an object defined in a file is usually deployed from version control as a whole. A single gateway setting is a knob someone turns in the UI, so the UI value wins. Resetting a field in the UI removes it from the stored spec, so the file's value or the default applies again.
+**Precedence.** A field set in the UI wins over the config file. The config file supplies the first values, and the defaults fill in the rest. Named objects follow the same rule since [ADR 0028](adr/0028-ui-wins-over-the-file.md). Resetting a field in the UI removes it from the stored spec, so the file's value or the default applies again.
 
 **Validation and propagation.** A change is checked by merging it into the file and parsing the result, as stored objects are. A bad value is refused with the parser's message, and nothing is saved. Every replica applies the change within `store.refresh_interval`, with no restart. The parts read only at startup today are made to follow changes:
 
@@ -91,5 +91,4 @@ A new field without one fails the test, with the path in the message. The browse
 ## Not in this design
 
 - Moving startup settings into the UI.
-- Editing objects defined in the config file. They stay read-only and are marked as coming from the file, and teams that want UI control define them in the UI instead.
 - Per-replica overrides.

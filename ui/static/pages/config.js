@@ -26,8 +26,16 @@ const namesOf = (objects) => {
   return out;
 };
 
+const sources = {
+  file: html`<span class="badge">From config file</span>`,
+  changed: html`<span class="badge warn" title="Changed in the UI; this version is used instead of the config file's">Changed here</span>`,
+  deleted: html`<span class="badge bad" title="Deleted in the UI; the config file's version is not used">Deleted here</span>`,
+  store: html`<span class="badge good">Stored</span>`,
+};
+
 // Config lists configuration objects from the file and the store, and lets
-// owners add and change the stored ones (docs/admin-ui-config-editing.md).
+// owners add, change, delete and reset them; a change wins over the file
+// (docs/admin-ui-config-editing.md, ADR 0028).
 export function Config() {
   const [reload, setReload] = useState(0);
   const state = useLoad(() => api('GET', '/admin/v1/config'), [reload]);
@@ -35,30 +43,32 @@ export function Config() {
   const [kind, setKind] = useState('providers');
   const [editing, setEditing] = useState(null);
   const [deleting, setDeleting] = useState(null);
+  const [resetting, setResetting] = useState(null);
   const done = () => {
     setEditing(null);
     setReload((n) => n + 1);
   };
   return html`
-    <${PageHeader} title="Configuration" sub="Objects from the config file are read-only here. Objects added here are stored in the database, apply to every replica within the refresh interval, and never override the file.">
+    <${PageHeader} title="Configuration" sub="Every object can be changed here, including those from the config file. Changes are stored in the database, win over the config file, and apply to every replica within the refresh interval. Reset returns an object to the config file's version.">
       <button onClick=${() => setEditing({ kind, name: '', spec: templates[kind], isNew: true })}>New ${kindNames[kind].toLowerCase().replace(/s$/, '')}</button>
     <//>
     <${Tabs} tabs=${kindNames} value=${kind} onChange=${setKind} />
     <${Loading} state=${state}>${(d) => html`
       ${d.error && html`<div class="notice error">The stored objects do not apply to the config file, so the gateway is running without the latest changes: ${d.error}</div>`}
       <${Table}
-        rowKey=${(o) => o.source + o.name}
+        rowKey=${(o) => o.name}
         rows=${d.data.filter((o) => o.kind === kind)}
         empty=${`No ${kindNames[kind].toLowerCase()} yet.`}
         columns=${[
           { label: 'Name', render: (o) => html`<code>${o.name}</code>${o.spec?.type && html`<div class="muted small">${providerTypes[o.spec.type] || o.spec.type}</div>`}` },
-          { label: 'Source', render: (o) => (o.source === 'file' ? html`<span class="badge">From config file</span>` : o.shadowed ? html`<span class="badge warn" title="The config file defines the same name, and the file wins">Shadowed by the file</span>` : html`<span class="badge good">Stored</span>`) },
+          { label: 'Source', render: (o) => sources[o.source] },
           { label: 'Updated', render: (o) => (o.updated_at ? html`${when(o.updated_at)}<div class="muted small">${o.updated_by}</div>` : '') },
           {
             label: '',
-            render: (o) => o.source === 'store' && html`<span class="row-actions">
-              <button class="secondary" onClick=${() => setEditing({ kind, name: o.name, spec: o.spec })}>Edit</button>
-              <button class="secondary" onClick=${() => setDeleting(o)}>Delete</button>
+            render: (o) => html`<span class="row-actions">
+              ${o.source !== 'deleted' && html`<button class="secondary" onClick=${() => setEditing({ kind, name: o.name, spec: o.spec, fromFile: o.source !== 'store' })}>Edit</button>`}
+              ${o.source !== 'deleted' && html`<button class="secondary" onClick=${() => setDeleting(o)}>Delete</button>`}
+              ${(o.source === 'changed' || o.source === 'deleted') && html`<button class="secondary" onClick=${() => setResetting(o)}>Reset</button>`}
             </span>`,
           },
         ]}
@@ -66,13 +76,23 @@ export function Config() {
     ${editing && html`<${Editor} obj=${editing} names=${namesOf(state.data?.data || [])} detectors=${detectors.data || []} onDone=${done} onClose=${() => setEditing(null)} />`}
     ${deleting && html`<${Confirm}
       title=${`Delete ${deleting.name}`}
-      message="The gateway stops using it on every replica within the refresh interval. Anything that still refers to it must be changed first."
+      message=${`The gateway stops using it on every replica within the refresh interval. Anything that still refers to it must be changed first.${deleting.source === 'store' ? '' : ' It stays deleted after a restart; Reset brings back the config file\'s version.'}`}
       action="Delete"
       onConfirm=${async () => {
         await api('DELETE', `/admin/v1/config/${deleting.kind}/${deleting.name}`);
         setReload((n) => n + 1);
       }}
-      onClose=${() => setDeleting(null)} />`}`;
+      onClose=${() => setDeleting(null)} />`}
+    ${resetting && html`<${Confirm}
+      title=${`Reset ${resetting.name}`}
+      message="The change made here is removed, and the config file's version applies again on every replica within the refresh interval."
+      action="Reset"
+      danger=${false}
+      onConfirm=${async () => {
+        await api('POST', `/admin/v1/config/${resetting.kind}/${resetting.name}/reset`);
+        setReload((n) => n + 1);
+      }}
+      onClose=${() => setResetting(null)} />`}`;
 }
 
 // Editor changes one stored object, with a form for each kind and the
@@ -124,6 +144,7 @@ function Editor({ obj, names, detectors, onDone, onClose }) {
   return html`<${Modal} title=${obj.isNew ? `New ${kindNames[obj.kind].toLowerCase().replace(/s$/, '')}` : `Edit ${obj.name}`} onClose=${onClose}>
     <form class="form" onSubmit=${submit}>
       <${ErrorBox} error=${error} />
+      ${obj.fromFile && html`<p class="muted">This object comes from the config file. Saving stores your version, which is used instead of the file's until you reset it. Secrets shown as set keep the file's value.</p>`}
       ${obj.isNew && html`<${Field} label="Name" setting=${obj.kind === 'alert_webhooks' ? 'alerts.webhooks.name' : undefined} hint="Lowercase letters, digits, '.', '_' and '-'. It cannot be changed later.">
         <input required pattern="[a-z0-9][a-z0-9._\\-]{0,62}" value=${name} onInput=${(e) => setName(e.target.value)} />
       <//>`}

@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"slices"
@@ -59,17 +60,18 @@ type Object struct {
 // ValidObjectName reports whether a stored object may have this name.
 func ValidObjectName(name string) bool { return objectName.MatchString(name) }
 
-// ParseWith decodes raw like Parse and adds stored objects to it. The
-// file wins: an object whose name the file defines is left out and
-// returned as shadowed. Stored values are not expanded as ${VAR}, so the
-// admin API cannot read the gateway's environment.
-func ParseWith(raw []byte, objects []Object) (*Config, []Object, error) {
+// ParseWith decodes raw like Parse and adds stored objects to it. A
+// stored object replaces the file's object of the same name, and one
+// whose spec is null removes it (ADR 0028). Stored values are not
+// expanded as ${VAR}, so the admin API cannot read the gateway's
+// environment.
+func ParseWith(raw []byte, objects []Object) (*Config, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return nil, nil, fmt.Errorf("parse config: %w", err)
+		return nil, fmt.Errorf("parse config: %w", err)
 	}
 	if err := expandEnv(&doc); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if len(doc.Content) == 0 {
 		doc = yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Kind: yaml.MappingNode, Tag: "!!map"}}}
@@ -79,50 +81,52 @@ func ParseWith(raw []byte, objects []Object) (*Config, []Object, error) {
 		root.Kind, root.Tag = yaml.MappingNode, "!!map"
 	}
 	if root.Kind != yaml.MappingNode {
-		return nil, nil, fmt.Errorf("parse config: the file must be a mapping")
+		return nil, fmt.Errorf("parse config: the file must be a mapping")
 	}
-	var shadowed []Object
 	for _, kind := range Kinds {
 		for _, o := range objects {
 			if o.Kind != kind {
 				continue
 			}
-			added, err := addObject(root, o)
-			if err != nil {
-				return nil, nil, err
-			}
-			if !added {
-				shadowed = append(shadowed, o)
+			if err := addObject(root, o); err != nil {
+				return nil, err
 			}
 		}
 	}
 	for _, o := range objects {
 		if o.Kind == KindSettings {
 			if err := addSettings(root, o); err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 		}
 	}
 	c, err := decode(root)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	c.Raw = raw
-	return c, shadowed, nil
+	return c, nil
 }
 
-// addObject inserts an object into the file's mapping. It reports false
-// when the file already defines that name.
-func addObject(root *yaml.Node, o Object) (bool, error) {
+// IsDeletion reports whether a stored spec is a deletion marker, which
+// removes a file object of the same name.
+func IsDeletion(spec []byte) bool { return string(bytes.TrimSpace(spec)) == "null" }
+
+// addObject puts an object into the file's mapping, replacing one of the
+// same name, or removes that one for a deletion marker.
+func addObject(root *yaml.Node, o Object) error {
 	path, ok := kindPath[o.Kind]
 	if !ok {
-		return false, fmt.Errorf("unknown kind %q", o.Kind)
+		return fmt.Errorf("unknown kind %q", o.Kind)
 	}
-	var spec yaml.Node
-	if err := yaml.Unmarshal(o.Spec, &spec); err != nil || len(spec.Content) == 0 || spec.Content[0].Kind != yaml.MappingNode {
-		return false, fmt.Errorf("%s %q: the spec must be a JSON object", o.Kind, o.Name)
+	var value *yaml.Node
+	if !IsDeletion(o.Spec) {
+		var spec yaml.Node
+		if err := yaml.Unmarshal(o.Spec, &spec); err != nil || len(spec.Content) == 0 || spec.Content[0].Kind != yaml.MappingNode {
+			return fmt.Errorf("%s %q: the spec must be a JSON object", o.Kind, o.Name)
+		}
+		value = spec.Content[0]
 	}
-	value := spec.Content[0]
 	parent := root
 	for _, key := range path[:len(path)-1] {
 		parent = child(parent, key, yaml.MappingNode)
@@ -130,21 +134,76 @@ func addObject(root *yaml.Node, o Object) (bool, error) {
 	last := path[len(path)-1]
 	if o.Kind == KindAlertWebhooks {
 		list := child(parent, last, yaml.SequenceNode)
-		for _, item := range list.Content {
-			if n := lookup(item, "name"); n != nil && n.Value == o.Name {
-				return false, nil
-			}
+		list.Content = slices.DeleteFunc(list.Content, func(item *yaml.Node) bool {
+			n := lookup(item, "name")
+			return n != nil && n.Value == o.Name
+		})
+		if value != nil {
+			setKey(value, "name", o.Name)
+			list.Content = append(list.Content, value)
 		}
-		setKey(value, "name", o.Name)
-		list.Content = append(list.Content, value)
-		return true, nil
+		return nil
 	}
 	m := child(parent, last, yaml.MappingNode)
-	if lookup(m, o.Name) != nil {
-		return false, nil
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == o.Name {
+			m.Content = slices.Delete(m.Content, i, i+2)
+			break
+		}
 	}
-	m.Content = append(m.Content, scalar(o.Name), value)
-	return true, nil
+	if value != nil {
+		m.Content = append(m.Content, scalar(o.Name), value)
+	}
+	return nil
+}
+
+// FileSpec returns a file object's spec as JSON, with ${VAR} expanded,
+// or nil when the file does not define it.
+func FileSpec(raw []byte, kind, name string) ([]byte, error) {
+	path, ok := kindPath[kind]
+	if !ok {
+		return nil, fmt.Errorf("unknown kind %q", kind)
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	if err := expandEnv(&doc); err != nil {
+		return nil, err
+	}
+	if len(doc.Content) == 0 {
+		return nil, nil
+	}
+	n := doc.Content[0]
+	for _, key := range path {
+		if n = lookup(n, key); n == nil {
+			return nil, nil
+		}
+	}
+	var node *yaml.Node
+	if kind == KindAlertWebhooks {
+		for _, item := range n.Content {
+			if v := lookup(item, "name"); v != nil && v.Value == name {
+				node = item
+			}
+		}
+	} else {
+		node = lookup(n, name)
+	}
+	if node == nil {
+		return nil, nil
+	}
+	var v any
+	if err := node.Decode(&v); err != nil {
+		return nil, err
+	}
+	if m, ok := v.(map[string]any); ok && kind == KindAlertWebhooks {
+		delete(m, "name")
+	}
+	if v == nil {
+		v = map[string]any{}
+	}
+	return json.Marshal(v)
 }
 
 // child returns the value of key in a mapping, creating it with kind when
