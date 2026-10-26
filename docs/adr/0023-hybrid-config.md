@@ -1,6 +1,6 @@
 # 0023. Configuration from the file or the admin API
 
-- Status: accepted
+- Status: accepted; the file-wins rule is superseded by [0028](0028-ui-wins-over-the-file.md)
 - Date: 2026-10-23
 
 ## Context

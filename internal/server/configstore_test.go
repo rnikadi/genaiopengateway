@@ -76,8 +76,6 @@ func TestConfigObjectsAPI(t *testing.T) {
 		}
 	}
 	e.call("PUT", "/admin/v1/config/things/x", `{}`, http.StatusNotFound, nil)
-	// The file wins: its names cannot be stored.
-	e.call("PUT", "/admin/v1/config/providers/up", `{"type": "openai"}`, http.StatusConflict, nil)
 
 	// A provider in use cannot be deleted; once the model is gone it can.
 	e.call("DELETE", "/admin/v1/config/providers/extra", "", http.StatusBadRequest, nil)
@@ -176,5 +174,91 @@ providers: {other: {base_url: "http://127.0.0.1:1/v1"}}
 	}
 	if rec := do(srv.Handler(), "GET", "/admin/v1/config", adminToken, ""); strings.Contains(rec.Body.String(), `"error":`) {
 		t.Fatalf("error still reported: %s", rec.Body)
+	}
+}
+
+// Objects from the config file are edited, deleted and reset from the UI,
+// and the change wins over the file (ADR 0028).
+func TestFileObjectsFromTheUI(t *testing.T) {
+	e := newAdminEnv(t, `guardrails: {no-pii: {type: pii, action: redact, stages: [input]}}`)
+	ctx := context.Background()
+	list := func() map[string]configEntry {
+		var out struct{ Data []configEntry }
+		e.call("GET", "/admin/v1/config", "", 200, &out)
+		m := map[string]configEntry{}
+		for _, c := range out.Data {
+			if _, dup := m[c.Kind+"/"+c.Name]; dup {
+				t.Errorf("%s/%s listed twice", c.Kind, c.Name)
+			}
+			m[c.Kind+"/"+c.Name] = c
+		}
+		return m
+	}
+	if got := list()["providers/up"]; got.Source != "file" || got.Spec["api_key"] != "set" || got.Spec["base_url"] == nil {
+		t.Fatalf("file provider = %+v", got)
+	}
+
+	// Editing a file provider keeps the file's key by reference, without
+	// an encryption key, and the change wins over the file.
+	var got configEntry
+	e.call("PUT", "/admin/v1/config/providers/up", `{"base_url": "https://proxy.example.com/v1", "api_key": "set", "timeout": "30s"}`, http.StatusCreated, &got)
+	if got.Source != "changed" || got.FileSpec["base_url"] == nil || got.Spec["api_key"] != "set" {
+		t.Fatalf("changed = %+v", got)
+	}
+	p := e.srv.rt.Load().cfg.Providers["up"]
+	if p.BaseURL != "https://proxy.example.com/v1" || p.APIKey.Value() != "upstream-key" || p.Timeout.Std().Seconds() != 30 {
+		t.Fatalf("not applied: %+v", p)
+	}
+	row, err := e.srv.store.GetConfigObject(ctx, "providers", "up")
+	if err != nil || row.Secrets != "" || strings.Contains(row.Spec, "upstream-key") {
+		t.Fatalf("the file's key was stored: %+v, %v", row, err)
+	}
+	// A new key typed in the UI needs the encryption key.
+	if rec := do(e.h, "PUT", "/admin/v1/config/providers/up", adminToken, `{"base_url": "https://proxy.example.com/v1", "api_key": "new"}`); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "encryption_key") {
+		t.Errorf("new secret without a key = %d %s", rec.Code, rec.Body)
+	}
+
+	// Deleting a file object stores a marker; one still in use is refused.
+	e.call("DELETE", "/admin/v1/config/providers/up", "", http.StatusBadRequest, nil)
+	e.call("DELETE", "/admin/v1/config/guardrails/no-pii", "", http.StatusNoContent, nil)
+	if _, ok := e.srv.rt.Load().cfg.Guardrails["no-pii"]; ok {
+		t.Fatal("deleted guardrail still running")
+	}
+	e.call("DELETE", "/admin/v1/config/guardrails/no-pii", "", http.StatusNotFound, nil)
+	m := list()
+	if g := m["guardrails/no-pii"]; g.Source != "deleted" || g.Spec != nil || g.FileSpec["type"] != "pii" {
+		t.Errorf("deleted = %+v", g)
+	}
+	// A restart reads the marker, so the object stays deleted.
+	other, err := New(e.srv.file, slog.New(slog.NewTextHandler(io.Discard, nil)), e.srv.store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other.refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := other.rt.Load().cfg.Guardrails["no-pii"]; ok {
+		t.Error("the deleted guardrail came back on restart")
+	}
+
+	// Reset brings the file's version back.
+	e.call("POST", "/admin/v1/config/providers/up/reset", "", http.StatusOK, &got)
+	e.call("POST", "/admin/v1/config/guardrails/no-pii/reset", "", http.StatusOK, nil)
+	e.call("POST", "/admin/v1/config/guardrails/no-pii/reset", "", http.StatusNotFound, nil)
+	cfg := e.srv.rt.Load().cfg
+	if got.Source != "file" || cfg.Providers["up"].BaseURL == "https://proxy.example.com/v1" || cfg.Guardrails["no-pii"].Type != "pii" {
+		t.Errorf("after reset: %+v %+v", got, cfg.Providers["up"])
+	}
+	e.call("PUT", "/admin/v1/config/providers/stored", `{"base_url": "https://x.example.com/v1"}`, http.StatusCreated, nil)
+	e.call("POST", "/admin/v1/config/providers/stored/reset", "", http.StatusNotFound, nil)
+
+	var audit struct{ Data []store.AuditEntry }
+	e.call("GET", "/admin/v1/audit", "", 200, &audit)
+	var actions []string
+	for _, a := range audit.Data {
+		actions = append(actions, a.Action)
+	}
+	if !strings.Contains(strings.Join(actions, " "), "config.reset") {
+		t.Errorf("audit = %v", actions)
 	}
 }

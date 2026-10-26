@@ -60,6 +60,7 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	h("GET /admin/v1/config", s.listConfig)
 	h("PUT /admin/v1/config/{kind}/{name}", s.putConfig)
 	h("DELETE /admin/v1/config/{kind}/{name}", s.deleteConfig)
+	h("POST /admin/v1/config/{kind}/{name}/reset", s.resetConfig)
 	h("POST /admin/v1/playground/chat/completions", s.playground(provider.ChatCompletions))
 	h("POST /admin/v1/playground/images/generations", s.playground(provider.ImageGenerations))
 	h("POST /admin/v1/playground/audio/speech", s.playground(provider.Speech))

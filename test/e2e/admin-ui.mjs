@@ -268,6 +268,29 @@ await step('owner adds a guardrail with the form', async () => {
   await ctx.close();
 });
 
+await step('owner changes a model from the config file and resets it', async () => {
+  const { ctx, page } = await signIn('owner@example.com');
+  await adminAPI('POST', '/admin/v1/config/models/chat-default/reset').catch(() => {});
+  await page.click('nav >> text=Configuration');
+  await page.click('[role=tab]:has-text("Models")');
+  const row = page.locator('tr', { has: page.locator('td code', { hasText: /^chat-default$/ }) });
+  await row.locator('button:has-text("Edit")').click();
+  await page.waitForSelector('.modal >> text=comes from the config file');
+  await page.locator('.modal [data-setting="models.targets.price.output_per_mtok"] input').first().fill('2.5');
+  await page.click('.modal button[type=submit]');
+  await row.locator('.badge:has-text("Changed here")').waitFor();
+  let obj = (await adminAPI('GET', '/admin/v1/config')).data.find((o) => o.kind === 'models' && o.name === 'chat-default');
+  assert.equal(obj.source, 'changed');
+  assert.equal(obj.spec.targets[0].price.output_per_mtok, 2.5);
+  assert.equal(obj.file_spec.targets[0].price.output_per_mtok, 1.6);
+  await row.locator('button:has-text("Reset")').click();
+  await page.click('.modal button:has-text("Reset")');
+  await row.locator('.badge:has-text("From config file")').waitFor();
+  obj = (await adminAPI('GET', '/admin/v1/config')).data.find((o) => o.kind === 'models' && o.name === 'chat-default');
+  assert.equal(obj.source, 'file');
+  await ctx.close();
+});
+
 await step('owner adds a provider and a model from the UI', async () => {
   const { ctx, page } = await signIn('owner@example.com');
   const provider = `e2e-${run}`;

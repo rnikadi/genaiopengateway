@@ -10,7 +10,7 @@ Operators want to run the gateway from the admin UI: whatever the gateway suppor
 ## Decision
 
 - Split settings into startup settings and runtime settings. Startup settings stay in the environment and config file: listeners, TLS, store, limiter connection, encryption keys, the admin token, `ui.enabled` and static keys. Runtime settings are everything else.
-- Store the gateway-wide runtime settings as one object of kind `settings`, named `gateway`, in the config file's shape. Merge it over the file, so a value set in the UI wins and resetting it falls back to the file, then the default. Named objects keep ADR 0023's rule that the file wins.
+- Store the gateway-wide runtime settings as one object of kind `settings`, named `gateway`, in the config file's shape. Merge it over the file, so a value set in the UI wins and resetting it falls back to the file, then the default. Named objects kept ADR 0023's rule that the file wins, until [0028](0028-ui-wins-over-the-file.md).
 - Make the Settings page editable for owners, showing each setting's value, default and source, with reset. Give every object kind a form.
 - Apply changes on every replica within the refresh interval, without restarts.
 - Fail the `ui` tests when a config path is neither a declared startup setting nor named by a `data-setting` control in the UI.
