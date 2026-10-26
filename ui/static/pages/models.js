@@ -9,8 +9,8 @@ export function Models() {
   const s = useSession();
   const state = useLoad(() => api('GET', '/admin/v1/models'));
   return html`
-    <${PageHeader} title="Models" sub="Virtual models from the gateway's configuration. Targets are tried in order; health covers the last hour.">
-      ${s.owner && html`<a class="button secondary" href="#/config">Add or change</a>`}
+    <${PageHeader} title="Models" sub="Virtual models from the gateway's configuration. Targets are tried in order; health covers the last hour. Endpoints are those the targets' provider types support: an embedding model on an OpenAI-compatible provider still lists chat.">
+      ${s.owner && html`<a class="button secondary" href="#/config?kind=models">Manage in Configuration</a>`}
     <//>
     <${Loading} state=${state}>${(d) => html`<${Table}
       rowKey=${(m) => m.name}
@@ -28,6 +28,7 @@ export function Models() {
             </li>`,
           )}</ol>`,
         },
+        ...(s.owner ? [{ label: '', render: (m) => html`<a class="button secondary" href=${`#/config?kind=models&edit=${encodeURIComponent(m.name)}`}>Edit</a>` }] : []),
       ]}
     />`}<//>`;
 }

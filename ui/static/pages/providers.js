@@ -23,7 +23,7 @@ export function Providers() {
   const state = useLoad(() => api('GET', '/admin/v1/providers'));
   return html`
     <${PageHeader} title="Providers" sub="Upstreams from the gateway's configuration. Health covers the last hour across every replica. Credentials are never shown.">
-      ${s.owner && html`<a class="button secondary" href="#/config">Add or change</a>`}
+      ${s.owner && html`<a class="button secondary" href="#/config?kind=providers">Manage in Configuration</a>`}
     <//>
     <${Loading} state=${state}>${(d) => html`<${Table}
       rowKey=${(p) => p.name}
@@ -35,6 +35,7 @@ export function Providers() {
         { label: 'Auth', render: (p) => html`${authNames[p.auth] || p.auth}${p.header_names?.length ? html`<div class="muted small">Headers: ${p.header_names.join(', ')}</div>` : ''}` },
         { label: 'Models', render: (p) => (p.models.length ? html`<span class="chips">${p.models.map((m) => html`<a class="badge" href="#/models" key=${m}>${m}</a>`)}</span>` : html`<span class="muted small">Not used by any model</span>`) },
         { label: 'Last hour', render: (p) => html`<${Health} h=${p.health} />` },
+        ...(s.owner ? [{ label: '', render: (p) => html`<a class="button secondary" href=${`#/config?kind=providers&edit=${encodeURIComponent(p.name)}`}>Edit</a>` }] : []),
       ]}
     />`}<//>`;
 }

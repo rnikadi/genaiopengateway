@@ -33,9 +33,9 @@ const routes = [
   [/^\/models$/, Models, 'models'],
   [/^\/providers$/, Providers, 'providers'],
   [/^\/alerts$/, Alerts, 'alerts'],
-  [/^\/settings$/, Settings, 'settings'],
+  [/^\/settings$/, Settings, 'settings', 'owner'],
   [/^\/playground$/, Playground, 'playground'],
-  [/^\/config$/, Config, 'config'],
+  [/^\/config$/, Config, 'config', 'owner'],
   [/^\/audit$/, Audit, 'audit'],
 ];
 
@@ -49,7 +49,7 @@ const nav = [
   ['guardrails', '#/guardrails', 'Guardrails'],
   ['mcp', '#/mcp', 'MCP'],
   ['models', '#/models', 'Models'],
-  ['playground', '#/playground', 'Playground'],
+  ['playground', '#/playground', 'Playground', 'writer'],
   ['providers', '#/providers', 'Providers'],
   ['alerts', '#/alerts', 'Alerts'],
   ['audit', '#/audit', 'Audit log'],
@@ -117,22 +117,26 @@ function Shell({ session, onSignOut }) {
   let Page = null;
   let section = '';
   let args = [];
-  for (const [re, component, sec] of routes) {
+  let needs;
+  for (const [re, component, sec, role] of routes) {
     const m = route.path.match(re);
     if (m) {
       Page = component;
       section = sec;
+      needs = role;
       args = m.slice(1).map(decodeURIComponent);
       break;
     }
   }
   const op = session.me.operator;
   const owner = op.grants.some((g) => g.role === 'owner');
+  // owner pages need the owner role; writer pages, owner or an organization's admin.
+  const may = (role) => !role || owner || (role === 'writer' && op.grants.some((g) => g.role === 'admin'));
   return html`<${Session.Provider} value=${session}>
     <div class="layout">
       <aside class="sidebar">
         <a class="brand" href="#/"><span class="logo" aria-hidden="true"></span>GenAIOpenGateway</a>
-        <nav>${nav.filter(([, , , role]) => !role || owner).map(([key, href, label]) => html`<a href=${href} class=${key === section ? 'active' : ''} aria-current=${key === section ? 'page' : undefined}>${label}</a>`)}</nav>
+        <nav>${nav.filter(([, , , role]) => may(role)).map(([key, href, label]) => html`<a href=${href} class=${key === section ? 'active' : ''} aria-current=${key === section ? 'page' : undefined}>${label}</a>`)}</nav>
         <div class="who">
           <span class="who-name" title=${op.email || op.subject}>${op.name || op.email || op.subject}</span>
           <span class="muted small">${roleLabel(op.grants, session.orgNames)}</span>
@@ -140,7 +144,11 @@ function Shell({ session, onSignOut }) {
         </div>
       </aside>
       <main class="content">
-        ${Page ? html`<${Page} key=${location.hash} args=${args} params=${route.params} />` : html`<h1>Not found</h1><p><a href="#/">Go to the overview</a></p>`}
+        ${!Page
+          ? html`<h1>Not found</h1><p><a href="#/">Go to the overview</a></p>`
+          : !may(needs)
+            ? html`<h1>Owners only</h1><p class="muted">This page needs the owner role. <a href="#/">Go to the overview</a></p>`
+            : html`<${Page} key=${location.hash} args=${args} params=${route.params} />`}
       </main>
     </div>
   <//>`;
