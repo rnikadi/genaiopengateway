@@ -45,7 +45,6 @@ func uiHeaders(h http.Header) {
 	// The playground shows generated images, inline or at the provider's
 	// URL, and plays generated speech from a blob.
 	h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob: https:; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
-	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "same-origin")
 	h.Set("X-Frame-Options", "DENY")
 }
