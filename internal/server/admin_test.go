@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -193,6 +194,9 @@ func TestAdminValidation(t *testing.T) {
 	for _, c := range cases {
 		e.call(c.method, c.path, c.body, 400, nil)
 	}
+	var team idResp
+	e.call("POST", "/admin/v1/orgs/"+org.ID+"/teams", `{"name":"t"}`, 201, &team)
+	e.call("POST", "/admin/v1/teams/"+team.ID+"/keys", `{"name":"k","expires_at":"2020-01-01T00:00:00Z"}`, 400, nil)
 	var trimmed struct{ Name string }
 	e.call("POST", "/admin/v1/orgs", `{"name":"  b  "}`, 201, &trimmed)
 	if trimmed.Name != "b" {
@@ -200,6 +204,21 @@ func TestAdminValidation(t *testing.T) {
 	}
 	e.call("POST", "/admin/v1/orgs/org_missing/teams", `{"name":"t"}`, 404, nil)
 	e.call("GET", "/admin/v1/teams/team_missing/keys", ``, 404, nil)
+}
+
+func TestSecurityHeaders(t *testing.T) {
+	e := newAdminEnv(t, "")
+	rec := do(e.h, "GET", "/admin/v1/orgs", adminToken, "")
+	if rec.Header().Get("X-Content-Type-Options") != "nosniff" || rec.Header().Get("Strict-Transport-Security") != "" {
+		t.Fatalf("over HTTP: %v", rec.Header())
+	}
+	req := httptest.NewRequest("GET", "/healthz", nil)
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rec = httptest.NewRecorder()
+	e.h.ServeHTTP(rec, req)
+	if rec.Header().Get("Strict-Transport-Security") == "" || rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("over HTTPS: %v", rec.Header())
+	}
 }
 
 func TestAdminAuth(t *testing.T) {
@@ -223,8 +242,9 @@ func TestExpiredKeyRejected(t *testing.T) {
 	var org, team, key idResp
 	e.call("POST", "/admin/v1/orgs", `{"name":"a"}`, 201, &org)
 	e.call("POST", "/admin/v1/orgs/"+org.ID+"/teams", `{"name":"t"}`, 201, &team)
-	past := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
-	e.call("POST", "/admin/v1/teams/"+team.ID+"/keys", `{"name":"k","expires_at":"`+past+`"}`, 201, &key)
+	soon := time.Now().Add(time.Second).UTC().Format(time.RFC3339Nano)
+	e.call("POST", "/admin/v1/teams/"+team.ID+"/keys", `{"name":"k","expires_at":"`+soon+`"}`, 201, &key)
+	time.Sleep(1100 * time.Millisecond)
 	if rec := do(e.h, "POST", "/v1/chat/completions", key.Key, `{"model":"chat"}`); rec.Code != 401 {
 		t.Fatalf("expired key = %d", rec.Code)
 	}

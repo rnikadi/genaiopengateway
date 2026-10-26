@@ -266,6 +266,9 @@ func (s *Server) apply(p *patch, name *string, pol *policy.Policy, expires **tim
 		if !p.isKey {
 			return badRequest("expires_at applies only to keys")
 		}
+		if p.ExpiresAt.Value != nil && p.ExpiresAt.Value.Before(time.Now()) {
+			return badRequest("expires_at is in the past")
+		}
 		*expires = p.ExpiresAt.Value
 	}
 	if err := pol.Validate(); err != nil {

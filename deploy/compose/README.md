@@ -47,7 +47,7 @@ Any MCP client can connect to `http://localhost:8080/mcp/demo` with the header `
 
 ## Admin UI and sign-in
 
-Open `http://localhost:8080/ui/` and sign in with the admin token (`local-admin-token-change-me-0000000000` by default).
+Open `http://localhost:8080/ui/` and sign in with the admin token (`local-admin-token-change-me-0000000000` by default). The sample token is public, so Compose publishes every port on 127.0.0.1 only and the gateway logs a warning while it is in use. Set `GATEWAY_ADMIN_TOKEN` (`openssl rand -hex 32`) before exposing the stack to anyone else.
 
 To try single sign-on and roles, add Dex, a local OpenID Connect provider:
 

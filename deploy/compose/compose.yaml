@@ -29,7 +29,7 @@ services:
     volumes:
       - ./config.yaml:/etc/genaiopengateway/config.yaml:ro
     ports:
-      - "${GATEWAY_PORT:-8080}:8080"
+      - "127.0.0.1:${GATEWAY_PORT:-8080}:8080"   # loopback only: the sample admin token is public
     depends_on:
       postgres: {condition: service_healthy}
       valkey: {condition: service_healthy}
@@ -94,7 +94,7 @@ services:
     profiles: [observability]
     image: jaegertracing/jaeger:2.10.0
     ports:
-      - "16686:16686"             # UI
+      - "127.0.0.1:16686:16686"   # UI
     restart: unless-stopped
 
   prometheus:
@@ -103,7 +103,7 @@ services:
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     restart: unless-stopped
 
 volumes:
