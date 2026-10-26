@@ -134,6 +134,21 @@ await step('owner creates, rotates and revokes a virtual key', async () => {
   await ctx.close();
 });
 
+await step('owner sees provider credentials on a team page', async () => {
+  const org = await adminAPI('POST', '/admin/v1/orgs', { name: `e2e-creds-${run}` });
+  const team = await adminAPI('POST', `/admin/v1/orgs/${org.id}/teams`, { name: 'byok' });
+  const { ctx, page } = await signIn('owner@example.com');
+  await page.goto(`${base}/ui/#/teams/${team.id}`);
+  const row = page.locator('tr', { has: page.locator('td code', { hasText: /^openai$/ }) });
+  await row.locator('text=Shared key').waitFor();
+  await row.locator('button:has-text("Set")').click();
+  await page.fill('.modal input[type=password]', 'sk-team-own');
+  await page.click('.modal button[type=submit]');
+  // The compose stack has no secrets.encryption_key, so storing is refused with the reason.
+  await page.waitForSelector('.modal [role=alert] >> text=encryption_key');
+  await ctx.close();
+});
+
 await step('owner turns on a guardrail and sees it block', async () => {
   const { ctx, page } = await signIn('owner@example.com');
   const org = (await adminAPI('GET', '/admin/v1/orgs?limit=500')).data.find((o) => o.name === orgName);

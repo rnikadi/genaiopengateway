@@ -34,7 +34,7 @@ func backends(t *testing.T) map[string]*Store {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, table := range []string{"usage", "audit_log", "mcp_calls", "mcp_tool_pins", "api_keys", "teams", "orgs", "config_objects"} {
+		for _, table := range []string{"usage", "audit_log", "mcp_calls", "mcp_tool_pins", "api_keys", "team_credentials", "teams", "orgs", "config_objects"} {
 			if _, err := pg.db.ExecContext(ctx, "DELETE FROM "+table); err != nil {
 				t.Fatal(err)
 			}
@@ -397,6 +397,47 @@ func TestListAllKeysAndRotation(t *testing.T) {
 			}
 			if err := s.RotateKey(ctx, keys[2].ID, "p", "h5", until); !errors.Is(err, ErrNotFound) {
 				t.Errorf("rotating a revoked key = %v", err)
+			}
+		})
+	}
+}
+
+func TestTeamCredentialsStore(t *testing.T) {
+	for name, s := range backends(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			org := &Org{Name: "creds"}
+			if err := s.CreateOrg(ctx, org); err != nil {
+				t.Fatal(err)
+			}
+			team := &Team{OrgID: org.ID, Name: "t"}
+			if err := s.CreateTeam(ctx, team); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.PutTeamCredential(ctx, &TeamCredential{TeamID: "missing", Provider: "openai", Secret: "x"}); !errors.Is(err, ErrNotFound) {
+				t.Errorf("unknown team = %v", err)
+			}
+			for _, secret := range []string{"sealed-1", "sealed-2"} {
+				if err := s.PutTeamCredential(ctx, &TeamCredential{TeamID: team.ID, Provider: "openai", Secret: secret, UpdatedBy: "me"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := s.ListTeamCredentials(ctx, team.ID)
+			if err != nil || len(got) != 1 || got[0].Secret != "sealed-2" || got[0].UpdatedBy != "me" {
+				t.Fatalf("list = %+v, %v", got, err)
+			}
+			if err := s.DeleteTeamCredential(ctx, team.ID, "openai"); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.DeleteTeamCredential(ctx, team.ID, "openai"); !errors.Is(err, ErrNotFound) {
+				t.Errorf("second delete = %v", err)
+			}
+			_ = s.PutTeamCredential(ctx, &TeamCredential{TeamID: team.ID, Provider: "anthropic", Secret: "s"})
+			if err := s.DeleteTeam(ctx, team.ID); err != nil {
+				t.Fatal(err)
+			}
+			if got, _ := s.ListTeamCredentials(ctx, ""); len(got) != 0 {
+				t.Errorf("credentials outlive their team: %+v", got)
 			}
 		})
 	}

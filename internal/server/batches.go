@@ -163,7 +163,7 @@ func (in *batchInput) writeTo(w io.Writer, upstreamModel string) error {
 // target of its model that accepts it.
 func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
-	p, ok := s.videoCaller(w, r)
+	p, r, ok := s.videoCaller(w, r)
 	if !ok {
 		return
 	}
@@ -249,7 +249,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for i, t := range targets {
-		f, ok := rt.router.Forwarder(t.Provider)
+		f, ok := rt.router.Forwarder(r.Context(), t.Provider)
 		if !ok {
 			continue
 		}
@@ -337,7 +337,7 @@ func passThrough(w http.ResponseWriter, resp *http.Response, t config.Target) ([
 
 // listFiles lists the caller's files, newest first, as recorded.
 func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.videoCaller(w, r)
+	p, r, ok := s.videoCaller(w, r)
 	if !ok {
 		return
 	}
@@ -364,7 +364,7 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 // that holds it.
 func (s *Server) fileCall(method, suffix string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		p, ok := s.videoCaller(w, r)
+		p, r, ok := s.videoCaller(w, r)
 		if !ok {
 			return
 		}
@@ -402,7 +402,7 @@ func (s *Server) fileCall(method, suffix string) http.HandlerFunc {
 // forward sends a call to a target's provider, answering the client
 // itself when it cannot.
 func (s *Server) forward(w http.ResponseWriter, r *http.Request, t config.Target, method, path string, body io.Reader, contentType string) (*http.Response, bool) {
-	f, ok := s.rt.Load().router.Forwarder(t.Provider)
+	f, ok := s.rt.Load().router.Forwarder(r.Context(), t.Provider)
 	if !ok {
 		writeError(w, provider.Batches, http.StatusNotFound, codeModelNotFound, "the provider that holds this is no longer configured")
 		return nil, false
@@ -418,7 +418,7 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, t config.Target
 
 // createBatch starts a batch on the target that holds its input file.
 func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.videoCaller(w, r)
+	p, r, ok := s.videoCaller(w, r)
 	if !ok {
 		return
 	}
@@ -484,7 +484,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 // keeps the stored batch current.
 func (s *Server) batchCall(method, suffix string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		p, ok := s.videoCaller(w, r)
+		p, r, ok := s.videoCaller(w, r)
 		if !ok {
 			return
 		}
@@ -507,7 +507,7 @@ func (s *Server) batchCall(method, suffix string) http.HandlerFunc {
 
 // listBatches lists the caller's batches, newest first, as last stored.
 func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.videoCaller(w, r)
+	p, r, ok := s.videoCaller(w, r)
 	if !ok {
 		return
 	}
@@ -672,7 +672,8 @@ func (s *Server) pollBatches(ctx context.Context) {
 // fetchBatch calls a batch at its target, for the refresh loop and the
 // admin API, and returns the batch object.
 func (s *Server) fetchBatch(ctx context.Context, b *store.Batch, suffix string) ([]byte, error) {
-	f, ok := s.rt.Load().router.Forwarder(b.Provider)
+	ctx = s.teamContext(ctx, b.TeamID)
+	f, ok := s.rt.Load().router.Forwarder(ctx, b.Provider)
 	if !ok {
 		return nil, errors.New("provider is no longer configured")
 	}

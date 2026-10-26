@@ -1,6 +1,6 @@
 import {
   html, useState, api, useLoad, useSession, Loading, Table, Modal, PolicyForm, Confirm, PageHeader, Card, CopyButton,
-  usageQuery, totals, policySummary, usd, num, day, when,
+  usageQuery, totals, policySummary, usd, num, day, when, Field, ErrorBox,
 } from '../lib.js';
 import { keyStatus, KeyActions, KeyModals } from './keys.js';
 
@@ -154,6 +154,7 @@ export function Team({ args: [id] }) {
           ]}
         />
       </section>
+      <${Credentials} team=${team} canWrite=${canWrite} />
       ${modal?.kind === 'edit' && html`<${Modal} title="Edit team" onClose=${close}>
         <${PolicyForm} kind="team" initial=${team} submitLabel="Save" onCancel=${close}
           onSubmit=${async (body) => { await api('PATCH', `/admin/v1/teams/${encodeURIComponent(id)}`, body); close(); state.reload(); }} />
@@ -175,4 +176,65 @@ export function Team({ args: [id] }) {
         <footer><button onClick=${() => setCreated(null)}>Done</button></footer>
       <//>`}`;
   }}<//>`;
+}
+
+// Credentials are the team's own provider keys, used for its requests in
+// place of the shared ones (docs/team-credentials.md).
+function Credentials({ team, canWrite }) {
+  const state = useLoad(() => api('GET', `/admin/v1/teams/${encodeURIComponent(team.id)}/credentials`), [team.id]);
+  const [editing, setEditing] = useState(null);
+  const [removing, setRemoving] = useState(null);
+  return html`<section class="panel">
+    <div class="panel-header"><h2>Provider credentials</h2></div>
+    <p class="muted">A provider key set here is used for this team's requests instead of the gateway's shared one, so they are billed to the team's own account. Applications keep using their virtual keys. If the team's key fails, the gateway does not fall back to the shared key of that provider.</p>
+    <${Loading} state=${state}>${(d) => html`<${Table}
+      rowKey=${(c) => c.provider}
+      rows=${d.data}
+      empty="No providers are configured."
+      columns=${[
+        { label: 'Provider', render: (c) => html`<code>${c.provider}</code><div class="muted small">${c.type}</div>` },
+        { label: 'Credential', render: (c) => (c.set ? html`<span class="badge good">Team's own key</span><div class="muted small">${when(c.updated_at)} · ${c.updated_by}</div>` : c.supported ? html`<span class="muted">Shared key</span>` : html`<span class="muted">Shared credential (not settable per team)</span>`) },
+        {
+          label: '',
+          render: (c) => canWrite && c.supported && html`<div class="row-actions">
+            <button class="link" onClick=${() => setEditing(c)}>${c.set ? 'Replace' : 'Set'}</button>
+            ${c.set && html`<button class="link danger" onClick=${() => setRemoving(c)}>Remove</button>`}
+          </div>`,
+        },
+      ]}
+    />`}<//>
+    ${editing && html`<${Modal} title=${`${editing.set ? 'Replace' : 'Set'} the ${editing.provider} key of ${team.name}`} onClose=${() => setEditing(null)}>
+      <${CredentialForm} onCancel=${() => setEditing(null)}
+        onSubmit=${async (apiKey) => { await api('PUT', `/admin/v1/teams/${encodeURIComponent(team.id)}/credentials/${encodeURIComponent(editing.provider)}`, { api_key: apiKey }); setEditing(null); state.reload(); }} />
+    <//>`}
+    ${removing && html`<${Confirm} title="Remove the team's key" action="Remove" onClose=${() => setRemoving(null)}
+      message=${`${team.name} goes back to the gateway's shared ${removing.provider} key.`}
+      onConfirm=${async () => { await api('DELETE', `/admin/v1/teams/${encodeURIComponent(team.id)}/credentials/${encodeURIComponent(removing.provider)}`); state.reload(); }} />`}
+  </section>`;
+}
+
+function CredentialForm({ onSubmit, onCancel }) {
+  const [key, setKey] = useState('');
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await onSubmit(key.trim());
+    } catch (err) {
+      setError(err);
+      setBusy(false);
+    }
+  };
+  return html`<form class="form" onSubmit=${submit}>
+    <${ErrorBox} error=${error} />
+    <${Field} label="API key" hint="Stored encrypted and never shown again.">
+      <input type="password" required autocomplete="off" value=${key} onInput=${(e) => setKey(e.target.value)} />
+    <//>
+    <footer>
+      <button type="button" class="secondary" onClick=${onCancel}>Cancel</button>
+      <button type="submit" disabled=${busy}>Save</button>
+    </footer>
+  </form>`;
 }

@@ -88,6 +88,8 @@ Base path `/admin/v1`. JSON in and out. Authenticate with `Authorization: Bearer
 | `POST /admin/v1/orgs/{org_id}/teams` | Create team |
 | `GET /admin/v1/orgs/{org_id}/teams` | List teams |
 | `GET`, `PATCH`, `DELETE /admin/v1/teams/{team_id}` | Read, update, delete (only when it has no active keys) |
+| `GET /admin/v1/teams/{team_id}/credentials` | Each provider with whether the team has its own credential for it (`set`, `supported`, `updated_at`, `updated_by`); never the secret ([team-credentials.md](team-credentials.md)) |
+| `PUT`, `DELETE /admin/v1/teams/{team_id}/credentials/{provider}` | Set the team's own API key for a provider with `{"api_key": "..."}`, or remove it; needs `secrets.encryption_key`; audited as `team.credential.set` and `team.credential.delete` |
 | `POST /admin/v1/teams/{team_id}/keys` | Create key; the secret is returned once, in this response only |
 | `GET /admin/v1/teams/{team_id}/keys` | List keys (no secrets) |
 | `GET /admin/v1/keys` | List keys across teams, filtered by `org_id`, `team_id`, `status` (`active`, `expiring`, `expired`, `revoked`, `rotating`) and `q` (name, prefix or owner); limited to the organizations the operator can read ([virtual-keys.md](virtual-keys.md)) |
