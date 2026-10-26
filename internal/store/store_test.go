@@ -122,7 +122,7 @@ func TestPagination(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			for i := 0; i < 5; i++ {
-				if err := s.CreateOrg(ctx, &Org{Name: "o"}); err != nil {
+				if err := s.CreateOrg(ctx, &Org{Name: "o" + strconv.Itoa(i)}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -438,6 +438,64 @@ func TestTeamCredentialsStore(t *testing.T) {
 			}
 			if got, _ := s.ListTeamCredentials(ctx, ""); len(got) != 0 {
 				t.Errorf("credentials outlive their team: %+v", got)
+			}
+		})
+	}
+}
+
+func TestOrgNamesAreUnique(t *testing.T) {
+	for name, s := range backends(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			acme := &Org{Name: "acme"}
+			if err := s.CreateOrg(ctx, acme); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.CreateOrg(ctx, &Org{Name: "ACME"}); !errors.Is(err, ErrConflict) {
+				t.Fatalf("a taken name, in another case: %v", err)
+			}
+			globex := &Org{Name: "globex"}
+			if err := s.CreateOrg(ctx, globex); err != nil {
+				t.Fatal(err)
+			}
+			globex.Name = "Acme"
+			if err := s.UpdateOrg(ctx, globex); !errors.Is(err, ErrConflict) {
+				t.Fatalf("a rename to a taken name: %v", err)
+			}
+			acme.Name = "Acme"
+			if err := s.UpdateOrg(ctx, acme); err != nil {
+				t.Fatalf("an organization keeps its own name in another case: %v", err)
+			}
+
+			// Migration 0015 renames the duplicates an older version allowed,
+			// except the oldest.
+			if _, err := s.db.ExecContext(ctx, `DROP INDEX orgs_name`); err != nil {
+				t.Fatal(err)
+			}
+			for i, id := range []string{"org_dup1", "org_dup2"} {
+				if _, err := s.db.ExecContext(ctx, s.q(`INSERT INTO orgs (id, name, policy, created_at, updated_at) VALUES (?, 'acme', '{}', ?, ?)`), id, now()+int64(i+1), now()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := s.db.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version = '0015_unique_org_names'`); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.migrate(ctx); err != nil {
+				t.Fatal(err)
+			}
+			var names []string
+			for _, id := range []string{acme.ID, "org_dup1", "org_dup2"} {
+				o, err := s.GetOrg(ctx, id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				names = append(names, o.Name)
+			}
+			if want := []string{"Acme", "acme (org_dup1)", "acme (org_dup2)"}; !slices.Equal(names, want) {
+				t.Fatalf("after the migration: %q, want %q", names, want)
+			}
+			if err := s.CreateOrg(ctx, &Org{Name: "acme"}); !errors.Is(err, ErrConflict) {
+				t.Fatalf("after the migration: %v", err)
 			}
 		})
 	}

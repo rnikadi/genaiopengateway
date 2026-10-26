@@ -182,12 +182,21 @@ func TestAdminValidation(t *testing.T) {
 		{"POST", "/admin/v1/orgs", `{"name":"a","budget":{"amount_usd":1,"period":"weekly"}}`},
 		{"POST", "/admin/v1/orgs", `{"name":"a","expires_at":"2030-01-01T00:00:00Z"}`},
 		{"POST", "/admin/v1/orgs", `not json`},
+		{"POST", "/admin/v1/orgs", `{"name":"   "}`},
+		{"POST", "/admin/v1/orgs", `{"name":"` + strings.Repeat("a", 201) + `"}`},
+		{"POST", "/admin/v1/orgs", `{"name":"a\u0000b"}`},
+		{"PATCH", "/admin/v1/orgs/" + org.ID, `{"name":"\n"}`},
 		{"GET", "/admin/v1/orgs?limit=0", ``},
 		{"GET", "/admin/v1/usage?group_by=bogus", ``},
 		{"GET", "/admin/v1/usage?from=yesterday", ``},
 	}
 	for _, c := range cases {
 		e.call(c.method, c.path, c.body, 400, nil)
+	}
+	var trimmed struct{ Name string }
+	e.call("POST", "/admin/v1/orgs", `{"name":"  b  "}`, 201, &trimmed)
+	if trimmed.Name != "b" {
+		t.Errorf("names are trimmed: %q", trimmed.Name)
 	}
 	e.call("POST", "/admin/v1/orgs/org_missing/teams", `{"name":"t"}`, 404, nil)
 	e.call("GET", "/admin/v1/teams/team_missing/keys", ``, 404, nil)

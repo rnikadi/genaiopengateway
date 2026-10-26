@@ -261,9 +261,27 @@ func (s *Store) CreateOrg(ctx context.Context, o *Org) error {
 	o.ID = id.New("org")
 	o.CreatedAt = toTime(now())
 	o.UpdatedAt = o.CreatedAt
-	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO orgs (id, name, policy, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`),
-		o.ID, o.Name, encodePolicy(o.Policy), o.CreatedAt.UnixMilli(), o.UpdatedAt.UnixMilli())
-	return err
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		if err := s.orgNameFree(ctx, tx, o); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, s.q(`INSERT INTO orgs (id, name, policy, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`),
+			o.ID, o.Name, encodePolicy(o.Policy), o.CreatedAt.UnixMilli(), o.UpdatedAt.UnixMilli())
+		return err
+	})
+}
+
+// orgNameFree returns ErrConflict when another organization has o's name,
+// compared without case: role mappings find organizations by name.
+func (s *Store) orgNameFree(ctx context.Context, tx *sql.Tx, o *Org) error {
+	var n int
+	if err := tx.QueryRowContext(ctx, s.q(`SELECT COUNT(*) FROM orgs WHERE lower(name) = lower(?) AND id <> ?`), o.Name, o.ID).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return fmt.Errorf("%w: an organization named %q already exists", ErrConflict, o.Name)
+	}
+	return nil
 }
 
 const orgCols = `id, name, policy, created_at, updated_at`
@@ -303,9 +321,13 @@ func (s *Store) ListOrgs(ctx context.Context, p Page) ([]*Org, bool, error) {
 // UpdateOrg saves the name and policy of an organization.
 func (s *Store) UpdateOrg(ctx context.Context, o *Org) error {
 	o.UpdatedAt = toTime(now())
-	res, err := s.db.ExecContext(ctx, s.q(`UPDATE orgs SET name = ?, policy = ?, updated_at = ? WHERE id = ?`),
-		o.Name, encodePolicy(o.Policy), o.UpdatedAt.UnixMilli(), o.ID)
-	return affected(res, err)
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		if err := s.orgNameFree(ctx, tx, o); err != nil {
+			return err
+		}
+		return affected(tx.ExecContext(ctx, s.q(`UPDATE orgs SET name = ?, policy = ?, updated_at = ? WHERE id = ?`),
+			o.Name, encodePolicy(o.Policy), o.UpdatedAt.UnixMilli(), o.ID))
+	})
 }
 
 // DeleteOrg removes an organization that has no teams.

@@ -76,6 +76,9 @@ func TestOperatorRoles(t *testing.T) {
 		want         int
 	}{
 		{"acme admin", acmeAdmin, "PATCH", "/admin/v1/orgs/" + acme.ID, `{"rpm":10}`, 200},
+		{"acme admin", acmeAdmin, "PATCH", "/admin/v1/orgs/" + acme.ID, `{"name":"acme","rpm":10}`, 200},
+		{"acme admin", acmeAdmin, "PATCH", "/admin/v1/orgs/" + acme.ID, `{"name":"globex"}`, 403},
+		{"acme admin", acmeAdmin, "PATCH", "/admin/v1/orgs/" + acme.ID, `{"name":"acme-new"}`, 403},
 		{"acme admin", acmeAdmin, "PATCH", "/admin/v1/orgs/" + globex.ID, `{"rpm":10}`, 403},
 		{"acme admin", acmeAdmin, "GET", "/admin/v1/orgs/" + globex.ID, "", 403},
 		{"acme admin", acmeAdmin, "POST", "/admin/v1/orgs", `{"name":"x"}`, 403},
@@ -109,6 +112,8 @@ func TestOperatorRoles(t *testing.T) {
 		{"viewer", viewAll, "GET", "/admin/v1/audit", "", 200},
 		{"viewer", viewAll, "PATCH", "/admin/v1/orgs/" + globex.ID, `{"rpm":1}`, 403},
 		{"owner", owner, "POST", "/admin/v1/orgs", `{"name":"initech"}`, 201},
+		{"owner", owner, "POST", "/admin/v1/orgs", `{"name":"Initech"}`, 409},
+		{"owner", owner, "PATCH", "/admin/v1/orgs/" + globex.ID, `{"name":"ACME"}`, 409},
 		{"nobody", "", "GET", "/admin/v1/orgs", "", 401},
 		{"unknown cookie", "forged", "GET", "/admin/v1/orgs", "", 401},
 	} {
@@ -362,6 +367,16 @@ sso:
 		t.Fatalf("a foreign return target must be dropped: %d %q", rec.Code, rec.Header().Get("Location"))
 	}
 
+	// An email the identity provider has not verified matches no mapping (ADR 0029).
+	for _, unverified := range []any{false, "false"} {
+		if rec := signIn("/ui/", jwt.MapClaims{"sub": "u7", "email": "analyst@example.com", "email_verified": unverified}, nil); rec.Code != 403 {
+			t.Fatalf("an unverified email (%v): %d", unverified, rec.Code)
+		}
+	}
+	if rec := signIn("/ui/", jwt.MapClaims{"sub": "u8", "email": "analyst@example.com", "email_verified": true}, nil); rec.Code != 302 {
+		t.Fatalf("a verified email: %d %s", rec.Code, rec.Body)
+	}
+
 	if rec := signIn("/ui/", jwt.MapClaims{"sub": "u3", "email": "stranger@example.com", "groups": []any{"sales"}}, nil); rec.Code != 403 {
 		t.Fatalf("a user with no role: %d", rec.Code)
 	}
@@ -390,7 +405,7 @@ sso:
 			signIns = append(signIns, a.Actor)
 		}
 	}
-	if len(signIns) != 2 {
+	if len(signIns) != 3 {
 		t.Fatalf("sign-ins in the audit log: %v", signIns)
 	}
 }
