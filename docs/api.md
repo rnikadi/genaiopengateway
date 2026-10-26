@@ -82,9 +82,9 @@ Base path `/admin/v1`. JSON in and out. Authenticate with `Authorization: Bearer
 
 | Method and path | Purpose |
 | --- | --- |
-| `POST /admin/v1/orgs` | Create organization |
+| `POST /admin/v1/orgs` | Create organization. Names are trimmed, 1 to 200 characters, and unique without case (`409` when taken) |
 | `GET /admin/v1/orgs` | List organizations |
-| `GET`, `PATCH`, `DELETE /admin/v1/orgs/{org_id}` | Read, update, delete (only when it has no teams) |
+| `GET`, `PATCH`, `DELETE /admin/v1/orgs/{org_id}` | Read, update, delete (only when it has no teams). Only owners change `name` |
 | `POST /admin/v1/orgs/{org_id}/teams` | Create team |
 | `GET /admin/v1/orgs/{org_id}/teams` | List teams |
 | `GET`, `PATCH`, `DELETE /admin/v1/teams/{team_id}` | Read, update, delete (only when it has no active keys) |

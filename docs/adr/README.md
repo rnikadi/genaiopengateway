@@ -30,5 +30,6 @@
 | [0026](0026-response-cache.md) | An opt-in response cache per team, with semantic matching on one replica's vectors |
 | [0027](0027-settings-in-the-ui.md) | Every runtime setting is edited in the admin UI, and a test keeps it so |
 | [0028](0028-ui-wins-over-the-file.md) | A change made in the UI wins over the config file for named objects |
+| [0029](0029-sign-in-roles-resolve-safely.md) | Sign-in roles resolve to one organization and a verified email |
 
 New ADRs copy [0000-template.md](0000-template.md).

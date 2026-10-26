@@ -226,7 +226,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	if o.Name, _ = claims["name"].(string); o.Name == "" {
 		o.Name, _ = claims["preferred_username"].(string)
 	}
-	o.Grants = s.resolveGrants(cfg.SSO.Roles, o.Email, oauth.Strings(claims[oc.GroupsClaim]))
+	o.Grants = s.resolveGrants(cfg.SSO.Roles, verifiedEmail(claims), oauth.Strings(claims[oc.GroupsClaim]))
 	if len(o.Grants) == 0 {
 		fail(http.StatusForbidden, fmt.Sprintf("%s has no role on this gateway. Ask an owner to map one of your groups to a role.", o.actor()), nil)
 		return
@@ -236,6 +236,24 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, f.Return, http.StatusFound)
+}
+
+// verifiedEmail is the email that role mappings may match: none when the
+// identity provider says it is unverified (ADR 0029). Providers that never
+// send email_verified, such as Entra ID, are trusted.
+func verifiedEmail(claims map[string]any) string {
+	email, _ := claims["email"].(string)
+	switch v := claims["email_verified"].(type) {
+	case bool:
+		if !v {
+			return ""
+		}
+	case string:
+		if strings.EqualFold(v, "false") {
+			return ""
+		}
+	}
+	return email
 }
 
 // tokenLogin signs in with the admin token when OIDC is not configured.

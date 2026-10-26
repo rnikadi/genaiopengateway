@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/rnikadi/genaiopengateway/internal/auth"
 	"github.com/rnikadi/genaiopengateway/internal/config"
@@ -208,14 +210,29 @@ func applyOwner(p *patch, k *store.Key) error {
 	return nil
 }
 
+// checkName validates the name of an organization, team or key.
+func checkName(name string) error {
+	switch {
+	case name == "":
+		return badRequest("name is required")
+	case utf8.RuneCountInString(name) > maxNameLength:
+		return badRequest("name is at most %d characters", maxNameLength)
+	case strings.IndexFunc(name, unicode.IsControl) >= 0:
+		return badRequest("name must not contain control characters")
+	}
+	return nil
+}
+
+const maxNameLength = 200
+
 // apply updates name and policy in place and validates the result
 // against the models currently configured.
 func (s *Server) apply(p *patch, name *string, pol *policy.Policy, expires **time.Time) error {
 	if p.Name != nil {
-		*name = *p.Name
+		*name = strings.TrimSpace(*p.Name)
 	}
-	if *name == "" {
-		return badRequest("name is required")
+	if err := checkName(*name); err != nil {
+		return err
 	}
 	if p.AllowedModels != nil {
 		pol.AllowedModels = *p.AllowedModels
@@ -372,6 +389,10 @@ func (s *Server) updateOrg(w http.ResponseWriter, r *http.Request) error {
 	before := *o
 	if err := s.apply(&p, &o.Name, &o.Policy, nil); err != nil {
 		return err
+	}
+	// Role mappings find organizations by name (ADR 0029).
+	if o.Name != before.Name && !operatorFrom(r.Context()).isOwner() {
+		return &apiError{http.StatusForbidden, "forbidden", "only owners rename an organization"}
 	}
 	if err := s.store.UpdateOrg(r.Context(), o); err != nil {
 		return err
