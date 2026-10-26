@@ -109,7 +109,7 @@ await step('owner creates, rotates and revokes a virtual key', async () => {
   await page.press('input[type=search]', 'Enter');
   const row = page.locator('tr', { hasText: owner });
   await row.waitFor();
-  assert.equal(await page.locator('tbody tr').count(), 1, 'the search finds only this key');
+  await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 1, null, { timeout: 5000 });
 
   await row.locator('button:has-text("Rotate")').click();
   await page.selectOption('.modal select', '1h');
