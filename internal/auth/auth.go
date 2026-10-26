@@ -58,6 +58,11 @@ type Principal struct {
 	Policies [3]policy.Policy
 	// ExpiresAt is when the key stops working; nil means never.
 	ExpiresAt *time.Time
+	// Owner is who the key belongs to, for alerts.
+	Owner string
+	// Previous marks the secret a rotation replaced, which works until
+	// ExpiresAt.
+	Previous bool
 }
 
 // LogBodies reports whether bodies of this principal's requests are
@@ -129,7 +134,9 @@ type Directory struct {
 func NewDirectory(byHash map[string]*Principal) *Directory {
 	byID := make(map[string]*Principal, len(byHash))
 	for _, p := range byHash {
-		byID[p.KeyID] = p
+		if !p.Previous {
+			byID[p.KeyID] = p
+		}
 	}
 	return &Directory{byHash: byHash, byID: byID}
 }

@@ -210,6 +210,7 @@ export function PolicyForm({ initial = {}, kind, submitLabel, onSubmit, onCancel
     budget_period: initial.budget?.period ?? 'monthly',
     alert_at: alertAtText(initial.budget?.alert_at),
     expires_at: initial.expires_at ? initial.expires_at.slice(0, 10) : '',
+    owner: initial.owner ?? '',
     log_bodies: initial.log_bodies === undefined || initial.log_bodies === null ? '' : String(initial.log_bodies),
     cache_mode: initial.cache?.mode ?? '',
     cache_ttl: initial.cache?.ttl ?? '',
@@ -242,7 +243,10 @@ export function PolicyForm({ initial = {}, kind, submitLabel, onSubmit, onCancel
       }
       body.budget.alert_at = at;
     }
-    if (kind === 'key') body.expires_at = v.expires_at ? new Date(v.expires_at + 'T23:59:59Z').toISOString() : null;
+    if (kind === 'key') {
+      body.expires_at = v.expires_at ? new Date(v.expires_at + 'T23:59:59Z').toISOString() : null;
+      body.owner = v.owner.trim();
+    }
     setBusy(true);
     setError(null);
     try {
@@ -263,6 +267,7 @@ export function PolicyForm({ initial = {}, kind, submitLabel, onSubmit, onCancel
   return html`<form class="form" onSubmit=${submit}>
     <${ErrorBox} error=${error} />
     <${Field} label="Name"><input required maxlength="200" value=${v.name} onInput=${set('name')} /><//>
+    ${kind === 'key' && html`<${Field} label="Owner" hint="The person or service responsible for the key, such as an email. Shown in expiry alerts."><input maxlength="200" value=${v.owner} onInput=${set('owner')} /><//>`}
     <${Field} label="Allowed models" hint="None checked means every model.">${checks('allowed_models', catalog.models.map((m) => m.name))}<//>
     <${Field} label="Allowed MCP servers" hint="None checked means every MCP server.">${checks('allowed_mcp_servers', catalog.virtualServers.map((s) => s.name))}<//>
     ${me.guardrails?.length > 0 && html`<${Field} label="Guardrails" hint="Guardrails set on the org, team and key all run; a lower level can add more but not remove any.">${checks('guardrails', me.guardrails)}<//>`}
