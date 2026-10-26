@@ -17,7 +17,7 @@ services:
     volumes:
       - ./dex.yaml:/etc/dex/config.yaml:ro
     ports:
-      - "5556:5556"
+      - "127.0.0.1:5556:5556"
     networks:
       default:
         # Browsers resolve *.localhost to this machine, and the gateway
