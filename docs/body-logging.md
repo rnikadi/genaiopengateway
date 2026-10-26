@@ -28,7 +28,7 @@ PATCH /admin/v1/teams/{id}
 {"log_bodies": true}
 ```
 
-The most specific level that sets it wins: a key's `false` overrides its team's `true`. Unset means inherit, and unset everywhere means off. Only owners and the organization's admins can change it, and the change is audited.
+The most specific level that sets it wins: a key's `false` overrides its team's `true`. Unset means inherit, and unset everywhere means off. Only owners change it on an organization; owners and the organization's admins change it on teams and keys. Changes are audited.
 
 Gateway-wide settings:
 

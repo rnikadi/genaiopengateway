@@ -75,8 +75,10 @@ func TestOperatorRoles(t *testing.T) {
 		body         string
 		want         int
 	}{
-		{"acme admin", acmeAdmin, "PATCH", "/admin/v1/orgs/" + acme.ID, `{"rpm":10}`, 200},
-		{"acme admin", acmeAdmin, "PATCH", "/admin/v1/orgs/" + acme.ID, `{"name":"acme","rpm":10}`, 200},
+		{"acme admin", acmeAdmin, "PATCH", "/admin/v1/orgs/" + acme.ID, `{"rpm":10}`, 403},
+		{"acme admin", acmeAdmin, "PATCH", "/admin/v1/orgs/" + acme.ID, `{"guardrails":[]}`, 403},
+		{"owner", owner, "PATCH", "/admin/v1/orgs/" + acme.ID, `{"rpm":10}`, 200},
+		{"acme admin", acmeAdmin, "PATCH", "/admin/v1/teams/" + acmeTeam.ID, `{"rpm":5}`, 200},
 		{"acme admin", acmeAdmin, "PATCH", "/admin/v1/orgs/" + acme.ID, `{"name":"globex"}`, 403},
 		{"acme admin", acmeAdmin, "PATCH", "/admin/v1/orgs/" + acme.ID, `{"name":"acme-new"}`, 403},
 		{"acme admin", acmeAdmin, "PATCH", "/admin/v1/orgs/" + globex.ID, `{"rpm":10}`, 403},
@@ -359,8 +361,8 @@ sso:
 	if me.Operator.Email != "lead@example.com" || len(me.Operator.Grants) != 1 || me.Operator.Grants[0] != (store.Grant{Role: config.RoleAdmin, OrgID: acme.ID}) || !me.SSO {
 		t.Fatalf("me: %+v", me)
 	}
-	if rec := e.browser(lead, "PATCH", "/admin/v1/orgs/"+acme.ID, `{"rpm":5}`); rec.Code != 200 {
-		t.Fatalf("org admin edits their org: %d", rec.Code)
+	if rec := e.browser(lead, "POST", "/admin/v1/orgs/"+acme.ID+"/teams", `{"name":"search"}`); rec.Code != 201 {
+		t.Fatalf("org admin adds a team to their org: %d", rec.Code)
 	}
 
 	rec = signIn("https://evil.example/", jwt.MapClaims{"sub": "u2", "email": "analyst@example.com"}, nil)

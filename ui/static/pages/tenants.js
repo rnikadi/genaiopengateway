@@ -55,7 +55,7 @@ export function Org({ args: [id] }) {
     return html`
       <p class="crumbs"><a href="#/orgs">Organizations</a></p>
       <${PageHeader} title=${org.name} sub=${policySummary(org)}>
-        ${canWrite && html`<button class="secondary" onClick=${() => setModal('edit')}>Edit policy</button>`}
+        ${s.owner && html`<button class="secondary" onClick=${() => setModal('edit')}>Edit policy</button>`}
         ${canWrite && html`<button class="secondary" onClick=${() => setModal('clear')}>Clear cache</button>`}
         ${s.owner && html`<button class="danger" disabled=${teams.length > 0} title=${teams.length ? 'Delete its teams first' : ''} onClick=${() => setModal('delete')}>Delete</button>`}
         <a class="button secondary" href=${`#/usage?org=${encodeURIComponent(id)}`}>Usage</a>

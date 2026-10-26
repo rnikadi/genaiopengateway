@@ -414,6 +414,10 @@ await step('organization admin sees and changes only their organization', async 
   assert.equal(await page.locator('button:has-text("New organization")').count(), 0);
   assert.equal(await pageFetch(page, 'POST', `/admin/v1/orgs/${acme.id}/teams`, { body: `{"name":"team-${run}"}` }), 201);
   assert.equal(await pageFetch(page, 'PATCH', `/admin/v1/orgs/${acme.id}`, { body: '{"name":"renamed"}' }), 403, 'only owners rename');
+  assert.equal(await pageFetch(page, 'PATCH', `/admin/v1/orgs/${acme.id}`, { body: '{"rpm":1000000}' }), 403, 'only owners change org limits');
+  await page.click('a:has-text("acme")');
+  await page.waitForSelector('text=Teams');
+  assert.equal(await page.locator('button:has-text("Edit policy")').count(), 0, 'org policy is read-only for admins');
   const other = (await adminAPI('GET', '/admin/v1/orgs?limit=500')).data.find((o) => o.name === orgName);
   assert.equal(await pageFetch(page, 'GET', `/admin/v1/orgs/${other.id}`), 403);
   assert.equal(await pageFetch(page, 'GET', '/admin/v1/usage'), 403, 'usage across all organizations');

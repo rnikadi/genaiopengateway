@@ -375,8 +375,11 @@ func (s *Server) getOrg(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// updateOrg changes an organization. Only owners may: its policy is the
+// ceiling for its teams and keys, and role mappings find it by name
+// (ADR 0029, ADR 0030).
 func (s *Server) updateOrg(w http.ResponseWriter, r *http.Request) error {
-	if err := write(r, r.PathValue("org_id")); err != nil {
+	if err := requireOwner(r); err != nil {
 		return err
 	}
 	var p patch
@@ -390,10 +393,6 @@ func (s *Server) updateOrg(w http.ResponseWriter, r *http.Request) error {
 	before := *o
 	if err := s.apply(&p, &o.Name, &o.Policy, nil); err != nil {
 		return err
-	}
-	// Role mappings find organizations by name (ADR 0029).
-	if o.Name != before.Name && !operatorFrom(r.Context()).isOwner() {
-		return &apiError{http.StatusForbidden, "forbidden", "only owners rename an organization"}
 	}
 	if err := s.store.UpdateOrg(r.Context(), o); err != nil {
 		return err
