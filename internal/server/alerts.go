@@ -200,7 +200,7 @@ func (s *Server) checkKeyExpiry(ctx context.Context, now time.Time) {
 	s.mu.Lock()
 	var expiring []*auth.Principal
 	for _, p := range s.storeKeys {
-		if p.ExpiresAt != nil && p.ExpiresAt.After(now) && p.ExpiresAt.Sub(now) <= keyExpiryWarning {
+		if !p.Previous && p.ExpiresAt != nil && p.ExpiresAt.After(now) && p.ExpiresAt.Sub(now) <= keyExpiryWarning {
 			expiring = append(expiring, p)
 		}
 	}
@@ -211,10 +211,14 @@ func (s *Server) checkKeyExpiry(ctx context.Context, now time.Time) {
 		if team != nil {
 			path += " / " + refName(team)
 		}
+		data, owner := map[string]any{"expires_at": p.ExpiresAt.UTC()}, ""
+		if p.Owner != "" {
+			data["owner"], owner = p.Owner, " (owner: "+p.Owner+")"
+		}
 		s.raise(ctx, fmt.Sprintf("%s:%s:%d", config.EventKeyExpiring, p.KeyID, p.ExpiresAt.Unix()), &alerts.Event{
 			Event: config.EventKeyExpiring, Org: org, Team: team, Key: key,
-			Data: map[string]any{"expires_at": p.ExpiresAt.UTC()},
-			Text: fmt.Sprintf("Key *%s* of %s expires on %s.", refName(key), path, p.ExpiresAt.UTC().Format("2006-01-02 15:04 MST")),
+			Data: data,
+			Text: fmt.Sprintf("Key *%s*%s of %s expires on %s.", refName(key), owner, path, p.ExpiresAt.UTC().Format("2006-01-02 15:04 MST")),
 		})
 	}
 }

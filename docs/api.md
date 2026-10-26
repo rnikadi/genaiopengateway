@@ -90,8 +90,10 @@ Base path `/admin/v1`. JSON in and out. Authenticate with `Authorization: Bearer
 | `GET`, `PATCH`, `DELETE /admin/v1/teams/{team_id}` | Read, update, delete (only when it has no active keys) |
 | `POST /admin/v1/teams/{team_id}/keys` | Create key; the secret is returned once, in this response only |
 | `GET /admin/v1/teams/{team_id}/keys` | List keys (no secrets) |
-| `GET`, `PATCH /admin/v1/keys/{key_id}` | Read, update limits or name |
+| `GET /admin/v1/keys` | List keys across teams, filtered by `org_id`, `team_id`, `status` (`active`, `expiring`, `expired`, `revoked`, `rotating`) and `q` (name, prefix or owner); limited to the organizations the operator can read ([virtual-keys.md](virtual-keys.md)) |
+| `GET`, `PATCH /admin/v1/keys/{key_id}` | Read, update limits, name or `owner` |
 | `POST /admin/v1/keys/{key_id}/revoke` | Revoke; takes effect on every replica within the refresh interval |
+| `POST /admin/v1/keys/{key_id}/rotate` | New secret, returned once; the previous one works for `grace` (default `24h`, `0` to `30d`). Audited as `key.rotate` |
 | `GET /admin/v1/usage` | Aggregated usage and cost |
 | `GET /admin/v1/audit` | Admin audit log |
 | `GET /admin/v1/alerts` | Alerts raised, newest first; filter with `org_id` and `event` ([alerts.md](alerts.md)) |

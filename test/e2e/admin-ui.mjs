@@ -92,6 +92,48 @@ await step('owner manages tenants and keys', async () => {
   await ctx.close();
 });
 
+await step('owner creates, rotates and revokes a virtual key', async () => {
+  const org = await adminAPI('POST', '/admin/v1/orgs', { name: `e2e-keys-${run}` });
+  const team = await adminAPI('POST', `/admin/v1/orgs/${org.id}/teams`, { name: 'apps' });
+  const owner = `svc-${run}@example.com`;
+  const { ctx, page } = await signIn('owner@example.com');
+  await page.click('nav >> text=Virtual keys');
+  await page.click('button:has-text("New key")');
+  await page.selectOption('.modal select', team.id);
+  await page.fill('.modal label:has-text("Name") input', 'billing');
+  await page.fill('.modal label:has-text("Owner") input', owner);
+  await page.click('.modal button[type=submit]');
+  const key = await page.textContent('.secret code');
+  await page.click('.modal button:has-text("Done")');
+  await page.fill('input[type=search]', owner);
+  await page.press('input[type=search]', 'Enter');
+  const row = page.locator('tr', { hasText: owner });
+  await row.waitFor();
+  assert.equal(await page.locator('tbody tr').count(), 1, 'the search finds only this key');
+
+  await row.locator('button:has-text("Rotate")').click();
+  await page.selectOption('.modal select', '1h');
+  await page.click('.modal button[type=submit]');
+  const rotated = await page.textContent('.secret code');
+  assert.notEqual(rotated, key);
+  await page.click('.modal button:has-text("Done")');
+  await row.locator('.badge:has-text("Rotating")').waitFor();
+  const models = (k) => fetch(base + '/v1/models', { headers: { Authorization: `Bearer ${k}` } }).then((r) => r.status);
+  assert.equal(await models(key), 200, 'the old secret works during the grace period');
+  assert.equal(await models(rotated), 200);
+
+  await row.locator('button:has-text("Access")').click();
+  await page.waitForSelector('.modal th:has-text("Organization")');
+  await page.click('.modal footer button:has-text("Close")');
+  await row.locator('button:has-text("Revoke")').click();
+  await page.click('.modal button.danger');
+  await page.selectOption('label:has-text("Status") select', 'revoked');
+  await row.locator('.badge:has-text("Revoked")').waitFor();
+  assert.equal(await models(key), 401);
+  assert.equal(await models(rotated), 401);
+  await ctx.close();
+});
+
 await step('owner turns on a guardrail and sees it block', async () => {
   const { ctx, page } = await signIn('owner@example.com');
   const org = (await adminAPI('GET', '/admin/v1/orgs?limit=500')).data.find((o) => o.name === orgName);

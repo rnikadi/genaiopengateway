@@ -59,12 +59,18 @@ type Key struct {
 	Name       string `json:"name"`
 	Prefix     string `json:"prefix"`
 	SecretHash string `json:"-"`
+	// Owner is who the key belongs to: a person's email or a service.
+	Owner string `json:"owner,omitempty"`
 	policy.Policy
-	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
-	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
-	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	// PreviousHash is the secret a rotation replaced, which works until
+	// PreviousExpiresAt.
+	PreviousHash      string     `json:"-"`
+	PreviousExpiresAt *time.Time `json:"previous_expires_at,omitempty"`
+	RevokedAt         *time.Time `json:"revoked_at,omitempty"`
+	LastUsedAt        *time.Time `json:"last_used_at,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 // Page selects a page of a list ordered by id.
@@ -403,24 +409,25 @@ func (s *Store) CreateKey(ctx context.Context, k *Key) error {
 	k.OrgID = t.OrgID
 	k.CreatedAt = toTime(now())
 	k.UpdatedAt = k.CreatedAt
-	_, err = s.db.ExecContext(ctx, s.q(`INSERT INTO api_keys (id, org_id, team_id, name, prefix, secret_hash, policy, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		k.ID, k.OrgID, k.TeamID, k.Name, k.Prefix, k.SecretHash, encodePolicy(k.Policy), fromTimePtr(k.ExpiresAt), k.CreatedAt.UnixMilli(), k.UpdatedAt.UnixMilli())
+	_, err = s.db.ExecContext(ctx, s.q(`INSERT INTO api_keys (id, org_id, team_id, name, prefix, secret_hash, owner, policy, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		k.ID, k.OrgID, k.TeamID, k.Name, k.Prefix, k.SecretHash, k.Owner, encodePolicy(k.Policy), fromTimePtr(k.ExpiresAt), k.CreatedAt.UnixMilli(), k.UpdatedAt.UnixMilli())
 	return err
 }
 
-const keyCols = `id, org_id, team_id, name, prefix, secret_hash, policy, expires_at, revoked_at, last_used_at, created_at, updated_at`
+const keyCols = `id, org_id, team_id, name, prefix, secret_hash, owner, policy, expires_at, previous_hash, previous_expires_at, revoked_at, last_used_at, created_at, updated_at`
 
 func scanKey(row interface{ Scan(...any) error }) (*Key, error) {
 	var k Key
 	var pol string
-	var expires, revoked, lastUsed sql.NullInt64
+	var expires, prevExpires, revoked, lastUsed sql.NullInt64
 	var created, updated int64
-	if err := row.Scan(&k.ID, &k.OrgID, &k.TeamID, &k.Name, &k.Prefix, &k.SecretHash, &pol, &expires, &revoked, &lastUsed, &created, &updated); err != nil {
+	if err := row.Scan(&k.ID, &k.OrgID, &k.TeamID, &k.Name, &k.Prefix, &k.SecretHash, &k.Owner, &pol, &expires, &k.PreviousHash, &prevExpires, &revoked, &lastUsed, &created, &updated); err != nil {
 		return nil, err
 	}
 	var err error
 	k.Policy, err = decodePolicy(pol)
 	k.ExpiresAt, k.RevokedAt, k.LastUsedAt = toTimePtr(expires), toTimePtr(revoked), toTimePtr(lastUsed)
+	k.PreviousExpiresAt = toTimePtr(prevExpires)
 	k.CreatedAt, k.UpdatedAt = toTime(created), toTime(updated)
 	return &k, err
 }
@@ -444,11 +451,79 @@ func (s *Store) ListKeys(ctx context.Context, teamID string, p Page) ([]*Key, bo
 	return collect(rows, n, scanKey)
 }
 
-// UpdateKey saves a key's name, policy and expiry.
+// KeyFilter selects keys across teams. Empty fields match everything.
+type KeyFilter struct {
+	// OrgIDs limits the keys to these organizations; nil means all.
+	OrgIDs []string
+	OrgID  string
+	TeamID string
+	// Query matches the name, prefix or owner, ignoring case.
+	Query string
+	// Status is active, expiring (within 7 days), expired, revoked or
+	// rotating (a previous secret still works).
+	Status string
+}
+
+// KeyStatuses are the values of KeyFilter.Status.
+var KeyStatuses = []string{"active", "expiring", "expired", "revoked", "rotating"}
+
+// ListAllKeys returns a page of keys across teams, including revoked ones.
+func (s *Store) ListAllKeys(ctx context.Context, f KeyFilter, p Page) ([]*Key, bool, error) {
+	if f.OrgIDs != nil && len(f.OrgIDs) == 0 {
+		return nil, false, nil
+	}
+	where, args := []string{"id > ?"}, []any{p.After}
+	if f.OrgIDs != nil {
+		where = append(where, "org_id IN (?"+strings.Repeat(", ?", len(f.OrgIDs)-1)+")")
+		for _, o := range f.OrgIDs {
+			args = append(args, o)
+		}
+	}
+	if f.OrgID != "" {
+		where, args = append(where, "org_id = ?"), append(args, f.OrgID)
+	}
+	if f.TeamID != "" {
+		where, args = append(where, "team_id = ?"), append(args, f.TeamID)
+	}
+	if f.Query != "" {
+		q := "%" + strings.ToLower(f.Query) + "%"
+		where, args = append(where, "(LOWER(name) LIKE ? OR LOWER(prefix) LIKE ? OR LOWER(owner) LIKE ?)"), append(args, q, q, q)
+	}
+	t := now()
+	switch f.Status {
+	case "active":
+		where, args = append(where, "revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)"), append(args, t)
+	case "expiring":
+		where, args = append(where, "revoked_at IS NULL AND expires_at > ? AND expires_at <= ?"), append(args, t, t+7*24*time.Hour.Milliseconds())
+	case "expired":
+		where, args = append(where, "revoked_at IS NULL AND expires_at <= ?"), append(args, t)
+	case "revoked":
+		where = append(where, "revoked_at IS NOT NULL")
+	case "rotating":
+		where, args = append(where, "revoked_at IS NULL AND previous_expires_at > ?"), append(args, t)
+	}
+	n := limit(p)
+	rows, err := s.db.QueryContext(ctx, s.q(`SELECT `+keyCols+` FROM api_keys WHERE `+strings.Join(where, " AND ")+` ORDER BY id LIMIT ?`), append(args, n+1)...)
+	if err != nil {
+		return nil, false, err
+	}
+	return collect(rows, n, scanKey)
+}
+
+// UpdateKey saves a key's name, owner, policy and expiry.
 func (s *Store) UpdateKey(ctx context.Context, k *Key) error {
 	k.UpdatedAt = toTime(now())
-	res, err := s.db.ExecContext(ctx, s.q(`UPDATE api_keys SET name = ?, policy = ?, expires_at = ?, updated_at = ? WHERE id = ?`),
-		k.Name, encodePolicy(k.Policy), fromTimePtr(k.ExpiresAt), k.UpdatedAt.UnixMilli(), k.ID)
+	res, err := s.db.ExecContext(ctx, s.q(`UPDATE api_keys SET name = ?, owner = ?, policy = ?, expires_at = ?, updated_at = ? WHERE id = ?`),
+		k.Name, k.Owner, encodePolicy(k.Policy), fromTimePtr(k.ExpiresAt), k.UpdatedAt.UnixMilli(), k.ID)
+	return affected(res, err)
+}
+
+// RotateKey gives a key a new secret. The current one becomes the
+// previous secret, which works until graceUntil; any older one stops.
+func (s *Store) RotateKey(ctx context.Context, keyID, prefix, hash string, graceUntil time.Time) error {
+	t := now()
+	res, err := s.db.ExecContext(ctx, s.q(`UPDATE api_keys SET previous_hash = secret_hash, previous_expires_at = ?, secret_hash = ?, prefix = ?, updated_at = ? WHERE id = ? AND revoked_at IS NULL`),
+		graceUntil.UnixMilli(), hash, prefix, t, keyID)
 	return affected(res, err)
 }
 

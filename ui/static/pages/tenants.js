@@ -2,6 +2,7 @@ import {
   html, useState, api, useLoad, useSession, Loading, Table, Modal, PolicyForm, Confirm, PageHeader, Card, CopyButton,
   usageQuery, totals, policySummary, usd, num, day, when,
 } from '../lib.js';
+import { keyStatus, KeyActions, KeyModals } from './keys.js';
 
 // usageBy indexes this month's usage rows by group.
 const usageBy = (rows) => Object.fromEntries(rows.map((r) => [r.group, r]));
@@ -99,11 +100,6 @@ export function Org({ args: [id] }) {
 // questions remembered on other replicas no longer find their answers.
 const cacheCleared = (n) => `Cleared ${num(n)} cached answer${n === 1 ? '' : 's'}.`;
 
-function keyStatus(k) {
-  if (k.revoked_at) return html`<span class="badge bad">Revoked</span>`;
-  if (k.expires_at && new Date(k.expires_at) < new Date()) return html`<span class="badge warn">Expired</span>`;
-  return html`<span class="badge good">Active</span>`;
-}
 
 export function Team({ args: [id] }) {
   const s = useSession();
@@ -140,12 +136,12 @@ export function Team({ args: [id] }) {
         <${Card} label="Active keys" value=${num(keys.filter((k) => !k.revoked_at).length)} />
       </div>
       <section class="panel">
-        <div class="panel-header"><h2>API keys</h2>${canWrite && html`<button onClick=${() => setModal({ kind: 'key' })}>New key</button>`}</div>
+        <div class="panel-header"><h2>Virtual keys</h2>${canWrite && html`<button onClick=${() => setModal({ kind: 'key' })}>New key</button>`}</div>
         <${Table}
           rows=${keys}
           empty="No keys yet."
           columns=${[
-            { label: 'Name', render: (k) => html`<strong>${k.name}</strong><br /><code class="muted small">${k.prefix}…</code>` },
+            { label: 'Name', render: (k) => html`<strong>${k.name}</strong><br /><code class="muted small">${k.prefix}…</code>${k.owner && html`<div class="muted small">${k.owner}</div>`}` },
             { label: 'Status', render: keyStatus },
             { label: 'Policy', render: (k) => html`<span class="muted">${policySummary(k)}</span>` },
             { label: 'Spend this month', num: true, render: (k) => usd(byKey[k.id]?.cost_usd) },
@@ -153,10 +149,7 @@ export function Team({ args: [id] }) {
             { label: 'Expires', render: (k) => (k.expires_at ? day(k.expires_at) : html`<span class="muted">Never</span>`) },
             {
               label: '',
-              render: (k) => canWrite && !k.revoked_at && html`<div class="row-actions">
-                <button class="link" onClick=${() => setModal({ kind: 'edit-key', key: k })}>Edit</button>
-                <button class="link danger" onClick=${() => setModal({ kind: 'revoke', key: k })}>Revoke</button>
-              </div>`,
+              render: (k) => html`<${KeyActions} k=${k} canWrite=${canWrite} setModal=${setModal} />`,
             },
           ]}
         />
@@ -171,17 +164,11 @@ export function Team({ args: [id] }) {
       ${modal?.kind === 'delete' && html`<${Confirm} title="Delete team" action="Delete team" onClose=${close}
         message=${`Delete ${team.name}? This cannot be undone. Usage and audit history stay.`}
         onConfirm=${async () => { await api('DELETE', `/admin/v1/teams/${encodeURIComponent(id)}`); location.hash = `#/orgs/${encodeURIComponent(org.id)}`; }} />`}
-      ${modal?.kind === 'key' && html`<${Modal} title="New API key" onClose=${close}>
+      ${modal?.kind === 'key' && html`<${Modal} title="New virtual key" onClose=${close}>
         <${PolicyForm} kind="key" submitLabel="Create key" onCancel=${close}
           onSubmit=${async (body) => { const k = await api('POST', `/admin/v1/teams/${encodeURIComponent(id)}/keys`, body); close(); setCreated(k); state.reload(); }} />
       <//>`}
-      ${modal?.kind === 'edit-key' && html`<${Modal} title="Edit API key" onClose=${close}>
-        <${PolicyForm} kind="key" initial=${modal.key} submitLabel="Save" onCancel=${close}
-          onSubmit=${async (body) => { await api('PATCH', `/admin/v1/keys/${encodeURIComponent(modal.key.id)}`, body); close(); state.reload(); }} />
-      <//>`}
-      ${modal?.kind === 'revoke' && html`<${Confirm} title="Revoke API key" action="Revoke key" onClose=${close}
-        message=${`Revoke ${modal.key.name}? Requests with it fail at once, and it cannot be restored.`}
-        onConfirm=${async () => { await api('POST', `/admin/v1/keys/${encodeURIComponent(modal.key.id)}/revoke`); state.reload(); }} />`}
+      <${KeyModals} modal=${modal?.key ? modal : null} setModal=${setModal} close=${close} done=${() => { close(); state.reload(); }} teams=${{ [team.id]: team }} />
       ${created && html`<${Modal} title="Key created" onClose=${() => setCreated(null)}>
         <p>Copy the key now. The gateway stores only its hash, so it cannot be shown again.</p>
         <div class="secret"><code>${created.key}</code><${CopyButton} text=${created.key} /></div>

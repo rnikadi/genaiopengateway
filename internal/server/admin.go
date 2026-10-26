@@ -10,9 +10,11 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/rnikadi/genaiopengateway/internal/auth"
+	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/policy"
 	"github.com/rnikadi/genaiopengateway/internal/provider"
 	"github.com/rnikadi/genaiopengateway/internal/store"
@@ -43,6 +45,8 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	h("GET /admin/v1/keys/{key_id}", s.getKey)
 	h("PATCH /admin/v1/keys/{key_id}", s.updateKey)
 	h("POST /admin/v1/keys/{key_id}/revoke", s.revokeKey)
+	h("POST /admin/v1/keys/{key_id}/rotate", s.rotateKey)
+	h("GET /admin/v1/keys", s.listAllKeys)
 	h("GET /admin/v1/usage", s.queryUsage)
 	h("GET /admin/v1/audit", s.listAudit)
 	h("GET /admin/v1/mcp/servers", s.listMCPServers)
@@ -184,7 +188,21 @@ type patch struct {
 	Guardrails        *[]string               `json:"guardrails"`
 	Cache             optional[policy.Cache]  `json:"cache"`
 	ExpiresAt         optional[time.Time]     `json:"expires_at"`
+	Owner             *string                 `json:"owner"`
 	isKey             bool
+}
+
+// applyOwner sets a key's owner from a patch.
+func applyOwner(p *patch, k *store.Key) error {
+	if p.Owner == nil {
+		return nil
+	}
+	o := strings.TrimSpace(*p.Owner)
+	if len(o) > 200 {
+		return badRequest("owner is at most 200 characters")
+	}
+	k.Owner = o
+	return nil
 }
 
 // apply updates name and policy in place and validates the result
@@ -219,6 +237,9 @@ func (s *Server) apply(p *patch, name *string, pol *policy.Policy, expires **tim
 	}
 	if p.Cache.Set {
 		pol.Cache = p.Cache.Value
+	}
+	if p.Owner != nil && !p.isKey {
+		return badRequest("owner applies only to keys")
 	}
 	if p.ExpiresAt.Set {
 		if !p.isKey {
@@ -487,6 +508,9 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request) error {
 	if err := s.apply(&p, &k.Name, &k.Policy, &k.ExpiresAt); err != nil {
 		return err
 	}
+	if err := applyOwner(&p, k); err != nil {
+		return err
+	}
 	secret, prefix, hash, err := auth.NewKey()
 	if err != nil {
 		return err
@@ -524,6 +548,86 @@ func (s *Server) listKeys(w http.ResponseWriter, r *http.Request) error {
 	return writeList(w, items, more)
 }
 
+// listAllKeys lists keys across teams, limited to the organizations the
+// operator can read (docs/virtual-keys.md).
+func (s *Server) listAllKeys(w http.ResponseWriter, r *http.Request) error {
+	pg, err := page(r)
+	if err != nil {
+		return err
+	}
+	q := r.URL.Query()
+	f := store.KeyFilter{OrgID: q.Get("org_id"), TeamID: q.Get("team_id"), Query: q.Get("q"), Status: q.Get("status")}
+	if f.Status != "" && !slices.Contains(store.KeyStatuses, f.Status) {
+		return badRequest("status is one of %s", strings.Join(store.KeyStatuses, ", "))
+	}
+	if op := operatorFrom(r.Context()); !op.readsAll() {
+		f.OrgIDs = op.orgIDs()
+		if f.OrgIDs == nil {
+			f.OrgIDs = []string{}
+		}
+	}
+	items, more, err := s.store.ListAllKeys(r.Context(), f, pg)
+	if err != nil {
+		return err
+	}
+	return writeList(w, items, more)
+}
+
+// maxRotationGrace bounds how long a rotated secret keeps working.
+const maxRotationGrace = 30 * 24 * time.Hour
+
+// rotateKey gives a key a new secret; the old one works for a grace
+// period, so applications can switch over without downtime.
+func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request) error {
+	var body struct {
+		Grace *string `json:"grace"`
+	}
+	if r.ContentLength != 0 {
+		if err := decode(r, &body); err != nil {
+			return err
+		}
+	}
+	grace := 24 * time.Hour
+	if body.Grace != nil {
+		var err error
+		if grace, err = config.ParseDuration(*body.Grace); err != nil {
+			return badRequest("grace: %v", err)
+		}
+	}
+	if grace < 0 || grace > maxRotationGrace {
+		return badRequest("grace is between 0 and 30d")
+	}
+	k, err := s.store.GetKey(r.Context(), r.PathValue("key_id"))
+	if err != nil {
+		return err
+	}
+	if err := write(r, k.OrgID); err != nil {
+		return err
+	}
+	if k.RevokedAt != nil {
+		return &apiError{http.StatusConflict, "conflict", "key is revoked"}
+	}
+	secret, prefix, hash, err := auth.NewKey()
+	if err != nil {
+		return err
+	}
+	until := time.Now().Add(grace)
+	if err := s.store.RotateKey(r.Context(), k.ID, prefix, hash, until); err != nil {
+		return err
+	}
+	if err := s.audit(r.Context(), "key.rotate", "key", k.ID, k.OrgID, map[string]any{"previous_prefix": k.Prefix, "prefix": prefix, "previous_expires_at": until.UTC()}); err != nil {
+		return err
+	}
+	if k, err = s.store.GetKey(r.Context(), k.ID); err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, struct {
+		*store.Key
+		Secret string `json:"key"`
+	}{k, secret})
+	return nil
+}
+
 func (s *Server) getKey(w http.ResponseWriter, r *http.Request) error {
 	k, err := s.store.GetKey(r.Context(), r.PathValue("key_id"))
 	if err != nil {
@@ -553,6 +657,9 @@ func (s *Server) updateKey(w http.ResponseWriter, r *http.Request) error {
 	}
 	before := *k
 	if err := s.apply(&p, &k.Name, &k.Policy, &k.ExpiresAt); err != nil {
+		return err
+	}
+	if err := applyOwner(&p, k); err != nil {
 		return err
 	}
 	if err := s.store.UpdateKey(r.Context(), k); err != nil {

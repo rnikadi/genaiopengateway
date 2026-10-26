@@ -4,6 +4,7 @@ import { render } from './vendor/htm-preact.js';
 import { html, useState, useEffect, api, Session, ErrorBox, APIError } from './lib.js';
 import { Overview } from './pages/overview.js';
 import { Orgs, Org, Team } from './pages/tenants.js';
+import { Keys } from './pages/keys.js';
 import { Usage } from './pages/usage.js';
 import { MCP } from './pages/mcp.js';
 import { Models } from './pages/models.js';
@@ -22,6 +23,7 @@ const routes = [
   [/^\/orgs$/, Orgs, 'orgs'],
   [/^\/orgs\/([^/]+)$/, Org, 'orgs'],
   [/^\/teams\/([^/]+)$/, Team, 'orgs'],
+  [/^\/keys$/, Keys, 'keys'],
   [/^\/usage$/, Usage, 'usage'],
   [/^\/requests$/, Requests, 'requests'],
   [/^\/requests\/([^/]+)$/, RequestBody, 'requests'],
@@ -40,6 +42,7 @@ const routes = [
 const nav = [
   ['overview', '#/', 'Overview'],
   ['orgs', '#/orgs', 'Organizations'],
+  ['keys', '#/keys', 'Virtual keys'],
   ['usage', '#/usage', 'Usage'],
   ['requests', '#/requests', 'Requests'],
   ['jobs', '#/jobs', 'Jobs'],

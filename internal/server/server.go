@@ -288,10 +288,20 @@ func (s *Server) refresh(ctx context.Context) error {
 		if org == nil || team == nil {
 			continue
 		}
-		keys[k.SecretHash] = &auth.Principal{
+		p := &auth.Principal{
 			OrgID: k.OrgID, TeamID: k.TeamID, KeyID: k.ID, KeyName: k.Name, KeyPrefix: k.Prefix,
 			Policies:  [3]policy.Policy{org.Policy, team.Policy, k.Policy},
-			ExpiresAt: k.ExpiresAt,
+			ExpiresAt: k.ExpiresAt, Owner: k.Owner,
+		}
+		keys[k.SecretHash] = p
+		// The secret a rotation replaced works until its grace period ends.
+		if k.PreviousHash != "" && k.PreviousExpiresAt != nil && time.Now().Before(*k.PreviousExpiresAt) {
+			prev := *p
+			prev.Previous = true
+			if prev.ExpiresAt == nil || k.PreviousExpiresAt.Before(*prev.ExpiresAt) {
+				prev.ExpiresAt = k.PreviousExpiresAt
+			}
+			keys[k.PreviousHash] = &prev
 		}
 	}
 	t := &tenants{orgs: snap.Orgs, teams: map[string]map[string]*store.Team{}}

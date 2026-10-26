@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -317,6 +318,85 @@ func TestUsageByProviderAndHealth(t *testing.T) {
 			}
 			if emb := byModel["openai/emb"]; emb.Errors != 0 || emb.LastErrorAt != nil {
 				t.Fatalf("openai/emb = %+v", emb)
+			}
+		})
+	}
+}
+
+func TestListAllKeysAndRotation(t *testing.T) {
+	for name, s := range backends(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			var teams []*Team
+			for _, n := range []string{"a", "b"} {
+				org := &Org{Name: "org-" + n}
+				if err := s.CreateOrg(ctx, org); err != nil {
+					t.Fatal(err)
+				}
+				team := &Team{OrgID: org.ID, Name: "team"}
+				if err := s.CreateTeam(ctx, team); err != nil {
+					t.Fatal(err)
+				}
+				teams = append(teams, team)
+			}
+			soon := time.Now().Add(48 * time.Hour)
+			keys := []*Key{
+				{TeamID: teams[0].ID, Name: "indexer", Prefix: "sk-gog-aaaa", SecretHash: "h1", Owner: "Dana@example.com"},
+				{TeamID: teams[0].ID, Name: "nightly", Prefix: "sk-gog-bbbb", SecretHash: "h2", ExpiresAt: &soon},
+				{TeamID: teams[1].ID, Name: "pager", Prefix: "sk-gog-cccc", SecretHash: "h3"},
+			}
+			for _, k := range keys {
+				if err := s.CreateKey(ctx, k); err != nil {
+					t.Fatal(err)
+				}
+			}
+			names := func(f KeyFilter) string {
+				got, _, err := s.ListAllKeys(ctx, f, Page{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var out []string
+				for _, k := range got {
+					out = append(out, k.Name)
+				}
+				slices.Sort(out)
+				return strings.Join(out, ",")
+			}
+			for _, tc := range []struct {
+				f    KeyFilter
+				want string
+			}{
+				{KeyFilter{}, "indexer,nightly,pager"},
+				{KeyFilter{Query: "dana"}, "indexer"},
+				{KeyFilter{Query: "CCCC"}, "pager"},
+				{KeyFilter{OrgIDs: []string{teams[1].OrgID}}, "pager"},
+				{KeyFilter{OrgIDs: []string{}}, ""},
+				{KeyFilter{TeamID: teams[0].ID, Status: "expiring"}, "nightly"},
+			} {
+				if got := names(tc.f); got != tc.want {
+					t.Errorf("%+v = %q, want %q", tc.f, got, tc.want)
+				}
+			}
+
+			until := time.Now().Add(time.Hour)
+			if err := s.RotateKey(ctx, keys[0].ID, "sk-gog-dddd", "h4", until); err != nil {
+				t.Fatal(err)
+			}
+			k, err := s.GetKey(ctx, keys[0].ID)
+			if err != nil || k.SecretHash != "h4" || k.PreviousHash != "h1" || k.Prefix != "sk-gog-dddd" || k.PreviousExpiresAt == nil || k.Owner != "Dana@example.com" {
+				t.Fatalf("rotated = %+v, %v", k, err)
+			}
+			if got := names(KeyFilter{Status: "rotating"}); got != "indexer" {
+				t.Errorf("rotating = %q", got)
+			}
+			if err := s.RevokeKey(ctx, keys[2].ID); err != nil {
+				t.Fatal(err)
+			}
+			if got := names(KeyFilter{Status: "active"}); got != "indexer,nightly" {
+				t.Errorf("active = %q", got)
+			}
+			if err := s.RotateKey(ctx, keys[2].ID, "p", "h5", until); !errors.Is(err, ErrNotFound) {
+				t.Errorf("rotating a revoked key = %v", err)
 			}
 		})
 	}
