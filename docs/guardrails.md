@@ -150,7 +150,7 @@ Batch input files ([batch.md](batch.md)) are checked line by line with `input` g
 
 | Threat | Control |
 | --- | --- |
-| A team removes a guardrail its organization requires | Lists add up across levels; changing them needs an admin role and is audited. |
+| A team removes a guardrail its organization requires | Lists add up across levels, and only owners change an organization's list (ADR 0030); team and key lists need an admin role. Changes are audited. |
 | A guardrail leaks the content it checks | Decisions store counts and the guardrail's reason, never the text. Webhook URLs come from config, use `https`, and requests are signed. |
 | Prompt injection through MCP tool output | `tool_output` guardrails on the virtual server, with a classifier through `model` or `webhook`. Defense in depth, not a guarantee, as for every injection filter. |
 | A slow or failing check service blocks all traffic, or lets everything through | A timeout per guardrail and an explicit `on_error`. `log` mode for rollout. Metrics show latency and failures per guardrail. |

@@ -51,7 +51,7 @@ Three fixed roles. A role is granted gateway-wide or for one organization.
 | Role | Gateway-wide | For one organization |
 | --- | --- | --- |
 | `owner` | Everything: all organizations, MCP tool approvals, the full audit log | Not applicable |
-| `admin` | Not applicable | Edit the organization's policy, but not its name; create, edit and delete its teams; create, edit and revoke its keys; see its usage, MCP calls and audit entries |
+| `admin` | Not applicable | Read the organization's policy, which only owners change (ADR 0030); create, edit and delete its teams; create, edit and revoke its keys; see its usage, MCP calls and audit entries |
 | `viewer` | Read everything | Read the organization, its teams, keys, usage, MCP calls and audit entries |
 
 Creating and deleting organizations, approving MCP tools, and reading entries not tied to an organization need `owner`. The admin token acts as `owner`.
