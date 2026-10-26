@@ -29,7 +29,7 @@ A key gains an optional `owner`: the email of the person responsible or the name
 ## Not in this design
 
 - Self-service keys created by team members who are not operators. It needs team-level roles, which come with Cedar policies.
-- Per-team provider credentials: a team storing its own provider key, used for its requests instead of the shared one. It is the next design.
+- Per-team provider credentials: a team storing its own provider key, used for its requests instead of the shared one, in [team-credentials.md](team-credentials.md).
 
 ## Testing
 

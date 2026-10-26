@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"time"
 
@@ -45,13 +46,80 @@ var factories = map[string]func(config.Provider, *http.Client) provider.Provider
 type Router struct {
 	models    map[string]config.Model
 	providers map[string]provider.Provider
+	configs   map[string]config.Provider
 	types     map[string]string // provider name to type
+	client    *http.Client
+}
+
+// Credentials are adapters that replace providers of the same name for
+// one request, such as those built from a team's own provider keys
+// (docs/team-credentials.md).
+type Credentials map[string]provider.Provider
+
+type credentialsKey struct{}
+
+// WithCredentials returns a context whose requests use c in place of the
+// providers it names.
+func WithCredentials(ctx context.Context, c Credentials) context.Context {
+	if len(c) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, credentialsKey{}, c)
+}
+
+// adapter returns the adapter for a provider, honoring the context's
+// credentials.
+func (r *Router) adapter(ctx context.Context, name string) provider.Provider {
+	if c, ok := ctx.Value(credentialsKey{}).(Credentials); ok {
+		if p, ok := c[name]; ok {
+			return p
+		}
+	}
+	return r.providers[name]
+}
+
+// credentialTypes are the provider types whose api_key a team may replace.
+var credentialTypes = []string{config.ProviderOpenAI, config.ProviderAnthropic, config.ProviderGemini, config.ProviderBedrock}
+
+// CheckCredential reports why a provider cannot take a team's API key.
+func (r *Router) CheckCredential(providerName string) error {
+	c, ok := r.configs[providerName]
+	if !ok {
+		return fmt.Errorf("unknown provider %q", providerName)
+	}
+	if !slices.Contains(credentialTypes, c.Type) {
+		return fmt.Errorf("provider %q is of type %s, which does not take an API key per team", providerName, c.Type)
+	}
+	return nil
+}
+
+// Unavailable returns an adapter whose requests fail with err, so
+// fallback moves to the next target. It stands in for a provider whose
+// team credential cannot be used.
+func Unavailable(err error) provider.Provider { return unavailable{err} }
+
+type unavailable struct{ err error }
+
+func (u unavailable) Supports(provider.Endpoint) bool { return true }
+func (u unavailable) Send(context.Context, *provider.Request) (*provider.Response, error) {
+	return nil, u.err
+}
+
+// WithAPIKey builds an adapter for a provider that uses apiKey in place
+// of the provider's own.
+func (r *Router) WithAPIKey(providerName, apiKey string) (provider.Provider, error) {
+	if err := r.CheckCredential(providerName); err != nil {
+		return unavailable{fmt.Errorf("team credential: %w", err)}, err
+	}
+	c := r.configs[providerName]
+	c.APIKey = config.Secret(apiKey)
+	return factories[c.Type](c, r.client), nil
 }
 
 // New builds a router. All adapters share one HTTP client so connections
 // are pooled per upstream host.
 func New(c *config.Config, client *http.Client) (*Router, error) {
-	r := &Router{models: c.Models, providers: map[string]provider.Provider{}, types: map[string]string{}}
+	r := &Router{models: c.Models, providers: map[string]provider.Provider{}, configs: c.Providers, types: map[string]string{}, client: client}
 	for name, p := range c.Providers {
 		f, ok := factories[p.Type]
 		if !ok {
@@ -171,7 +239,7 @@ func (r *Router) send(ctx context.Context, t config.Target, req *provider.Reques
 		))
 	defer span.End()
 	start := time.Now()
-	resp, err := r.providers[t.Provider].Send(ctx, req)
+	resp, err := r.adapter(ctx, t.Provider).Send(ctx, req)
 	s := sent{Attempt: Attempt{Target: t, Err: err, TTFB: time.Since(start)}, resp: resp}
 	if err != nil {
 		span.RecordError(err)
@@ -206,15 +274,15 @@ func (r *Router) Targets(ep provider.Endpoint, model string) ([]config.Target, e
 }
 
 // Dialer returns a provider's realtime adapter.
-func (r *Router) Dialer(providerName string) (provider.Dialer, bool) {
-	d, ok := r.providers[providerName].(provider.Dialer)
+func (r *Router) Dialer(ctx context.Context, providerName string) (provider.Dialer, bool) {
+	d, ok := r.adapter(ctx, providerName).(provider.Dialer)
 	return d, ok
 }
 
 // Forwarder returns a provider's adapter for calls on upstream objects,
 // or false when the provider is gone or does not serve them.
-func (r *Router) Forwarder(providerName string) (provider.Forwarder, bool) {
-	f, ok := r.providers[providerName].(provider.Forwarder)
+func (r *Router) Forwarder(ctx context.Context, providerName string) (provider.Forwarder, bool) {
+	f, ok := r.adapter(ctx, providerName).(provider.Forwarder)
 	return f, ok
 }
 

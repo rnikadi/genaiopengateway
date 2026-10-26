@@ -27,7 +27,7 @@ v0.3 adds a web UI for operators, sign-in through the company's identity provide
 | Organizations | List, create, edit policy (allowed models and MCP servers, RPM, TPM, budget, response cache), delete | `orgs` |
 | Virtual keys | Every key across organizations and teams: search, filter by status, create with an owner, edit, rotate with a grace period, revoke, and each key's access by level | `keys` |
 | Organization | Its teams, usage by team, edit, clear the response cache | `orgs/{id}`, `orgs/{id}/teams`, `usage`, `cache` |
-| Team | Its keys, usage by key and model, edit policy, clear the response cache | `teams/{id}`, `teams/{id}/keys`, `usage`, `cache` |
+| Team | Its keys (edit, rotate, revoke), usage by key and model, edit policy, its own provider credentials, clear the response cache | `teams/{id}`, `teams/{id}/keys`, `teams/{id}/credentials`, `usage`, `cache` |
 | Key | Limits, expiry, revoke; the secret is shown once, on create | `keys/{id}`, `keys/{id}/revoke` |
 | Usage | Filter by organization, team, key and dates; group by model, team, key, day, provider or endpoint; chart, table and CSV download; cache hits and money saved when the cache answered | `usage` |
 | MCP | Upstream servers and their status, virtual servers, tools with pin status; review a tool's definition and approve it; users' connections to per-user servers, with revoke (owners); call records | `mcp/*` |

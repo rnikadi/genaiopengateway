@@ -64,6 +64,7 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 			return
 		}
 		rec.OrgID, rec.TeamID, rec.KeyID, rec.KeyPrefix = p.OrgID, p.TeamID, p.KeyID, p.KeyPrefix
+		r = r.WithContext(s.teamContext(r.Context(), p.TeamID))
 		if createsJob(ep) && s.store == nil {
 			fail(jobError(errNoDatabase))
 			return

@@ -95,6 +95,11 @@ type Server struct {
 
 	notifier *alerts.Notifier
 	conns    *connections
+
+	// teamCreds are teams' own provider credentials; credsMu serializes
+	// rebuilding their adapters.
+	teamCreds atomic.Pointer[teamCredentials]
+	credsMu   sync.Mutex
 }
 
 // New builds a server. st may be nil.
@@ -280,6 +285,9 @@ func (s *Server) refresh(ctx context.Context) error {
 	}
 	snap, err := s.store.LoadSnapshot(ctx)
 	if err != nil {
+		return err
+	}
+	if err := s.loadTeamCredentials(ctx); err != nil {
 		return err
 	}
 	keys := make(map[string]*auth.Principal, len(snap.Keys))

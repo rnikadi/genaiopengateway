@@ -82,6 +82,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rec.OrgID, rec.TeamID, rec.KeyID, rec.KeyPrefix = p.OrgID, p.TeamID, p.KeyID, p.KeyPrefix
+	r = r.WithContext(s.teamContext(r.Context(), p.TeamID))
 	model := r.URL.Query().Get("model")
 	if model == "" {
 		fail(http.StatusBadRequest, codeInvalidRequest, "the model query parameter is required")
@@ -184,7 +185,7 @@ func (s *Server) dialRealtime(ctx context.Context, rt *runtime, rec *requestLog,
 		hdr["Openai-Beta"] = v
 	}
 	for i, t := range targets {
-		d, ok := rt.router.Dialer(t.Provider)
+		d, ok := rt.router.Dialer(ctx, t.Provider)
 		if !ok {
 			continue
 		}

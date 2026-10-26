@@ -83,21 +83,22 @@ func (s *Server) recordJob(ctx context.Context, p *auth.Principal, model string,
 	}
 }
 
-// videoCaller authenticates a call on video jobs.
-func (s *Server) videoCaller(w http.ResponseWriter, r *http.Request) (*auth.Principal, bool) {
+// videoCaller authenticates a call on jobs and files, and returns the
+// request with the caller's team credentials.
+func (s *Server) videoCaller(w http.ResponseWriter, r *http.Request) (*auth.Principal, *http.Request, bool) {
 	p, ok := principalFrom(r.Context())
 	if !ok {
 		p, ok = s.authenticate(r)
 	}
 	if !ok {
 		writeError(w, provider.Videos, http.StatusUnauthorized, codeInvalidKey, "missing or invalid API key")
-		return nil, false
+		return nil, r, false
 	}
 	if s.store == nil {
 		writeJobError(w, errNoDatabase)
-		return nil, false
+		return nil, r, false
 	}
-	return p, true
+	return p, r.WithContext(s.teamContext(r.Context(), p.TeamID)), true
 }
 
 // videoJob serves retrieve, delete and content on a job, at the target
@@ -105,7 +106,7 @@ func (s *Server) videoCaller(w http.ResponseWriter, r *http.Request) (*auth.Prin
 func (s *Server) videoJob(method, suffix string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		p, ok := s.videoCaller(w, r)
+		p, r, ok := s.videoCaller(w, r)
 		if !ok {
 			return
 		}
@@ -114,7 +115,7 @@ func (s *Server) videoJob(method, suffix string) http.HandlerFunc {
 			writeJobError(w, err)
 			return
 		}
-		f, ok := s.rt.Load().router.Forwarder(j.Provider)
+		f, ok := s.rt.Load().router.Forwarder(r.Context(), j.Provider)
 		if !ok {
 			writeError(w, provider.Videos, http.StatusNotFound, codeModelNotFound, "the provider that made this video is no longer configured")
 			return
@@ -169,7 +170,7 @@ func (s *Server) videoJob(method, suffix string) http.HandlerFunc {
 
 // listVideos lists the caller's jobs, newest first, as last stored.
 func (s *Server) listVideos(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.videoCaller(w, r)
+	p, r, ok := s.videoCaller(w, r)
 	if !ok {
 		return
 	}
