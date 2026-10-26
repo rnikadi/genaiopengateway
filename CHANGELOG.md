@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Security
+
+- Sign-in roles resolve safely (ADR 0029), from the October 2026 pentest. Organization names are unique without case (`409` when taken) and only owners rename an organization, so an SSO role mapping's `org` can no longer resolve to another organization of the same name, or to one an organization admin renamed. Migration 0015 appends the id to existing duplicate names, keeping the oldest. Role mappings by `email` are skipped when the ID token has `email_verified: false`. Names of organizations, teams and keys are trimmed, at most 200 characters and without control characters.
+
 ### Added
 
 - Team provider credentials ([docs/team-credentials.md](docs/team-credentials.md)): a team can store its own API key for an OpenAI-compatible, Anthropic, Gemini or Bedrock provider, used for its requests, realtime sessions and batches instead of the shared key, so they are billed to the team's own account while applications keep their virtual keys. The shared key of that provider is never used as a fallback for the team. Set and removed on the team page or with `PUT`/`DELETE /admin/v1/teams/{id}/credentials/{provider}`; encrypted with `secrets.encryption_key` and audited.

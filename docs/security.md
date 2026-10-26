@@ -25,6 +25,7 @@ This is the threat model as of v0.3. It is reviewed at every minor release.
 | Threat | Example | Mitigation |
 | --- | --- | --- |
 | Spoofing | Guessing or stealing a gateway key | 238-bit random keys; constant-time hash lookup; keys revocable and expirable; keys never logged (only the prefix) |
+| Spoofing | A user gets a role meant for someone else at sign-in | Organization names are unique and only owners rename one, so a role mapping names one organization; `email` mappings need an email the identity provider has not marked unverified (ADR 0029) |
 | Spoofing | Client sends its own upstream key to reach a provider directly | Client `Authorization` and `x-api-key` headers are never forwarded upstream; the gateway sets upstream credentials itself |
 | Spoofing | A user sends someone else a connect link so the victim's upstream account is bound to the attacker's identity, or the reverse | Links work once and expire in 10 minutes; PKCE and a state bound to a cookie set when the link was opened; with SSO on the same identity provider, only the user who asked can complete the link ([mcp-user-credentials.md](mcp-user-credentials.md#security)) |
 | Tampering | Client sets `model` to an upstream model name to bypass allow lists | `model` must name a configured virtual model; unknown names are rejected |

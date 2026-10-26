@@ -198,7 +198,9 @@ export function Columns({ items, format = num }) {
 // PolicyForm edits the fields organizations, teams and keys share. Empty
 // allow lists mean everything; an empty budget means none.
 export function PolicyForm({ initial = {}, kind, submitLabel, onSubmit, onCancel }) {
-  const { catalog, me } = useSession();
+  const { catalog, me, owner } = useSession();
+  // Role mappings find organizations by name, so only owners rename one.
+  const fixedName = kind === 'org' && initial.id && !owner;
   const [v, setV] = useState({
     name: initial.name ?? '',
     allowed_models: initial.allowed_models ?? [],
@@ -266,7 +268,7 @@ export function PolicyForm({ initial = {}, kind, submitLabel, onSubmit, onCancel
 
   return html`<form class="form" onSubmit=${submit}>
     <${ErrorBox} error=${error} />
-    <${Field} label="Name"><input required maxlength="200" value=${v.name} onInput=${set('name')} /><//>
+    <${Field} label="Name" hint=${fixedName ? 'Only owners rename an organization: SSO role mappings find it by name.' : undefined}><input required maxlength="200" value=${v.name} disabled=${fixedName} onInput=${set('name')} /><//>
     ${kind === 'key' && html`<${Field} label="Owner" hint="The person or service responsible for the key, such as an email. Shown in expiry alerts."><input maxlength="200" value=${v.owner} onInput=${set('owner')} /><//>`}
     <${Field} label="Allowed models" hint="None checked means every model.">${checks('allowed_models', catalog.models.map((m) => m.name))}<//>
     <${Field} label="Allowed MCP servers" hint="None checked means every MCP server.">${checks('allowed_mcp_servers', catalog.virtualServers.map((s) => s.name))}<//>

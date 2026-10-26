@@ -51,7 +51,7 @@ Three fixed roles. A role is granted gateway-wide or for one organization.
 | Role | Gateway-wide | For one organization |
 | --- | --- | --- |
 | `owner` | Everything: all organizations, MCP tool approvals, the full audit log | Not applicable |
-| `admin` | Not applicable | Edit the organization's policy; create, edit and delete its teams; create, edit and revoke its keys; see its usage, MCP calls and audit entries |
+| `admin` | Not applicable | Edit the organization's policy, but not its name; create, edit and delete its teams; create, edit and revoke its keys; see its usage, MCP calls and audit entries |
 | `viewer` | Read everything | Read the organization, its teams, keys, usage, MCP calls and audit entries |
 
 Creating and deleting organizations, approving MCP tools, and reading entries not tied to an organization need `owner`. The admin token acts as `owner`.
@@ -67,7 +67,7 @@ sso:
     - {email: alice@example.com, role: viewer, org: acme}
 ```
 
-A user gets every role whose `group` is in the groups claim or whose `email` matches. A user with no role cannot sign in. Changing a group in the identity provider takes effect at the user's next sign-in, and at most `session_ttl` later.
+A user gets every role whose `group` is in the groups claim or whose `email` matches. An `email` mapping is skipped when the ID token says `email_verified: false`, so prefer groups with identity providers that let users register any address. Organization names are unique without case and only owners rename an organization, so a mapping's `org` always means one organization (ADR 0029). A user with no role cannot sign in. Changing a group in the identity provider takes effect at the user's next sign-in, and at most `session_ttl` later.
 
 ## Sign-in
 
