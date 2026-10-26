@@ -328,11 +328,11 @@ await step('owner adds a guardrail with the form', async () => {
 await step('owner changes a model from the config file and resets it', async () => {
   const { ctx, page } = await signIn('owner@example.com');
   await adminAPI('POST', '/admin/v1/config/models/chat-default/reset').catch(() => {});
-  await page.click('nav >> text=Configuration');
-  await page.click('[role=tab]:has-text("Models")');
-  const row = page.locator('tr', { has: page.locator('td code', { hasText: /^chat-default$/ }) });
-  await row.locator('button:has-text("Edit")').click();
+  // Edit on the Models page opens the same editor on the Configuration page.
+  await page.click('nav >> text=Models');
+  await page.locator('tr', { has: page.locator('strong', { hasText: /^chat-default$/ }) }).locator('a:has-text("Edit")').click();
   await page.waitForSelector('.modal >> text=comes from the config file');
+  const row = page.locator('tr', { has: page.locator('td code', { hasText: /^chat-default$/ }) });
   await page.locator('.modal [data-setting="models.targets.price.output_per_mtok"] input').first().fill('2.5');
   await page.click('.modal button[type=submit]');
   await row.locator('.badge:has-text("Changed here")').waitFor();
@@ -399,6 +399,9 @@ await step('viewer reads but cannot change anything', async () => {
   assert.equal(await pageFetch(page, 'GET', '/admin/v1/settings'), 403);
   assert.equal(await pageFetch(page, 'GET', '/admin/v1/config'), 403);
   assert.equal(await pageFetch(page, 'GET', '/admin/v1/providers'), 200);
+  assert.equal(await page.locator('nav >> text=Playground').count(), 0, 'the playground is for owners and admins');
+  await page.goto(`${base}/ui/#/config`);
+  await page.waitForSelector('h1:has-text("Owners only")');
   await ctx.close();
 });
 

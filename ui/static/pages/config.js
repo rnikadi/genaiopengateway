@@ -1,4 +1,4 @@
-import { html, useState, api, useLoad, useSession, Loading, Table, PageHeader, Modal, Field, ErrorBox, Tabs, Confirm, when, providerTypes } from '../lib.js';
+import { html, useState, useEffect, api, useLoad, useSession, Loading, Table, PageHeader, Modal, Field, ErrorBox, Tabs, Confirm, when, providerTypes } from '../lib.js';
 
 const kindNames = {
   providers: 'Providers',
@@ -36,12 +36,22 @@ const sources = {
 // Config lists configuration objects from the file and the store, and lets
 // owners add, change, delete and reset them; a change wins over the file
 // (docs/admin-ui-config-editing.md, ADR 0028).
-export function Config() {
+// #/config?kind=models&edit=chat-default opens that object's editor, for
+// the Edit links on the Providers and Models pages.
+export function Config({ params }) {
   const [reload, setReload] = useState(0);
   const state = useLoad(() => api('GET', '/admin/v1/config'), [reload]);
   const detectors = useLoad(async () => (await api('GET', '/admin/v1/settings')).detectors);
-  const [kind, setKind] = useState('providers');
+  const [kind, setKind] = useState(kindNames[params?.get('kind')] ? params.get('kind') : 'providers');
   const [editing, setEditing] = useState(null);
+  const [linked, setLinked] = useState(params?.get('edit') || '');
+  useEffect(() => {
+    const o = linked && state.data?.data.find((x) => x.kind === kind && x.name === linked && x.source !== 'deleted');
+    if (o) {
+      setEditing({ kind, name: o.name, spec: o.spec, fromFile: o.source !== 'store' });
+      setLinked('');
+    }
+  }, [state.data, linked]);
   const [deleting, setDeleting] = useState(null);
   const [resetting, setResetting] = useState(null);
   const done = () => {

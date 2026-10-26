@@ -36,6 +36,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Changed
 
+- Admin UI tidy-ups from the October 2026 walkthrough. The Providers and Models pages have an Edit button on each row for owners, which opens that object's editor on the Configuration page (`#/config?kind=&edit=`). Viewers no longer see the Playground in the navigation, and opening an owner-only page by its address shows "Owners only" instead of an error and failed API calls. The Models page says that endpoints come from each target's provider type.
 - On Postgres, migrations run under an advisory lock, so replicas that start together no longer race on the same migration.
 - On shutdown, `/readyz` fails before the listener closes, so load balancers stop sending requests to a stopping gateway. The shutdown grace period is 50 seconds.
 - When an output guardrail applies to a stream the gateway cannot read, the response is blocked instead of passed on unchecked.
