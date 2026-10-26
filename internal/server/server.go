@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"reflect"
 	"regexp"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -105,6 +106,9 @@ type Server struct {
 // New builds a server. st may be nil.
 func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error) {
 	s := &Server{log: log, client: newUpstreamClient(), store: st, cfgRev: -1}
+	if strings.Contains(cfg.Admin.Token.Value(), "change-me") {
+		log.Warn("the admin token is the sample from the Compose files: anyone who has read them is an owner; set GATEWAY_ADMIN_TOKEN to a random value (openssl rand -hex 32)")
+	}
 	ctx, stop := context.WithCancel(context.Background())
 	s.stop = stop
 	var backend limits.Backend
@@ -439,7 +443,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/.well-known/oauth-protected-resource/mcp/{name}", s.mcpResourceMetadata)
 	s.adminRoutes(mux)
 	s.uiRoutes(mux)
-	return s.recoverer(withRequestID(mux))
+	return s.recoverer(withRequestID(withSecurityHeaders(mux)))
 }
 
 // Drain makes /readyz fail, before a graceful shutdown.
@@ -505,6 +509,18 @@ func withRequestID(next http.Handler) http.Handler {
 			r.Header.Set("X-Request-Id", rid)
 		}
 		w.Header().Set("X-Request-Id", rid)
+		next.ServeHTTP(w, r)
+	})
+}
+
+// withSecurityHeaders sets the headers every response gets: no MIME
+// sniffing of JSON or proxied files, and HSTS when served over HTTPS.
+func withSecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		if secure(r) {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+		}
 		next.ServeHTTP(w, r)
 	})
 }
