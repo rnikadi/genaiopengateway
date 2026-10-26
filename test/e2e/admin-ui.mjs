@@ -431,6 +431,19 @@ await step('signing out ends the session', async () => {
   await ctx.close();
 });
 
+await step('owner signs everyone else out', async () => {
+  const viewer = await signIn('viewer@example.com');
+  const { ctx, page } = await signIn('owner@example.com');
+  await page.goto(`${base}/ui/#/settings`);
+  await page.click('button:has-text("Sign out everyone else")');
+  await page.click('.modal button:has-text("Sign out everyone")');
+  await page.waitForSelector('text=/Signed out \\d+ other/');
+  assert.equal(await pageFetch(viewer.page, 'GET', '/admin/v1/me'), 401);
+  assert.equal(await pageFetch(page, 'GET', '/admin/v1/me'), 200);
+  await viewer.ctx.close();
+  await ctx.close();
+});
+
 await browser.close();
 // Clean up what the test created.
 const created = (await adminAPI('GET', '/admin/v1/orgs?limit=500')).data.find((o) => o.name === orgName);

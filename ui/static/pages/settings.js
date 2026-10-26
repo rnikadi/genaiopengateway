@@ -1,4 +1,4 @@
-import { html, useState, api, useLoad, useSession, Loading, Table, PageHeader, KV, ErrorBox, num, policySummary } from '../lib.js';
+import { html, useState, api, useLoad, useSession, Loading, Table, PageHeader, KV, ErrorBox, Confirm, num, policySummary } from '../lib.js';
 
 // Settings edits the gateway's own settings, for owners
 // (docs/admin-ui-settings.md). Each field shows its value, its default and
@@ -174,8 +174,17 @@ const save = (spec) => api('PUT', '/admin/v1/config/settings/gateway', spec);
 
 export function Settings() {
   const state = useLoad(() => api('GET', '/admin/v1/settings'));
+  const [signOut, setSignOut] = useState(false);
+  const [signedOut, setSignedOut] = useState(null);
   return html`
-    <${PageHeader} title="Settings" sub="How this gateway runs. A value saved here applies to every replica within the refresh interval and wins over the configuration file; Reset goes back to the file's value or the default." />
+    <${PageHeader} title="Settings" sub="How this gateway runs. A value saved here applies to every replica within the refresh interval and wins over the configuration file; Reset goes back to the file's value or the default.">
+      <button class="secondary" onClick=${() => setSignOut(true)}>Sign out everyone else</button>
+    <//>
+    ${signedOut !== null && html`<p class="notice">Signed out ${num(signedOut)} other ${signedOut === 1 ? 'session' : 'sessions'}.</p>`}
+    ${signOut && html`<${Confirm} title="Sign out everyone else" action="Sign out everyone"
+      message="Every other admin UI session ends now, on every replica; people sign in again. Use it when someone leaves or a session may be stolen. Your session stays."
+      onClose=${() => setSignOut(false)}
+      onConfirm=${async () => { const r = await api('DELETE', '/admin/v1/sessions'); setSignedOut(r.deleted); setSignOut(false); }} />`}
     <${Loading} state=${state}>${(d) => {
       const fields = Object.fromEntries(d.fields.map((f) => [f.path, f]));
       return html`
