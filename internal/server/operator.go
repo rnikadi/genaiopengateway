@@ -27,6 +27,8 @@ type operator struct {
 	Grants  []store.Grant `json:"grants"`
 	// session is the hash of the session cookie, empty for the token.
 	session string
+	// claims are what role mappings match, for SSO sign-ins only.
+	claims *store.SessionClaims
 }
 
 // tokenOperator is the admin token, which acts as owner.
@@ -205,7 +207,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, o *operato
 	ttl := s.rt.Load().cfg.SSO.SessionTTL.Std()
 	now := time.Now()
 	if err := s.store.CreateSession(r.Context(), &store.Session{
-		IDHash: hashSession(value), Subject: o.Subject, Email: o.Email, Name: o.Name, Grants: o.Grants,
+		IDHash: hashSession(value), Subject: o.Subject, Email: o.Email, Name: o.Name, Grants: o.Grants, Claims: o.claims,
 		CreatedAt: now, ExpiresAt: now.Add(ttl),
 	}); err != nil {
 		return err
@@ -227,7 +229,16 @@ func (s *Server) sessionOperator(r *http.Request) (*operator, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &operator{Subject: ss.Subject, Email: ss.Email, Name: ss.Name, Grants: ss.Grants, session: h}, nil
+	o := &operator{Subject: ss.Subject, Email: ss.Email, Name: ss.Name, Grants: ss.Grants, session: h}
+	// Roles follow the current sso.roles, so removing a mapping takes
+	// effect at once rather than at the next sign-in.
+	if cfg := s.rt.Load().cfg; ss.Claims != nil && cfg.SSO.OIDC != nil {
+		o.Grants = s.resolveGrants(cfg.SSO.Roles, ss.Claims.Email, ss.Claims.Groups)
+		if len(o.Grants) == 0 {
+			return nil, store.ErrNotFound
+		}
+	}
+	return o, nil
 }
 
 // sameOrigin is the CSRF check for requests authenticated by cookie that
@@ -268,6 +279,26 @@ func (s *Server) adminOperator(r *http.Request) (*operator, *apiError) {
 		return nil, &apiError{http.StatusForbidden, "forbidden", "cross-origin request refused: send JSON from the gateway's own origin"}
 	}
 	return o, nil
+}
+
+// deleteSessions signs out everyone else, or with ?subject= one user,
+// for when someone leaves or a session may be stolen. The caller's own
+// session is kept.
+func (s *Server) deleteSessions(w http.ResponseWriter, r *http.Request) error {
+	if err := requireOwner(r); err != nil {
+		return err
+	}
+	ctx := r.Context()
+	subject := r.URL.Query().Get("subject")
+	n, err := s.store.DeleteOtherSessions(ctx, operatorFrom(ctx).session, subject)
+	if err != nil {
+		return err
+	}
+	if err := s.audit(ctx, "operator.sessions.delete", "operator", subject, "", map[string]any{"subject": subject, "deleted": n}); err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, map[string]int64{"deleted": n})
+	return nil
 }
 
 func (s *Server) sessionPruneLoop(ctx context.Context) {

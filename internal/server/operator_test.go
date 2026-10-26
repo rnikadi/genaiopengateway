@@ -101,6 +101,7 @@ func TestOperatorRoles(t *testing.T) {
 		{"acme admin", acmeAdmin, "GET", "/admin/v1/guardrails", "", 200},
 		{"acme admin", acmeAdmin, "GET", "/admin/v1/alerts/webhooks", "", 403},
 		{"acme admin", acmeAdmin, "GET", "/admin/v1/settings", "", 403},
+		{"acme admin", acmeAdmin, "DELETE", "/admin/v1/sessions", "", 403},
 		{"viewer", viewAll, "GET", "/admin/v1/settings", "", 403},
 		{"owner", owner, "GET", "/admin/v1/settings", "", 200},
 		{"owner", owner, "GET", "/admin/v1/alerts/webhooks", "", 200},
@@ -407,5 +408,24 @@ sso:
 	}
 	if len(signIns) != 3 {
 		t.Fatalf("sign-ins in the audit log: %v", signIns)
+	}
+
+	// Roles follow sso.roles on each request, not only at sign-in.
+	platform := sessionFrom(t, signIn("/ui/", jwt.MapClaims{"sub": "u9", "groups": []any{"platform"}}, nil))
+	e.call("PUT", "/admin/v1/config/settings/gateway", `{"sso": {"roles": [{"group": "platform", "role": "owner"}]}}`, 201, nil)
+	if rec := e.browser(lead, "GET", "/admin/v1/me", ""); rec.Code != 401 {
+		t.Fatalf("a session whose mapping was removed: %d", rec.Code)
+	}
+
+	// An owner signs everyone else out, and keeps their own session.
+	other := sessionFrom(t, signIn("/ui/", jwt.MapClaims{"sub": "u10", "groups": []any{"platform"}}, nil))
+	if rec := e.browser(other, "DELETE", "/admin/v1/sessions?subject=nobody", ""); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"deleted":0`) {
+		t.Fatalf("signing out a user with no session: %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.browser(other, "DELETE", "/admin/v1/sessions", ""); rec.Code != 200 {
+		t.Fatalf("sign out everyone: %d %s", rec.Code, rec.Body)
+	}
+	if e.browser(platform, "GET", "/admin/v1/me", "").Code != 401 || e.browser(other, "GET", "/admin/v1/me", "").Code != 200 {
+		t.Fatal("everyone but the caller is signed out")
 	}
 }

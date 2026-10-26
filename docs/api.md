@@ -104,6 +104,7 @@ Base path `/admin/v1`. JSON in and out. Authenticate with `Authorization: Bearer
 | `GET /admin/v1/requests` | Model requests from usage records, newest first, with `has_body`; filter with `org_id`, `team_id`, `key_id`, `from`, `to`. `after` is a `request_id` ([body-logging.md](body-logging.md)) |
 | `GET /admin/v1/requests/{request_id}` | A request's logged body, decrypted: `request`, `response`, `truncated`, `redactions`. Owners and the organization's admins only; each read is audited as `request_body.read` |
 | `GET /admin/v1/guardrail-events` | Guardrails that matched or failed, newest first; filter with `org_id`, `team_id`, `key_id`, `guardrail`, `action`, `request_id`, `from`, `to`. Never the matched text ([guardrails.md](guardrails.md)) |
+| `DELETE /admin/v1/sessions?subject=` | Sign out every admin UI session but the caller's, or one user's. Returns `{"deleted": n}` (owners only, audited as `operator.sessions.delete`) |
 | `DELETE /admin/v1/requests?org_id=&before=` | Delete an organization's bodies logged before a time, for erasure requests. Returns `{"deleted": n}` (owners only, audited) |
 | `GET /admin/v1/batches` | Batches newest first, with owner, model, target, `status`, the last batch `object`, `cost_usd` and `charged_at`; filter with `org_id`, `team_id`, `status` ([batch.md](batch.md)) |
 | `POST /admin/v1/batches/{id}/cancel` | Cancel a batch at its target. Owners and the organization's admins; audited as `batch.cancel` |

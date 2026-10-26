@@ -67,7 +67,7 @@ sso:
     - {email: alice@example.com, role: viewer, org: acme}
 ```
 
-A user gets every role whose `group` is in the groups claim or whose `email` matches. An `email` mapping is skipped when the ID token says `email_verified: false`, so prefer groups with identity providers that let users register any address. Organization names are unique without case and only owners rename an organization, so a mapping's `org` always means one organization (ADR 0029). A user with no role cannot sign in. Changing a group in the identity provider takes effect at the user's next sign-in, and at most `session_ttl` later.
+A user gets every role whose `group` is in the groups claim or whose `email` matches. An `email` mapping is skipped when the ID token says `email_verified: false`, so prefer groups with identity providers that let users register any address. Organization names are unique without case and only owners rename an organization, so a mapping's `org` always means one organization (ADR 0029). A user with no role cannot sign in. Changing `sso.roles` applies to signed-in users at once. Changing a group in the identity provider takes effect at the user's next sign-in, at most `session_ttl` later, or at once after an owner signs everyone out.
 
 ## Sign-in
 
@@ -102,6 +102,7 @@ When `sso.oidc` is not configured, the sign-in page asks for the admin token. Th
 - A session is a random 256-bit id in a cookie: `HttpOnly`, `SameSite=Lax`, `Path=/`, and `Secure` with the `__Host-` prefix when the gateway is reached over HTTPS (TLS on the gateway, or `X-Forwarded-Proto: https` from the load balancer).
 - The store keeps only the id's SHA-256 hash, the user, the resolved roles and the expiry, so sessions work across replicas and a database leak yields no usable cookie.
 - Sessions expire `session_ttl` after sign-in; there is no sliding renewal. Signing out deletes the session. Expired sessions are pruned with usage records.
+- Roles are resolved again on every request from the email and groups the identity provider gave at sign-in, against the current `sso.roles`. Removing a mapping takes effect at once; a session left with no role is signed out. A change to someone's groups in the identity provider still needs a new sign-in, so owners have **Sign out everyone else** on the Settings page (`DELETE /admin/v1/sessions`, or `?subject=` for one user).
 - Every admin API request with a session cookie checks the session in the store. Admin traffic is light, and this keeps revocation immediate.
 
 ## Admin API changes
@@ -115,6 +116,7 @@ When `sso.oidc` is not configured, the sign-in page asks for the admin token. Th
 | Method and path | Purpose |
 | --- | --- |
 | `GET /admin/v1/me` | The signed-in user, their roles, and whether SSO is on |
+| `DELETE /admin/v1/sessions?subject=` | Sign out every other session, or one user's; returns `{"deleted": n}` (owners, audited as `operator.sessions.delete`) |
 | `GET /admin/v1/models` | Virtual models with their targets (no credentials) |
 | `GET /admin/v1/mcp/virtual-servers` | Virtual MCP servers and the tools they expose |
 | `GET /ui/auth/login`, `GET /ui/auth/callback`, `POST /ui/auth/logout` | Sign-in and sign-out |

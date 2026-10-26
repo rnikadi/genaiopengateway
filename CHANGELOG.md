@@ -7,6 +7,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 ### Security
 
 - Sign-in roles resolve safely (ADR 0029), from the October 2026 pentest. Organization names are unique without case (`409` when taken) and only owners rename an organization, so an SSO role mapping's `org` can no longer resolve to another organization of the same name, or to one an organization admin renamed. Migration 0015 appends the id to existing duplicate names, keeping the oldest. Role mappings by `email` are skipped when the ID token has `email_verified: false`. Names of organizations, teams and keys are trimmed, at most 200 characters and without control characters.
+- Admin UI roles are resolved on every request against the current `sso.roles`, from the email and groups stored with the session (migration 0016), so removing a mapping takes effect at once instead of up to `session_ttl` later. Owners can sign everyone else out from the Settings page or `DELETE /admin/v1/sessions` (`?subject=` for one user), audited as `operator.sessions.delete`.
 
 ### Added
 
