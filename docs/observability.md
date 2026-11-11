@@ -28,6 +28,8 @@ Prometheus, at `/metrics`. All names start with `gog_`. Go runtime and process m
 | `gog_unpriced_requests_total` | counter | `target` |
 | `gog_usage_write_errors_total` | counter | none (usage, MCP call and guardrail event records) |
 | `gog_snapshot_age_seconds` | gauge | none |
+| `gen_ai_client_operation_duration_seconds` | histogram | `gen_ai_operation_name`, `gen_ai_provider_name`, `gen_ai_request_model`, `error_type` (OpenTelemetry `gen_ai.client.operation.duration`) |
+| `gen_ai_client_token_usage` | histogram | `gen_ai_operation_name`, `gen_ai_provider_name`, `gen_ai_request_model`, `gen_ai_token_type` (input, output; OpenTelemetry `gen_ai.client.token.usage`) |
 | `gog_target_circuit_state` | gauge | `target`; 0 closed, 1 open, 2 half open ([routing](routing.md#circuit-breaker)) |
 | `gog_mcp_requests_total` | counter | `virtual_server`, `method`, `status` (ok, tool_error, error, denied, rate_limited) |
 | `gog_mcp_request_duration_seconds` | histogram | `virtual_server`, `method` |
@@ -49,11 +51,27 @@ Prometheus, at `/metrics`. All names start with `gog_`. Go runtime and process m
 
 Labels never include org, team or key ids, to keep cardinality bounded. Per-tenant numbers come from the usage API.
 
+## Dashboard and alerts
+
+A Grafana dashboard and Prometheus alerting rules ship in the Helm chart's `files/` directory. The [runbook](runbook.md) explains how to install them and what to do for each alert.
+
 ## Traces
 
 OpenTelemetry, exported over OTLP/HTTP (`http/protobuf`) when `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set. The standard OTel environment variables apply, including `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_SERVICE_NAME` (default `genaiopengateway`), `OTEL_RESOURCE_ATTRIBUTES`, `OTEL_TRACES_SAMPLER` and `OTEL_SDK_DISABLED`. Incoming W3C `traceparent` is honoured. For gRPC-only backends, run an OpenTelemetry Collector in between.
 
-Spans: `gateway.request` (server), with one `gateway.upstream` (client) child per target tried. An upstream span ends when response headers arrive; the request span ends when the response has been streamed to the client. Attributes follow the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/): `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, plus `gog.virtual_model`, `gog.org_id`, `gog.team_id`.
+Spans: `gateway.request` (server), with one client child per target tried. A client span is named for the operation and the upstream model, such as `chat gpt-4.1-mini`, as the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) say. It ends when response headers arrive. The request span ends when the response has been streamed to the client.
+
+Attributes follow the same conventions:
+
+- `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model` and `gen_ai.response.model`.
+- `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens` and `gen_ai.usage.cache_read.input_tokens` on the request span.
+- The request's own parameters, when it sets them: `gen_ai.request.max_tokens`, `temperature`, `top_p`, `top_k`, `seed`, `stop_sequences` and `choice.count`.
+- `error.type` on a failed client span: the upstream's HTTP status, `timeout` or `connection_error`. On the request span it is the gateway's error code.
+- `gog.virtual_model`, `gog.target`, `gog.org_id`, `gog.team_id`, `gog.fallbacks` and `gog.cache`.
+
+Prompts and completions are never put on spans. Use [body logging](body-logging.md) for content, which is redacted and encrypted.
+
+Upgrading from 0.8: client spans were named `gateway.upstream`.
 
 MCP requests have an `mcp.request` (server) span, with an `mcp.upstream` (client) child when the request goes to an upstream. They carry `mcp.method.name`, `mcp.protocol.version` (upstream span), `gen_ai.tool.name`, `gog.virtual_server`, `gog.mcp_server`, `gog.org_id` and `gog.team_id`. Trace context is read from the request's `_meta` or its HTTP headers, and passed upstream in `_meta`.
 

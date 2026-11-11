@@ -91,6 +91,19 @@ serviceMonitor:
   interval: 30s
   labels: {}
 
+# Alerting rules from files/alerts.yaml, as a PrometheusRule for the
+# Prometheus Operator (docs/runbook.md).
+prometheusRule:
+  enabled: false
+  labels: {}
+
+# The Grafana dashboard from files/dashboard.json, in a ConfigMap that the
+# Grafana sidecar picks up by its label.
+grafanaDashboard:
+  enabled: false
+  labels:
+    grafana_dashboard: "1"
+
 networkPolicy:
   enabled: false
   # Namespaces allowed to reach port 8080, by label. Empty allows only the

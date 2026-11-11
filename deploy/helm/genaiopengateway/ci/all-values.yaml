@@ -4,6 +4,8 @@ ingress:
   tls: [{hosts: [gateway.example.com], secretName: gateway-tls}]
 autoscaling: {enabled: true}
 serviceMonitor: {enabled: true}
+prometheusRule: {enabled: true}
+grafanaDashboard: {enabled: true}
 networkPolicy:
   enabled: true
   ingressNamespaceSelectors:

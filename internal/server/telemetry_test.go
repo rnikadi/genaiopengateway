@@ -61,6 +61,8 @@ keys:
 		`gog_request_duration_seconds_count{endpoint="chat.completions",model="chat",target="good/backup"} 1`,
 		`gog_usage_write_errors_total 0`,
 		`gog_snapshot_age_seconds 0`,
+		`gen_ai_client_operation_duration_seconds_count{error_type="",gen_ai_operation_name="chat",gen_ai_provider_name="openai",gen_ai_request_model="backup"} 1`,
+		`gen_ai_client_token_usage_sum{gen_ai_operation_name="chat",gen_ai_provider_name="openai",gen_ai_request_model="backup",gen_ai_token_type="input"} 10`,
 		`gog_target_circuit_state{target="bad/primary"} 0`,
 		`gog_target_circuit_state{target="good/backup"} 0`,
 		`go_goroutines`,
@@ -100,7 +102,7 @@ models:
 keys: [{name: dev, key: `+devKey+`}]
 `, nil)
 
-	req := strings.NewReader(`{"model":"chat","messages":[]}`)
+	req := strings.NewReader(`{"model":"chat","messages":[],"temperature":0.2,"max_tokens":64}`)
 	r, _ := http.NewRequest("POST", "/v1/chat/completions", req)
 	r.Header.Set("Authorization", "Bearer "+devKey)
 	const parent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
@@ -134,13 +136,18 @@ keys: [{name: dev, key: `+devKey+`}]
 	}
 	for i, model := range []string{"primary", "backup"} {
 		s := spans[i]
-		if s.Name() != "gateway.upstream" || s.Parent().SpanID() != root.SpanContext().SpanID() {
+		if s.Name() != "chat "+model || s.Parent().SpanID() != root.SpanContext().SpanID() {
 			t.Fatalf("span %d is %s, not an upstream child of the request", i, s.Name())
 		}
+		attrs := map[string]string{}
 		for _, kv := range s.Attributes() {
-			if kv.Key == "gen_ai.request.model" && kv.Value.AsString() != model {
-				t.Errorf("upstream span %d model %s, want %s", i, kv.Value.AsString(), model)
-			}
+			attrs[string(kv.Key)] = kv.Value.String()
+		}
+		if attrs["gen_ai.request.model"] != model || attrs["gen_ai.request.temperature"] != "0.2" || attrs["gen_ai.request.max_tokens"] != "64" {
+			t.Errorf("upstream span %d attributes %v", i, attrs)
+		}
+		if want := map[int]string{0: "503", 1: ""}[i]; attrs["error.type"] != want {
+			t.Errorf("upstream span %d error.type %q, want %q", i, attrs["error.type"], want)
 		}
 	}
 }

@@ -15,7 +15,7 @@ docker compose up -d        # builds the gateway from this checkout and starts e
 |---|---|
 | `docker compose up -d` | gateway on `localhost:8080`, Postgres, Valkey, MCP reference server |
 | `docker compose --profile ollama up -d` | Ollama with a small model (`qwen2.5:0.5b`), served as `local-chat`, so no provider keys are needed |
-| `docker compose --profile observability up -d` | Jaeger at `localhost:16686` and Prometheus at `localhost:9090` |
+| `docker compose --profile observability up -d` | Jaeger at `localhost:16686`, Prometheus with the alerting rules at `localhost:9090`, and Grafana with the gateway dashboard at `localhost:3000` |
 
 Profiles combine: `docker compose --profile ollama --profile observability up -d`. For traces, also set `OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318` in `.env`.
 

@@ -1,0 +1,80 @@
+# Prometheus alerting rules for GenAI Open Gateway. Each alert links to
+# its section of docs/runbook.md. Load this file with rule_files, or set
+# prometheusRule.enabled in the Helm chart.
+groups:
+  - name: genaiopengateway
+    rules:
+      - alert: GatewayHighErrorRate
+        expr: |
+          sum(rate(gog_requests_total{status_class="5xx"}[5m]))
+            / clamp_min(sum(rate(gog_requests_total[5m])), 1e-9) > 0.05
+        for: 10m
+        labels: {severity: page}
+        annotations:
+          summary: More than 5% of model requests fail with a 5xx.
+          runbook_url: https://rnikadi.github.io/genaiopengateway/runbook/#gatewayhigherrorrate
+
+      - alert: GatewayAllTargetsFailing
+        expr: sum by (model) (rate(gog_requests_total{error_code="all_targets_failed"}[5m])) > 0.1
+        for: 5m
+        labels: {severity: page}
+        annotations:
+          summary: "Model {{ $labels.model }}: every target is failing."
+          runbook_url: https://rnikadi.github.io/genaiopengateway/runbook/#gatewayalltargetsfailing
+
+      - alert: GatewayCircuitOpen
+        expr: max by (target) (gog_target_circuit_state) == 1
+        for: 15m
+        labels: {severity: ticket}
+        annotations:
+          summary: "Target {{ $labels.target }} has been out of rotation for 15 minutes."
+          runbook_url: https://rnikadi.github.io/genaiopengateway/runbook/#gatewaycircuitopen
+
+      - alert: GatewayHighLatency
+        expr: |
+          histogram_quantile(0.95, sum by (le, target) (rate(gog_upstream_ttfb_seconds_bucket[10m]))) > 10
+        for: 15m
+        labels: {severity: ticket}
+        annotations:
+          summary: "Target {{ $labels.target }}: p95 time to first byte is over 10 seconds."
+          runbook_url: https://rnikadi.github.io/genaiopengateway/runbook/#gatewayhighlatency
+
+      - alert: GatewayStaleSnapshot
+        expr: max(gog_snapshot_age_seconds) > 300
+        for: 5m
+        labels: {severity: page}
+        annotations:
+          summary: A replica has not reloaded keys and configuration from the store for 5 minutes.
+          runbook_url: https://rnikadi.github.io/genaiopengateway/runbook/#gatewaystalesnapshot
+
+      - alert: GatewayUsageWriteErrors
+        expr: sum(rate(gog_usage_write_errors_total[10m])) > 0
+        for: 10m
+        labels: {severity: page}
+        annotations:
+          summary: Usage records are being lost, so some spend is not counted.
+          runbook_url: https://rnikadi.github.io/genaiopengateway/runbook/#gatewayusagewriteerrors
+
+      - alert: GatewayUnpricedTraffic
+        expr: sum by (target) (rate(gog_unpriced_requests_total[1h])) > 0
+        for: 1h
+        labels: {severity: ticket}
+        annotations:
+          summary: "Target {{ $labels.target }} serves traffic without a price, so budgets miss it."
+          runbook_url: https://rnikadi.github.io/genaiopengateway/runbook/#gatewayunpricedtraffic
+
+      - alert: GatewayMCPUpstreamDown
+        expr: min by (server) (gog_mcp_upstream_up) == 0
+        for: 10m
+        labels: {severity: ticket}
+        annotations:
+          summary: "MCP server {{ $labels.server }} has failed its catalog refresh for 10 minutes."
+          runbook_url: https://rnikadi.github.io/genaiopengateway/runbook/#gatewaymcpupstreamdown
+
+      - alert: GatewayBodiesDropped
+        expr: sum(rate(gog_request_bodies_dropped_total[10m])) > 0
+        for: 15m
+        labels: {severity: ticket}
+        annotations:
+          summary: Logged request bodies are being dropped.
+          runbook_url: https://rnikadi.github.io/genaiopengateway/runbook/#gatewaybodiesdropped
