@@ -15,6 +15,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - Hosted stdio MCP servers ([docs/mcp.md](docs/mcp.md#hosted-stdio-servers)): an MCP server with `command` instead of `url` runs as a child process with only `PATH`, `HOME` and its own `env`, restarts when it exits, and logs its stderr. It can be set only in the config file; stored objects with `command`, `env` or `dir` are refused.
 - A2A agents ([docs/a2a.md](docs/a2a.md), ADR 0033): agents speaking the Agent2Agent protocol are served at `/a2a/{name}` with gateway keys, `allowed_agents` policies, rate limits, guardrails and metrics, and their cards rewritten to point at the gateway. Task and context ids are recorded with their caller, so no team can read or continue another's task. Agents are configured in the file, the UI, `gogctl` and Terraform policies.
 
+- Control and data planes ([docs/control-plane.md](docs/control-plane.md), ADR 0034): a replica with `control_plane` and no store reads versioned snapshots of keys, tenants, stored configuration, team credentials and Cedar policies from a replica with `data_planes`, caches the last one on disk to serve through outages and restarts, and sends its usage, MCP call and guardrail records back. Data planes hold no database credentials and serve no admin API.
 
 ## [0.11.0] - 2026-11-11
 

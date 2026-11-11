@@ -54,7 +54,33 @@ type Config struct {
 	Guardrails  map[string]Guardrail `yaml:"guardrails"`
 	Cache       Cache                `yaml:"cache"`
 	Routing     Routing              `yaml:"routing"`
+	// ControlPlane makes this replica a data plane that reads tenancy
+	// and stored configuration from a control plane instead of a store;
+	// DataPlanes lets data planes read them from this one (ADR 0034).
+	ControlPlane ControlPlane `yaml:"control_plane"`
+	DataPlanes   DataPlanes   `yaml:"data_planes"`
 }
+
+// ControlPlane connects a data plane to its control plane
+// (docs/control-plane.md).
+type ControlPlane struct {
+	// URL is the control plane's base URL.
+	URL   string `yaml:"url"`
+	Token Secret `yaml:"token"`
+	// CacheFile keeps the last snapshot, so a data plane that restarts
+	// while the control plane is down still serves.
+	CacheFile string `yaml:"cache_file"`
+}
+
+// DataPlanes configures this replica as a control plane.
+type DataPlanes struct {
+	// Token is what data planes present; empty turns the control plane
+	// endpoints off.
+	Token Secret `yaml:"token"`
+}
+
+// minPlaneToken is the shortest token between planes.
+const minPlaneToken = 32
 
 // Cache configures the response cache (docs/cache.md). Policies turn it
 // on.
@@ -1047,6 +1073,7 @@ func (c *Config) validate() error {
 
 	c.validateMCP(add)
 	c.validateA2A(add)
+	c.validatePlanes(add)
 	c.validateSSO(add)
 	c.validateAlerts(add)
 	c.validateStreams(add)
@@ -1615,5 +1642,30 @@ func (c *Config) validateA2A(add func(string, ...any)) {
 			}
 		}
 		a.Agents[name] = ag
+	}
+}
+
+func (c *Config) validatePlanes(add func(string, ...any)) {
+	if cp := c.ControlPlane; cp.URL != "" {
+		c.ControlPlane.URL = strings.TrimRight(cp.URL, "/")
+		if !httpURL(cp.URL) {
+			add("control_plane.url must be an http or https URL")
+		}
+		if len(cp.Token.Value()) < minPlaneToken {
+			add("control_plane.token must be at least %d characters", minPlaneToken)
+		}
+		if c.Store.Driver != "" {
+			add("a data plane reads from its control plane, so control_plane and store cannot both be set")
+		}
+	} else if cp.Token != "" || cp.CacheFile != "" {
+		add("control_plane needs a url")
+	}
+	if t := c.DataPlanes.Token; t != "" {
+		if len(t.Value()) < minPlaneToken {
+			add("data_planes.token must be at least %d characters", minPlaneToken)
+		}
+		if c.Store.Driver == "" {
+			add("data_planes needs a store, which the snapshot is read from")
+		}
 	}
 }

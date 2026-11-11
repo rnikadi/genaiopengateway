@@ -32,7 +32,7 @@ func credentialAD(teamID, provider string) []byte {
 // credential that cannot be opened is logged and its provider fails for
 // that team rather than falling back to the shared credential.
 func (s *Server) loadTeamCredentials(ctx context.Context) error {
-	rows, err := s.store.ListTeamCredentials(ctx, "")
+	rows, err := s.source.ListTeamCredentials(ctx, "")
 	if err != nil {
 		return err
 	}

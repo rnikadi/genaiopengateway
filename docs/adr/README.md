@@ -35,5 +35,6 @@
 | [0031](0031-routing-strategies.md) | Routing strategies, retries and circuit breakers live in the router, per replica |
 | [0032](0032-roles-are-permission-sets.md) | Roles are sets of permissions, granted for every organization, one organization or one team |
 | [0033](0033-a2a-agents.md) | A2A agents behind the gateway, with tasks owned by their caller |
+| [0034](0034-control-and-data-planes.md) | Data planes read versioned snapshots from a control plane over HTTP |
 
 New ADRs copy [0000-template.md](0000-template.md).

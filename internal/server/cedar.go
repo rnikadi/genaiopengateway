@@ -31,7 +31,7 @@ type orgCedar struct {
 
 // loadCedar parses the policies in force of every organization.
 func (s *Server) loadCedar(ctx context.Context) error {
-	stored, err := s.store.LoadCedarPolicies(ctx)
+	stored, err := s.source.LoadCedarPolicies(ctx)
 	if err != nil {
 		return err
 	}

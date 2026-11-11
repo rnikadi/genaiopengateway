@@ -86,6 +86,7 @@ nav:
       - Playground: playground.md
   - Operations:
       - Deploying to Kubernetes: deploy-kubernetes.md
+      - Control and data planes: control-plane.md
       - Helm chart: helm.md
       - Observability: observability.md
       - Runbook: runbook.md

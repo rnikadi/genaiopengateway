@@ -58,10 +58,14 @@ type Server struct {
 	a2aCards sync.Map
 	streams  *stream.Manager
 
-	// store and usage are nil when no database is configured.
-	store *store.Store
-	usage *usage.Writer[usage.Record]
-	calls *usage.Writer[store.MCPCall]
+	// store and usage are nil when no database is configured. A data
+	// plane has no store but a plane, which its snapshot comes from and
+	// its records go to; source is where snapshots are read.
+	store  *store.Store
+	plane  *planeClient
+	source snapshotSource
+	usage  *usage.Writer[usage.Record]
+	calls  *usage.Writer[store.MCPCall]
 	// bodies is nil without a store, like usage and calls.
 	bodies *usage.Writer[capturedBody]
 	// guardEvents is nil without a store.
@@ -139,6 +143,12 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error)
 		s.bodies = usage.NewWriterSize(s.writeBodies, log, "request_bodies", bodyQueue)
 		s.guardEvents = usage.NewWriter(streamed(s, config.RecordGuardrailEvents, st.InsertGuardrailEvents), log, "guardrail_events")
 		st.OnAudit(func(e store.AuditEntry) { stream.Publish(s.streams, config.RecordAudit, []store.AuditEntry{e}) })
+		s.source = st
+	} else if cfg.ControlPlane.URL != "" {
+		// Ready once the first snapshot is in.
+		s.plane = newPlaneClient(cfg.ControlPlane, s.client, log)
+		s.source = s.plane
+		newPlaneWriters(s)
 	} else {
 		s.ready.Store(true)
 	}
@@ -151,6 +161,8 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error)
 		s.conns = newConnections(s)
 		mo.Pins, mo.Record, mo.Audit, mo.OnPending, mo.LogBody = st, s.calls.Add, st.AppendAudit, s.toolPending, s.logMCPBody
 		mo.Credentials = s.conns
+	} else if s.plane != nil {
+		mo.Record = s.calls.Add
 	}
 	s.mcp = mcpgw.New(ctx, cfg.MCP, mo)
 	if err := s.Reload(cfg); err != nil {
@@ -238,6 +250,10 @@ func (s *Server) rebuildKeys() {
 // store and pruning old usage.
 func (s *Server) Start(ctx context.Context) {
 	if s.store == nil {
+		if s.plane != nil {
+			go s.refreshLoop(ctx)
+			go s.notifier.Run(ctx)
+		}
 		return
 	}
 	go s.seedBudgets(ctx)
@@ -256,7 +272,9 @@ func (s *Server) Close(ctx context.Context) {
 	if s.usage != nil {
 		s.usage.Close(ctx)
 		s.calls.Close(ctx)
-		s.bodies.Close(ctx)
+		if s.bodies != nil {
+			s.bodies.Close(ctx)
+		}
 		s.guardEvents.Close(ctx)
 	}
 	s.stop()
@@ -304,10 +322,15 @@ func (s *Server) refreshLoop(ctx context.Context) {
 // refresh loads stored configuration objects, tenants and keys from the
 // store.
 func (s *Server) refresh(ctx context.Context) error {
+	if s.plane != nil {
+		if err := s.plane.update(ctx); err != nil {
+			return err
+		}
+	}
 	if err := s.refreshConfig(ctx); err != nil {
 		return err
 	}
-	snap, err := s.store.LoadSnapshot(ctx)
+	snap, err := s.source.LoadSnapshot(ctx)
 	if err != nil {
 		return err
 	}
@@ -367,7 +390,7 @@ func (s *Server) usageWriteErrors() float64 {
 // snapshotAge is zero without a store or before the first load, which
 // /readyz already reports.
 func (s *Server) snapshotAge() float64 {
-	if s.store == nil {
+	if s.source == nil {
 		return 0
 	}
 	last := s.lastRefresh.Load()
@@ -460,6 +483,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/realtime", s.realtime)
 	mux.HandleFunc("GET /ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent", s.live)
 	mux.HandleFunc("GET /bedrock/model/{model}/invoke-with-bidirectional-stream", s.bidi)
+	if s.store != nil {
+		mux.HandleFunc("GET "+planeSnapshotPath, s.serveSnapshot)
+		mux.HandleFunc("POST "+planeRecordsPath+"{kind}", s.serveRecords)
+	}
 	mux.HandleFunc("POST /a2a/{name}", s.serveA2A)
 	mux.HandleFunc("GET /a2a/{name}/.well-known/agent-card.json", s.a2aCard)
 	mux.HandleFunc("GET /a2a/{name}/.well-known/agent.json", s.a2aCard)
