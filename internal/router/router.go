@@ -7,9 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math/rand/v2"
 	"net/http"
 	"slices"
 	"sort"
+	"strconv"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -49,6 +52,9 @@ type Router struct {
 	configs   map[string]config.Provider
 	types     map[string]string // provider name to type
 	client    *http.Client
+	health    *Health
+	breaker   config.CircuitBreaker
+	sleep     func(context.Context, time.Duration) error
 }
 
 // Credentials are adapters that replace providers of the same name for
@@ -117,9 +123,15 @@ func (r *Router) WithAPIKey(providerName, apiKey string) (provider.Provider, err
 }
 
 // New builds a router. All adapters share one HTTP client so connections
-// are pooled per upstream host.
-func New(c *config.Config, client *http.Client) (*Router, error) {
-	r := &Router{models: c.Models, providers: map[string]provider.Provider{}, configs: c.Providers, types: map[string]string{}, client: client}
+// are pooled per upstream host. Health is kept across routers so a
+// config reload keeps what the gateway learned about its targets; nil
+// starts afresh.
+func New(c *config.Config, client *http.Client, h *Health) (*Router, error) {
+	if h == nil {
+		h = NewHealth()
+	}
+	r := &Router{models: c.Models, providers: map[string]provider.Provider{}, configs: c.Providers, types: map[string]string{}, client: client,
+		health: h, breaker: c.Routing.CircuitBreaker, sleep: sleepCtx}
 	for name, p := range c.Providers {
 		f, ok := factories[p.Type]
 		if !ok {
@@ -194,33 +206,141 @@ func (r *Router) route(ctx context.Context, ep provider.Endpoint, model string, 
 	if len(targets) == 0 {
 		return nil, ErrUnsupported
 	}
+	m := r.models[model]
+	if keep == nil {
+		key := ""
+		if m.Sticky == "user" {
+			key = stickyKey(body)
+		}
+		targets = r.health.order(model, m, targets, key)
+	}
+	targets = r.admitted(targets)
 
 	res := &Result{}
 	for i, t := range targets {
-		if err := ctx.Err(); err != nil {
-			return res, err
-		}
+		last := i == len(targets)-1
 		body["model"], _ = json.Marshal(t.Model)
 		raw, err := json.Marshal(body)
 		if err != nil {
 			return res, err
 		}
-		req.Endpoint, req.Model, req.Body = ep, t.Model, raw
-		a := r.send(ctx, t, &req)
-		if a.Err != nil {
+		for try := 0; ; try++ {
+			if err := ctx.Err(); err != nil {
+				return res, err
+			}
+			req.Endpoint, req.Model, req.Body = ep, t.Model, raw
+			a := r.send(ctx, t, &req)
+			failed := a.Err != nil || provider.Retryable(a.Status)
+			r.health.observe(t.String(), a.TTFB, failed, r.breaker)
+			if !failed {
+				res.Response, res.Target, res.TTFB = a.resp, t, a.TTFB
+				return res, nil
+			}
+			retry := try < m.Retries.Attempts
+			if !retry && last && a.Err == nil {
+				// The last target's error goes to the client as it is.
+				res.Response, res.Target, res.TTFB = a.resp, t, a.TTFB
+				return res, nil
+			}
 			res.Failed = append(res.Failed, a.Attempt)
-			continue
+			wait := backoff(m.Retries, try)
+			if a.resp != nil {
+				if ra, ok := retryAfter(a.resp.Header); ok && ra <= m.Retries.MaxBackoff.Std() {
+					wait = ra
+				}
+				provider.Drain(a.resp)
+			}
+			if !retry {
+				break
+			}
+			sleep := r.sleep
+			if sleep == nil {
+				sleep = sleepCtx
+			}
+			if err := sleep(ctx, wait); err != nil {
+				return res, err
+			}
 		}
-		if provider.Retryable(a.resp.StatusCode) && i < len(targets)-1 {
-			res.Failed = append(res.Failed, a.Attempt)
-			provider.Drain(a.resp)
-			continue
-		}
-		res.Response, res.Target, res.TTFB = a.resp, t, a.TTFB
-		return res, nil
 	}
 	return res, ErrAllTargetsFailed
 }
+
+// admitted drops targets whose circuit breaker is open. When every
+// target is open, all of them are tried anyway: a request that might
+// succeed beats one that surely fails.
+func (r *Router) admitted(targets []config.Target) []config.Target {
+	var out []config.Target
+	for _, t := range targets {
+		if r.health.admit(t.String()) {
+			out = append(out, t)
+		}
+	}
+	if len(out) == 0 {
+		return targets
+	}
+	return out
+}
+
+// stickyKey is who a request is for: OpenAI's user field, or Anthropic's
+// metadata.user_id.
+func stickyKey(body map[string]json.RawMessage) string {
+	var user string
+	if raw, ok := body["user"]; ok && json.Unmarshal(raw, &user) == nil && user != "" {
+		return user
+	}
+	var meta struct {
+		UserID string `json:"user_id"`
+	}
+	if raw, ok := body["metadata"]; ok && json.Unmarshal(raw, &meta) == nil {
+		return meta.UserID
+	}
+	return ""
+}
+
+// backoff is the wait before retry number try+1: exponential from
+// Backoff, capped at MaxBackoff, with full jitter.
+func backoff(rt config.Retries, try int) time.Duration {
+	d := rt.Backoff.Std() << min(try, 20)
+	if d <= 0 || d > rt.MaxBackoff.Std() {
+		d = rt.MaxBackoff.Std()
+	}
+	if d <= 0 {
+		return 0
+	}
+	return time.Duration(rand.Int64N(int64(d)) + 1)
+}
+
+// retryAfter reads a Retry-After header in seconds or as an HTTP date.
+func retryAfter(h http.Header) (time.Duration, bool) {
+	v := h.Get("Retry-After")
+	if v == "" {
+		return 0, false
+	}
+	if secs, err := strconv.Atoi(v); err == nil && secs >= 0 {
+		return time.Duration(secs) * time.Second, true
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		return max(time.Until(t), 0), true
+	}
+	return 0, false
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+// Health returns what the router has learned about its targets.
+func (r *Router) Health() *Health { return r.health }
 
 type sent struct {
 	Attempt
@@ -239,7 +359,7 @@ func (r *Router) send(ctx context.Context, t config.Target, req *provider.Reques
 		))
 	defer span.End()
 	start := time.Now()
-	resp, err := r.adapter(ctx, t.Provider).Send(ctx, req)
+	resp, err := r.sendWithin(ctx, t, req)
 	s := sent{Attempt: Attempt{Target: t, Err: err, TTFB: time.Since(start)}, resp: resp}
 	if err != nil {
 		span.RecordError(err)
@@ -252,6 +372,47 @@ func (r *Router) send(ctx context.Context, t config.Target, req *provider.Reques
 		span.SetStatus(codes.Error, http.StatusText(resp.StatusCode))
 	}
 	return s
+}
+
+// errTargetTimeout is a target's timeout to response headers passing.
+var errTargetTimeout = errors.New("no response headers within the target's timeout")
+
+// sendWithin sends to a target, giving up when its timeout passes before
+// response headers. The body keeps streaming after that, so the
+// deadline is lifted once headers arrive, and the request's context is
+// only cancelled when the body is closed.
+func (r *Router) sendWithin(ctx context.Context, t config.Target, req *provider.Request) (*provider.Response, error) {
+	p := r.adapter(ctx, t.Provider)
+	if t.Timeout <= 0 {
+		return p.Send(ctx, req)
+	}
+	ctx, cancel := context.WithCancelCause(ctx)
+	timer := time.AfterFunc(t.Timeout.Std(), func() { cancel(errTargetTimeout) })
+	resp, err := p.Send(ctx, req)
+	if !timer.Stop() && context.Cause(ctx) == errTargetTimeout {
+		if resp != nil {
+			provider.Drain(resp)
+		}
+		cancel(nil)
+		return nil, errTargetTimeout
+	}
+	if err != nil {
+		cancel(nil)
+		return nil, err
+	}
+	resp.Body = &cancelOnClose{ReadCloser: resp.Body, cancel: func() { cancel(nil) }}
+	return resp, nil
+}
+
+type cancelOnClose struct {
+	io.ReadCloser
+	cancel func()
+}
+
+func (c *cancelOnClose) Close() error {
+	err := c.ReadCloser.Close()
+	c.cancel()
+	return err
 }
 
 // Targets lists the targets of a model that serve an endpoint, in

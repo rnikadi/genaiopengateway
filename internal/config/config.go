@@ -44,6 +44,7 @@ type Config struct {
 	BodyLogging BodyLogging          `yaml:"body_logging"`
 	Guardrails  map[string]Guardrail `yaml:"guardrails"`
 	Cache       Cache                `yaml:"cache"`
+	Routing     Routing              `yaml:"routing"`
 }
 
 // Cache configures the response cache (docs/cache.md). Policies turn it
@@ -303,9 +304,37 @@ type Provider struct {
 	Region string `yaml:"region"`
 }
 
-// Model is a virtual model. Targets are tried in order.
+// Routing strategies of a virtual model (docs/routing.md).
+const (
+	StrategyOrdered      = "ordered"
+	StrategyWeighted     = "weighted"
+	StrategyRoundRobin   = "round_robin"
+	StrategyLeastLatency = "least_latency"
+	StrategyLowestCost   = "lowest_cost"
+)
+
+// Strategies lists the routing strategies.
+var Strategies = []string{StrategyOrdered, StrategyWeighted, StrategyRoundRobin, StrategyLeastLatency, StrategyLowestCost}
+
+// Model is a virtual model. Strategy chooses the order its targets are
+// tried in; the default tries them in the order listed.
 type Model struct {
-	Targets []Target `yaml:"targets"`
+	Targets  []Target `yaml:"targets" json:"targets"`
+	Strategy string   `yaml:"strategy" json:"strategy,omitempty"`
+	// Sticky "user" sends a caller's requests to the same first target
+	// while it is healthy, keyed by the request's user field, so provider
+	// prompt caches stay warm. Only with weighted and round_robin.
+	Sticky  string  `yaml:"sticky" json:"sticky,omitempty"`
+	Retries Retries `yaml:"retries" json:"retries,omitempty"`
+}
+
+// Retries are extra tries on the same target before moving on, after a
+// 429, a 5xx or a connection failure, waiting a jittered exponential
+// backoff or the upstream's Retry-After when it is shorter than MaxBackoff.
+type Retries struct {
+	Attempts   int      `yaml:"attempts" json:"attempts,omitempty"`
+	Backoff    Duration `yaml:"backoff" json:"backoff,omitempty"`
+	MaxBackoff Duration `yaml:"max_backoff" json:"max_backoff,omitempty"`
 }
 
 // Target maps a virtual model onto one provider's model.
@@ -313,6 +342,25 @@ type Target struct {
 	Provider string `yaml:"provider" json:"provider"`
 	Model    string `yaml:"model" json:"model"`
 	Price    Price  `yaml:"price" json:"price"`
+	// Weight is the target's share of traffic under the weighted
+	// strategy; zero counts as 1.
+	Weight int `yaml:"weight" json:"weight,omitempty"`
+	// Timeout bounds the wait for response headers, after which the next
+	// target is tried. Zero leaves only the provider's timeout.
+	Timeout Duration `yaml:"timeout" json:"timeout,omitempty"`
+}
+
+// Routing holds gateway-wide routing settings (docs/routing.md).
+type Routing struct {
+	CircuitBreaker CircuitBreaker `yaml:"circuit_breaker"`
+}
+
+// CircuitBreaker takes a target out of rotation after Failures failures
+// in a row, for Cooldown, then lets one probe request through to decide
+// whether it is back. Failures of 0 turns it off.
+type CircuitBreaker struct {
+	Failures int      `yaml:"failures"`
+	Cooldown Duration `yaml:"cooldown"`
 }
 
 // String identifies the target as provider/model.
@@ -473,6 +521,11 @@ type StaticKey struct {
 // Defaults applied before the file is decoded.
 const (
 	DefaultListen          = ":8080"
+	DefaultBreakerFailures = 5
+	DefaultBreakerCooldown = 30 * time.Second
+	DefaultRetryBackoff    = 250 * time.Millisecond
+	DefaultRetryMaxBackoff = 5 * time.Second
+	MaxRetryAttempts       = 5
 	DefaultMaxRequestBytes = 32 << 20
 	// DefaultMaxRealtimeSession bounds a realtime session.
 	DefaultMaxRealtimeSession = Duration(30 * time.Minute)
@@ -521,6 +574,7 @@ func decode(root *yaml.Node) (*Config, error) {
 		SSO:         SSO{SessionTTL: Duration(DefaultSessionTTL)},
 		Alerts:      Alerts{BudgetThresholds: DefaultBudgetThresholds},
 		BodyLogging: BodyLogging{Retention: Duration(DefaultBodyRetention), MaxBodyBytes: DefaultMaxBodyBytes},
+		Routing:     Routing{CircuitBreaker: CircuitBreaker{Failures: DefaultBreakerFailures, Cooldown: Duration(DefaultBreakerCooldown)}},
 	}
 	if err := root.Decode(&c); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
@@ -641,10 +695,44 @@ func (c *Config) validate() error {
 		c.Providers[name] = p
 	}
 
+	if c.Routing.CircuitBreaker.Failures < 0 || c.Routing.CircuitBreaker.Cooldown < 0 {
+		add("routing.circuit_breaker: failures and cooldown must not be negative")
+	}
+	if c.Routing.CircuitBreaker.Failures > 0 && c.Routing.CircuitBreaker.Cooldown == 0 {
+		c.Routing.CircuitBreaker.Cooldown = Duration(DefaultBreakerCooldown)
+	}
 	for name, m := range c.Models {
 		if len(m.Targets) == 0 {
 			add("model %q: at least one target is required", name)
 		}
+		switch {
+		case m.Strategy == "":
+			m.Strategy = StrategyOrdered
+		case !slices.Contains(Strategies, m.Strategy):
+			add("model %q: strategy must be one of %s, got %q", name, strings.Join(Strategies, ", "), m.Strategy)
+		}
+		switch m.Sticky {
+		case "":
+		case "user":
+			if m.Strategy != StrategyWeighted && m.Strategy != StrategyRoundRobin {
+				add("model %q: sticky routing needs the weighted or round_robin strategy", name)
+			}
+		default:
+			add("model %q: sticky must be user or empty, got %q", name, m.Sticky)
+		}
+		if m.Retries.Attempts < 0 || m.Retries.Attempts > MaxRetryAttempts {
+			add("model %q: retries.attempts must be between 0 and %d", name, MaxRetryAttempts)
+		}
+		if m.Retries.Backoff < 0 || m.Retries.MaxBackoff < 0 {
+			add("model %q: retry backoffs must not be negative", name)
+		}
+		if m.Retries.Backoff == 0 {
+			m.Retries.Backoff = Duration(DefaultRetryBackoff)
+		}
+		if m.Retries.MaxBackoff == 0 {
+			m.Retries.MaxBackoff = Duration(DefaultRetryMaxBackoff)
+		}
+		c.Models[name] = m
 		for i, t := range m.Targets {
 			if _, ok := c.Providers[t.Provider]; !ok {
 				add("model %q target %d: unknown provider %q", name, i, t.Provider)
@@ -657,6 +745,9 @@ func (c *Config) validate() error {
 			}
 			if t.Price.BatchDiscount > 1 {
 				add("model %q target %d: batch_discount must be between 0 and 1", name, i)
+			}
+			if t.Weight < 0 || t.Timeout < 0 {
+				add("model %q target %d: weight and timeout must not be negative", name, i)
 			}
 		}
 	}

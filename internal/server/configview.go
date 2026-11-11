@@ -71,12 +71,18 @@ type configuredTarget struct {
 	ProviderType string              `json:"provider_type"`
 	Endpoints    []provider.Endpoint `json:"endpoints"`
 	Health       store.TargetHealth  `json:"health"`
+	// Circuit is this replica's breaker state for the target; nil until
+	// the replica has sent to it.
+	Circuit *router.CircuitState `json:"circuit,omitempty"`
 }
 
 // configuredModel is a virtual model as the admin UI shows it: targets
 // and prices, never credentials.
 type configuredModel struct {
 	Name      string              `json:"name"`
+	Strategy  string              `json:"strategy"`
+	Sticky    string              `json:"sticky,omitempty"`
+	Retries   config.Retries      `json:"retries"`
 	Endpoints []provider.Endpoint `json:"endpoints"`
 	Targets   []configuredTarget  `json:"targets"`
 }
@@ -88,16 +94,22 @@ func (s *Server) listConfiguredModels(w http.ResponseWriter, r *http.Request) er
 	if err != nil {
 		return err
 	}
+	circuits := s.routing.States()
 	out := []configuredModel{}
 	for _, name := range slices.Sorted(maps.Keys(rt.cfg.Models)) {
-		m := configuredModel{Name: name, Endpoints: []provider.Endpoint{}}
+		cm := rt.cfg.Models[name]
+		m := configuredModel{Name: name, Strategy: cm.Strategy, Sticky: cm.Sticky, Retries: cm.Retries, Endpoints: []provider.Endpoint{}}
 		served := map[provider.Endpoint]bool{}
-		for _, t := range rt.cfg.Models[name].Targets {
+		for _, t := range cm.Targets {
 			eps := rt.router.Endpoints(t.Provider, t.Model)
-			m.Targets = append(m.Targets, configuredTarget{
+			ct := configuredTarget{
 				Target: t, ProviderType: rt.cfg.Providers[t.Provider].Type,
 				Endpoints: eps, Health: health[[2]string{t.Provider, t.Model}],
-			})
+			}
+			if c, ok := circuits[t.String()]; ok {
+				ct.Circuit = &c
+			}
+			m.Targets = append(m.Targets, ct)
 			for _, e := range eps {
 				served[e] = true
 			}

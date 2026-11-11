@@ -55,6 +55,7 @@ nav:
       - Images, audio, video and realtime: modalities.md
       - Batch and files: batch.md
       - Response cache: cache.md
+      - Routing and failover: routing.md
       - Providers: providers.md
       - Gemini, Vertex AI and Bedrock: cloud-providers.md
   - MCP gateway:

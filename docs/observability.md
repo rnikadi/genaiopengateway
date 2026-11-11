@@ -28,6 +28,7 @@ Prometheus, at `/metrics`. All names start with `gog_`. Go runtime and process m
 | `gog_unpriced_requests_total` | counter | `target` |
 | `gog_usage_write_errors_total` | counter | none (usage, MCP call and guardrail event records) |
 | `gog_snapshot_age_seconds` | gauge | none |
+| `gog_target_circuit_state` | gauge | `target`; 0 closed, 1 open, 2 half open ([routing](routing.md#circuit-breaker)) |
 | `gog_mcp_requests_total` | counter | `virtual_server`, `method`, `status` (ok, tool_error, error, denied, rate_limited) |
 | `gog_mcp_request_duration_seconds` | histogram | `virtual_server`, `method` |
 | `gog_mcp_tool_calls_total` | counter | `server`, `tool`, `status` |

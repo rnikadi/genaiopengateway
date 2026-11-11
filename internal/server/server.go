@@ -52,6 +52,7 @@ type Server struct {
 	draining atomic.Bool
 	log      *slog.Logger
 	client   *http.Client
+	routing  *router.Health
 
 	// store and usage are nil when no database is configured.
 	store *store.Store
@@ -105,7 +106,7 @@ type Server struct {
 
 // New builds a server. st may be nil.
 func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error) {
-	s := &Server{log: log, client: newUpstreamClient(), store: st, cfgRev: -1}
+	s := &Server{log: log, client: newUpstreamClient(), routing: router.NewHealth(), store: st, cfgRev: -1}
 	if strings.Contains(cfg.Admin.Token.Value(), "change-me") {
 		log.Warn("the admin token is the sample from the Compose files: anyone who has read them is an owner; set GATEWAY_ADMIN_TOKEN to a random value (openssl rand -hex 32)")
 	}
@@ -134,6 +135,7 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error)
 		s.ready.Store(true)
 	}
 	s.metrics = telemetry.NewMetrics(s.usageWriteErrors, s.snapshotAge, s.bodiesDropped)
+	s.metrics.WatchCircuits(s.circuitStates)
 	s.notifier = alerts.New(log, s.client.Transport, mcpgw.Version, s.metrics.ObserveAlertDelivery)
 	mo := mcpgw.Options{Log: log, Transport: s.client.Transport, Limiter: s.limiter, Metrics: s.metrics, Guard: s.guardTool}
 	if st != nil {
@@ -168,7 +170,7 @@ func (s *Server) Reload(file *config.Config) error {
 
 // build prepares the runtime for a config without installing it.
 func (s *Server) build(cfg *config.Config) (*runtime, error) {
-	r, err := router.New(cfg, s.client)
+	r, err := router.New(cfg, s.client, s.routing)
 	if err != nil {
 		return nil, err
 	}
@@ -555,4 +557,20 @@ func newUpstreamClient() *http.Client {
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: time.Second,
 	}}
+}
+
+// circuitStates is each target's breaker state for metrics.
+func (s *Server) circuitStates() map[string]float64 {
+	out := map[string]float64{}
+	for key, c := range s.routing.States() {
+		switch c.State {
+		case "open":
+			out[key] = 1
+		case "half_open":
+			out[key] = 2
+		default:
+			out[key] = 0
+		}
+	}
+	return out
 }

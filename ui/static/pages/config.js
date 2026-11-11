@@ -278,6 +278,22 @@ function ProviderForm({ spec, onChange }) {
     <${Field} label="Extra headers" setting="providers.headers" hint="Sent with every upstream request, such as an organization id."><${Headers} ...${p} path="headers" /><//>`;
 }
 
+const strategies = {
+  ordered: 'Ordered: first target, then fallbacks',
+  weighted: 'Weighted: split traffic by weight',
+  round_robin: 'Round robin: take turns',
+  least_latency: 'Least latency: fastest first',
+  lowest_cost: 'Lowest cost: cheapest first',
+};
+
+const strategyNotes = {
+  ordered: 'Targets are tried in order: when one fails, the next one answers.',
+  weighted: 'Each request picks a target in proportion to its weight; the others are fallbacks.',
+  round_robin: 'Requests take turns across targets; the others are fallbacks.',
+  least_latency: 'The target with the fastest recent time to first byte goes first.',
+  lowest_cost: 'The cheapest target by its prices goes first.',
+};
+
 // targetPrices are the price fields of a target (docs/modalities.md).
 const targetPrices = [
   ['models.targets.price.input_per_mtok', 'Input, USD per million tokens'],
@@ -307,8 +323,26 @@ function ModelForm({ spec, names, onChange }) {
     const k = path.split('.').pop();
     return html`<${Field} label=${label} setting=${path} key=${k}><input type="number" min="0" step="any" value=${t.price?.[k] ?? ''} onInput=${(e) => setPrice(i, k, e.target.value)} /><//>`;
   };
+  const p = { spec, onChange };
+  const strategy = spec.strategy || 'ordered';
+  const num = (v) => (v === '' ? undefined : Number(v));
   return html`
-    <p class="muted small">Targets are tried in order: when one fails, the next one answers. Empty prices are zero.</p>
+    <div class="row">
+      <${Field} label="Routing strategy" setting="models.strategy" hint="How the first target is chosen. The rest are fallbacks, in the same order (docs/routing.md).">
+        <${Select} ...${p} path="strategy" def="ordered" options=${strategies} />
+      <//>
+      ${(strategy === 'weighted' || strategy === 'round_robin') && html`<${Field} label="Sticky" setting="models.sticky" hint="Keeps a user on one target, which helps provider prompt caches. The user is the request's user or metadata.user_id.">
+        <${Select} ...${p} path="sticky" options=${{ '': 'Off', user: 'Same target per user' }} />
+      <//>`}
+    </div>
+    <div class="row">
+      <${Field} label="Retries per target" setting="models.retries.attempts" hint="Extra tries on the same target after a 429, a 5xx or a timeout, before the next target. At most 5.">
+        <input type="number" min="0" max="5" step="1" value=${spec.retries?.attempts ?? ''} placeholder="0" onInput=${(e) => onChange(put(spec, 'retries.attempts', num(e.target.value)))} />
+      <//>
+      <${Field} label="First retry after" setting="models.retries.backoff" hint="Doubles each retry, with jitter."><${Text} ...${p} path="retries.backoff" placeholder="250ms" /><//>
+      <${Field} label="Longest wait" setting="models.retries.max_backoff" hint="A longer Retry-After moves on instead."><${Text} ...${p} path="retries.max_backoff" placeholder="5s" /><//>
+    </div>
+    <p class="muted small">${strategyNotes[strategy]} Empty prices are zero.</p>
     ${targets.map((t, i) => html`<div class="panel" key=${i}>
       <div class="row">
         <${Field} label=${`Target ${i + 1}: provider`} setting="models.targets.provider">
@@ -318,6 +352,14 @@ function ModelForm({ spec, names, onChange }) {
         <//>
         <${Field} label="Upstream model" setting="models.targets.model"><input required value=${t.model} onInput=${(e) => setTarget(i, { model: e.target.value })} /><//>
       </div>
+      <div class="row">
+        ${strategy === 'weighted' && html`<${Field} label="Weight" setting="models.targets.weight" hint="Share of traffic. Default 1.">
+          <input type="number" min="0" step="1" value=${t.weight ?? ''} placeholder="1" onInput=${(e) => setTarget(i, { weight: num(e.target.value) })} />
+        <//>`}
+        <${Field} label="Timeout to first byte" setting="models.targets.timeout" hint="Moves on when the target has not started answering. Empty: the provider's timeout.">
+          <input value=${t.timeout ?? ''} placeholder="For example 10s" onInput=${(e) => setTarget(i, { timeout: e.target.value || undefined })} />
+        <//>
+      </div>
       <div class="row">${targetPrices.slice(0, 3).map((f) => priceField(t, i, f))}</div>
       <details open=${targetPrices.slice(3).some(([path]) => t.price?.[path.split('.').pop()])}>
         <summary class="small">More prices: images, speech, audio, video, requests, batch discount</summary>
@@ -325,7 +367,7 @@ function ModelForm({ spec, names, onChange }) {
       </details>
       ${targets.length > 1 && html`<button type="button" class="secondary small" onClick=${() => onChange({ ...spec, targets: targets.filter((_, n) => n !== i) })}>Remove target</button>`}
     </div>`)}
-    <button type="button" class="secondary" onClick=${() => onChange({ ...spec, targets: [...targets, { provider: '', model: '' }] })}>Add a fallback target</button>`;
+    <button type="button" class="secondary" onClick=${() => onChange({ ...spec, targets: [...targets, { provider: '', model: '' }] })}>Add a target</button>`;
 }
 
 const stages = ['input', 'output', 'tool_input', 'tool_output'];

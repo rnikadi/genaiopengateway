@@ -136,6 +136,13 @@ models:
       - provider: anthropic
         model: claude-haiku-4-5
         price: {input_per_mtok: 1.00, output_per_mtok: 5.00}
+  chat-balanced:                     # routing strategies, retries and timeouts; see routing.md
+    strategy: weighted               # ordered (default), weighted, round_robin, least_latency, lowest_cost
+    sticky: user                     # same first target per user (weighted and round_robin)
+    retries: {attempts: 2, backoff: 250ms, max_backoff: 5s}
+    targets:
+      - {provider: openai, model: gpt-4.1-mini, weight: 3, timeout: 10s}
+      - {provider: anthropic, model: claude-haiku-4-5, weight: 1}
   image:                             # media endpoints; see modalities.md
     targets:
       - provider: openai
@@ -143,6 +150,9 @@ models:
         price: {per_image: 0.04}     # also per_mchars, per_audio_minute, per_video_second, per_request,
                                      # audio_input_per_mtok, audio_output_per_mtok (realtime),
                                      # batch_discount (0.5 for half price in batches)
+
+routing:
+  circuit_breaker: {failures: 5, cooldown: 30s}   # 0 failures turns it off; see routing.md
 
 keys:                                # static keys; read-only
   - name: local-dev

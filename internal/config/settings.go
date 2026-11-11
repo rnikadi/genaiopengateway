@@ -47,6 +47,7 @@ type Settings struct {
 	Limits      Limits      `yaml:"limits"`
 	BodyLogging BodyLogging `yaml:"body_logging"`
 	Cache       Cache       `yaml:"cache"`
+	Routing     Routing     `yaml:"routing"`
 	Alerts      struct {
 		BudgetThresholds []float64 `yaml:"budget_thresholds"`
 	} `yaml:"alerts"`

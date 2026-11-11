@@ -22,6 +22,14 @@ const sections = [
     ],
   },
   {
+    title: 'Circuit breaker',
+    note: 'Takes a failing model target out of rotation, then lets one request probe it after the cooldown (docs/routing.md).',
+    fields: [
+      { path: 'routing.circuit_breaker.failures', label: 'Open after this many failures in a row', type: 'number', min: '0', step: '1', hint: '0 turns the breaker off.' },
+      { path: 'routing.circuit_breaker.cooldown', label: 'Probe again after', type: 'duration' },
+    ],
+  },
+  {
     title: 'Data and refresh',
     fields: [
       { path: 'store.usage_retention', label: 'Keep usage, MCP calls and guardrail events for', type: 'duration', zero: 'Forever' },
