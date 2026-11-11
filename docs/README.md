@@ -14,6 +14,7 @@
 | [Benchmarks](benchmarks.md) | Added latency and throughput, method and results |
 | [Configuration and data model](config.md) | YAML reference, database tables |
 | [Security and threat model](security.md) | Assets, trust boundaries, STRIDE, defaults |
+| [Compliance guide](compliance.md) | SOC 2, ISO 27001, GDPR and EU AI Act control mapping, records kept, hardening checklist |
 | [Provider adapters](providers.md) | Adapter interface, translation rules, conformance tests |
 | [MCP gateway](mcp.md) | Virtual servers, tool pinning, auth, audit, MCP configuration |
 | [MCP catalog](mcp-catalog.md) | Browsing virtual servers, requesting and approving team access |

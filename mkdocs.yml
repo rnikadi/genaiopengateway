@@ -71,6 +71,7 @@ nav:
       - Alerts: alerts.md
       - Streams: streams.md
       - Security and threat model: security.md
+      - Compliance guide: compliance.md
       - Encryption keys and KMS: secrets.md
   - Admin UI:
       - Admin UI and SSO: admin-ui.md

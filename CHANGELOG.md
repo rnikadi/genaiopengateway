@@ -4,6 +4,17 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-11
+
+Enterprise identity: the v0.11 scope of the [roadmap](docs/roadmap.md). Operators sign in with SAML or OIDC and are provisioned by SCIM, roles are sets of permissions down to one team, Cedar policies add attribute-based rules, teams request MCP servers from a catalog, and tenants are managed as code with `gogctl` or Terraform.
+
+### Upgrade notes
+
+- Migrations 0017 to 0020 add the SCIM, SAML assertion, Cedar policy and MCP access request tables. They run at startup, as before.
+- Built-in roles are unchanged, but `GET /admin/v1/me` now lists each grant's permissions, and role mappings can name a `team`.
+- `gogctl config import` reports `N changes applied` instead of `N objects imported`, and exports gain an `orgs` section. Files without it import as before.
+- The SAML implementation uses gosaml2. SHA-1 signatures are refused, so identity providers must sign with SHA-256 or better.
+
 ### Added
 
 - Custom and per-team roles ([docs/roles.md](docs/roles.md), ADR 0032). Roles are now sets of permissions, such as `keys.write` or `usage.read`. `sso.custom_roles` defines new ones, and a role mapping with a `team` grants a role for one team: its keys, credentials, usage and playground, but not its policy. Both are editable on the Settings page. `GET /admin/v1/me` lists each grant's permissions.
@@ -12,6 +23,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - Cedar policies per organization ([docs/cedar.md](docs/cedar.md), ADR 0009): attribute-based rules on models and MCP tools by team, key, end user, time and client address, evaluated in-process with cedar-go. Owners edit them on the organization page, every save is a version, and anyone who can read the organization can check a request against them. A denied model request gets 403 `policy_denied` naming the policy; a denied tool call gets a tool error. Migration 0019 adds the table.
 - An MCP catalog with access requests ([docs/mcp-catalog.md](docs/mcp-catalog.md)). The MCP page lists the virtual servers with a team's access to each; anyone who can read a team can request a server for it, and operators who manage the organization's teams approve, which adds the server to the team's `allowed_mcp_servers`, or deny with a note. Requests and decisions are audited. Migration 0020 adds the table.
 - Declarative tenants in `gogctl config export` and `import` ([docs/gogctl.md](docs/gogctl.md#configuration-as-code)): organizations by name with their policies, Cedar policies and teams. Import creates what is missing and updates what differs, and `-prune` deletes what the file's sections leave out. Importing the same file twice changes nothing. Exports now include the `orgs` section, and import reports `N changes applied` instead of `N objects imported`.
+- A compliance guide ([docs/compliance.md](docs/compliance.md)) mapping the gateway's controls to SOC 2, ISO 27001, GDPR, the EU AI Act, HIPAA and PCI DSS, with the records it keeps, a hardening checklist and answers to common questionnaire items.
 - A Terraform provider ([docs/terraform.md](docs/terraform.md)) in `terraform/`, with resources for organizations, teams, keys, Cedar policies and stored configuration objects, plus an organization data source. Acceptance tests run it against a real gateway in CI, and release archives include its binary.
 
 ## [0.10.0] - 2026-11-11
@@ -166,7 +178,8 @@ The first release: an OpenAI-compatible gateway with tenants, keys, limits, budg
 - Config reload on `SIGHUP` and graceful shutdown.
 - Signed binaries and images with SBOMs.
 
-[Unreleased]: https://github.com/rnikadi/genaiopengateway/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/rnikadi/genaiopengateway/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/rnikadi/genaiopengateway/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/rnikadi/genaiopengateway/compare/v0.8.0...v0.10.0
 [0.8.0]: https://github.com/rnikadi/genaiopengateway/compare/v0.3.0...v0.8.0
 [0.3.0]: https://github.com/rnikadi/genaiopengateway/compare/v0.2.0...v0.3.0
