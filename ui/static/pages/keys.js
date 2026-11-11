@@ -41,7 +41,7 @@ export function Keys() {
     close();
     state.reload();
   };
-  const writable = Object.values(teams.data || {}).filter((t) => s.canWrite(t.org_id));
+  const writable = Object.values(teams.data || {}).filter((t) => s.can('keys.write', t.org_id, t.id));
 
   return html`
     <${PageHeader} title="Virtual keys" sub="Applications use these keys instead of provider credentials, which stay in the gateway. Each key belongs to a team and can narrow its access and limits.">
@@ -74,7 +74,7 @@ export function Keys() {
         { label: 'Status', render: keyStatus },
         { label: 'Last used', render: (k) => (k.last_used_at ? when(k.last_used_at) : html`<span class="muted">Never</span>`) },
         { label: 'Expires', render: (k) => (k.expires_at ? day(k.expires_at) : html`<span class="muted">Never</span>`) },
-        { label: '', render: (k) => html`<${KeyActions} k=${k} canWrite=${s.canWrite(k.org_id)} setModal=${setModal} />` },
+        { label: '', render: (k) => html`<${KeyActions} k=${k} canWrite=${s.can('keys.write', k.org_id, k.team_id)} setModal=${setModal} />` },
       ]}
     />`}<//>
     ${modal?.kind === 'create' && html`<${CreateKey} teams=${writable} onClose=${close} onCreated=${(k) => { setModal({ kind: 'secret', key: k, title: 'Key created' }); state.reload(); }} />`}

@@ -311,6 +311,7 @@ func (s *Server) settings(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	out["fields"], out["stored"], out["startup"], out["detectors"] = fields, stored, config.StartupPaths, redact.Builtins
+	out["permissions"] = config.Permissions
 	writeJSON(w, http.StatusOK, out)
 	return nil
 }

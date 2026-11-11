@@ -105,6 +105,14 @@ type tenants struct {
 	teams map[string]map[string]*store.Team
 }
 
+// team finds a team of an organization by name or id; it is nil-safe.
+func (t *tenants) team(orgID, nameOrID string) *store.Team {
+	if t == nil || nameOrID == "" {
+		return nil
+	}
+	return t.teams[orgID][nameOrID]
+}
+
 // oauthPrincipal maps a token to the configured organization and to the
 // first team, named or identified by the team claim, that exists in it.
 // Limits and policies apply at organization and team level.
@@ -228,7 +236,7 @@ func (s *Server) listMCPCalls(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	q := r.URL.Query()
-	if err := s.readScope(r, q.Get("org_id"), q.Get("team_id"), q.Get("key_id")); err != nil {
+	if err := s.readScope(r, config.PermUsageRead, q.Get("org_id"), q.Get("team_id"), q.Get("key_id")); err != nil {
 		return err
 	}
 	cq := store.MCPCallQuery{OrgID: q.Get("org_id"), TeamID: q.Get("team_id"), KeyID: q.Get("key_id"), Server: q.Get("server")}

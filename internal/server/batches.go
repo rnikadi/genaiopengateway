@@ -724,7 +724,7 @@ func (s *Server) listAdminBatches(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	q := r.URL.Query()
-	if err := s.readScope(r, q.Get("org_id"), q.Get("team_id"), ""); err != nil {
+	if err := s.readScope(r, config.PermUsageRead, q.Get("org_id"), q.Get("team_id"), ""); err != nil {
 		return err
 	}
 	items, more, err := s.store.ListBatches(r.Context(), store.BatchQuery{OrgID: q.Get("org_id"), TeamID: q.Get("team_id"), Status: q.Get("status")}, pg)
@@ -742,10 +742,10 @@ func (s *Server) cancelAdminBatch(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return err
 	}
-	if !operatorFrom(ctx).canRead(b.OrgID) {
+	if !operatorFrom(ctx).can(config.PermUsageRead, b.OrgID, b.TeamID) {
 		return store.ErrNotFound
 	}
-	if err := write(r, b.OrgID); err != nil {
+	if err := allow(r, config.PermBatchesWrite, b.OrgID, b.TeamID); err != nil {
 		return err
 	}
 	obj, err := s.fetchBatch(ctx, b, "/cancel")
@@ -770,7 +770,7 @@ func (s *Server) listAdminVideos(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	q := r.URL.Query()
-	if err := s.readScope(r, q.Get("org_id"), q.Get("team_id"), ""); err != nil {
+	if err := s.readScope(r, config.PermUsageRead, q.Get("org_id"), q.Get("team_id"), ""); err != nil {
 		return err
 	}
 	items, more, err := s.store.ListVideoJobs(r.Context(), q.Get("org_id"), q.Get("team_id"), "", pg)

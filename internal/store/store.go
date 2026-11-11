@@ -483,10 +483,12 @@ func (s *Store) ListKeys(ctx context.Context, teamID string, p Page) ([]*Key, bo
 
 // KeyFilter selects keys across teams. Empty fields match everything.
 type KeyFilter struct {
-	// OrgIDs limits the keys to these organizations; nil means all.
-	OrgIDs []string
-	OrgID  string
-	TeamID string
+	// OrgIDs and TeamIDs limit the keys to these organizations or teams;
+	// both nil means all.
+	OrgIDs  []string
+	TeamIDs []string
+	OrgID   string
+	TeamID  string
 	// Query matches the name, prefix or owner, ignoring case.
 	Query string
 	// Status is active, expiring (within 7 days), expired, revoked or
@@ -499,15 +501,26 @@ var KeyStatuses = []string{"active", "expiring", "expired", "revoked", "rotating
 
 // ListAllKeys returns a page of keys across teams, including revoked ones.
 func (s *Store) ListAllKeys(ctx context.Context, f KeyFilter, p Page) ([]*Key, bool, error) {
-	if f.OrgIDs != nil && len(f.OrgIDs) == 0 {
-		return nil, false, nil
-	}
 	where, args := []string{"id > ?"}, []any{p.After}
-	if f.OrgIDs != nil {
-		where = append(where, "org_id IN (?"+strings.Repeat(", ?", len(f.OrgIDs)-1)+")")
-		for _, o := range f.OrgIDs {
-			args = append(args, o)
+	if f.OrgIDs != nil || f.TeamIDs != nil {
+		var scope []string
+		for _, c := range []struct {
+			col string
+			ids []string
+		}{{"org_id", f.OrgIDs}, {"team_id", f.TeamIDs}} {
+			col, ids := c.col, c.ids
+			if len(ids) == 0 {
+				continue
+			}
+			scope = append(scope, col+" IN (?"+strings.Repeat(", ?", len(ids)-1)+")")
+			for _, id := range ids {
+				args = append(args, id)
+			}
 		}
+		if len(scope) == 0 {
+			return nil, false, nil
+		}
+		where = append(where, "("+strings.Join(scope, " OR ")+")")
 	}
 	if f.OrgID != "" {
 		where, args = append(where, "org_id = ?"), append(args, f.OrgID)

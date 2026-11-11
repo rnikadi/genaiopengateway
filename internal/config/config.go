@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -328,6 +329,15 @@ type SSO struct {
 	OIDC       *OIDC         `yaml:"oidc"`
 	SessionTTL Duration      `yaml:"session_ttl"`
 	Roles      []RoleMapping `yaml:"roles"`
+	// CustomRoles are named sets of permissions that role mappings can
+	// grant besides the built-in roles (docs/roles.md).
+	CustomRoles map[string]CustomRole `yaml:"custom_roles"`
+}
+
+// CustomRole is a named set of permissions.
+type CustomRole struct {
+	Description string   `yaml:"description" json:"description,omitempty"`
+	Permissions []string `yaml:"permissions" json:"permissions"`
 }
 
 // OIDC is the identity provider operators sign in with.
@@ -347,13 +357,58 @@ const (
 	RoleViewer = "viewer"
 )
 
+// Permissions an operator role can hold, each over the organizations or
+// the team it is granted for (docs/roles.md). Owners hold them all, and
+// also manage the gateway itself.
+const (
+	PermOrgRead          = "org.read"
+	PermTeamsRead        = "teams.read"
+	PermTeamsWrite       = "teams.write"
+	PermKeysRead         = "keys.read"
+	PermKeysWrite        = "keys.write"
+	PermCredentialsWrite = "credentials.write"
+	PermUsageRead        = "usage.read"
+	PermAuditRead        = "audit.read"
+	PermAlertsRead       = "alerts.read"
+	PermBodiesRead       = "bodies.read"
+	PermBatchesWrite     = "batches.write"
+	PermCacheClear       = "cache.clear"
+	PermPlayground       = "playground.use"
+)
+
+// Permissions lists every permission, in the order the docs give them.
+var Permissions = []string{
+	PermOrgRead, PermTeamsRead, PermTeamsWrite, PermKeysRead, PermKeysWrite, PermCredentialsWrite,
+	PermUsageRead, PermAuditRead, PermAlertsRead, PermBodiesRead, PermBatchesWrite, PermCacheClear, PermPlayground,
+}
+
+// viewerPermissions are what the viewer role holds: everything an
+// organization's admin reads, except logged bodies.
+var viewerPermissions = []string{PermOrgRead, PermTeamsRead, PermKeysRead, PermUsageRead, PermAuditRead, PermAlertsRead}
+
+// RolePermissions returns what a role may do, or nil for an unknown role.
+func (s *SSO) RolePermissions(role string) []string {
+	switch role {
+	case RoleOwner, RoleAdmin:
+		return Permissions
+	case RoleViewer:
+		return viewerPermissions
+	}
+	if r, ok := s.CustomRoles[role]; ok {
+		return r.Permissions
+	}
+	return nil
+}
+
 // RoleMapping grants a role to the members of a group, or to one email,
-// gateway-wide or for one organization (named or by id).
+// gateway-wide, for one organization (named or by id), or for one team
+// of that organization.
 type RoleMapping struct {
 	Group string `yaml:"group"`
 	Email string `yaml:"email"`
 	Role  string `yaml:"role"`
 	Org   string `yaml:"org"`
+	Team  string `yaml:"team"`
 }
 
 // UI configures the admin UI. It is on whenever the admin API is.
@@ -1151,8 +1206,26 @@ func (c *Config) validateSSO(add func(string, ...any)) {
 			add("sso.roles[%d]: owner is gateway-wide and takes no org", i)
 		case r.Role == RoleAdmin && r.Org == "":
 			add("sso.roles[%d]: admin needs an org", i)
-		case r.Role != RoleOwner && r.Role != RoleAdmin && r.Role != RoleViewer:
-			add("sso.roles[%d]: role must be owner, admin or viewer, got %q", i, r.Role)
+		case r.Team != "" && r.Org == "":
+			add("sso.roles[%d]: team needs an org", i)
+		case s.RolePermissions(r.Role) == nil:
+			add("sso.roles[%d]: role must be owner, admin, viewer or one of sso.custom_roles, got %q", i, r.Role)
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(s.CustomRoles)) {
+		r := s.CustomRoles[name]
+		switch {
+		case name == RoleOwner || name == RoleAdmin || name == RoleViewer:
+			add("sso.custom_roles.%s: the name is a built-in role", name)
+		case !mcpName.MatchString(name):
+			add("sso.custom_roles.%s: names are lowercase letters, digits, - and _", name)
+		case len(r.Permissions) == 0:
+			add("sso.custom_roles.%s: permissions are required", name)
+		}
+		for _, p := range r.Permissions {
+			if !slices.Contains(Permissions, p) {
+				add("sso.custom_roles.%s: unknown permission %q; permissions are %s", name, p, strings.Join(Permissions, ", "))
+			}
 		}
 	}
 }

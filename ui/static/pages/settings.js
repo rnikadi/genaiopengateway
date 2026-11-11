@@ -73,7 +73,8 @@ const sections = [
       { path: 'sso.oidc.groups_claim', label: 'Groups claim', type: 'text' },
       { path: 'sso.oidc.scopes', label: 'Scopes', type: 'list', hint: 'One per line.' },
       { path: 'sso.session_ttl', label: 'Session length', type: 'duration' },
-      { path: 'sso.roles', label: 'Roles', type: 'roles' },
+      { path: 'sso.custom_roles', label: 'Custom roles', type: 'customRoles', hint: 'Named sets of permissions that role mappings can grant besides owner, admin and viewer (docs/roles.md).' },
+      { path: 'sso.roles', label: 'Role mappings', type: 'roles', hint: 'A role for every organization, one organization, or one team of it.' },
     ],
   },
   {
@@ -107,7 +108,7 @@ const bytesText = (n) => {
 // show formats a value for reading.
 function show(f, v) {
   if (v === null || v === undefined || (Array.isArray(v) && !v.length)) {
-    return f.type === 'detectors' ? 'All' : f.type === 'roles' ? 'None' : f.zero || 'Not set';
+    return f.type === 'detectors' ? 'All' : f.type === 'roles' || f.type === 'customRoles' ? 'None' : f.zero || 'Not set';
   }
   switch (f.type) {
     case 'bytes': return bytesText(v);
@@ -116,6 +117,10 @@ function show(f, v) {
     case 'percents': return v.map((x) => `${Math.round(x * 100)}%`).join(', ');
     case 'duration': return v || f.zero || 'Not set';
     case 'roles': return `${v.length} mapping${v.length === 1 ? '' : 's'}`;
+    case 'customRoles': {
+      const n = Object.keys(v).length;
+      return n ? `${n} role${n === 1 ? '' : 's'}` : 'None';
+    }
     case 'list': case 'detectors': return v.join(', ');
   }
   return String(v);
@@ -130,6 +135,7 @@ function input(f, v) {
     case 'detectors': return v || [];
     case 'percents': return v ? (v.length ? v.map((x) => Math.round(x * 100)).join(', ') : 'off') : '';
     case 'roles': return v || [];
+    case 'customRoles': return Object.entries(v || {}).map(([name, r]) => ({ name, description: r.description || '', permissions: r.permissions || [] }));
     case 'secret': return '';
   }
   return v ?? '';
@@ -150,6 +156,8 @@ function parse(f, raw) {
       return xs;
     }
     case 'roles': return raw.map((r) => Object.fromEntries(Object.entries(r).filter(([, v]) => v)));
+    case 'customRoles':
+      return Object.fromEntries(raw.filter((r) => r.name.trim()).map((r) => [r.name.trim(), { ...(r.description.trim() && { description: r.description.trim() }), permissions: r.permissions }]));
     case 'secret': return raw === '' ? undefined : raw;
   }
   return raw.trim() === '' ? undefined : raw.trim();
@@ -196,12 +204,12 @@ export function Settings() {
     <${Loading} state=${state}>${(d) => {
       const fields = Object.fromEntries(d.fields.map((f) => [f.path, f]));
       return html`
-        ${sections.map((s) => html`<${Section} key=${s.title} section=${s} fields=${fields} stored=${d.stored} detectors=${d.detectors} onSaved=${state.reload} />`)}
+        ${sections.map((s) => html`<${Section} key=${s.title} section=${s} fields=${fields} stored=${d.stored} detectors=${d.detectors} permissions=${d.permissions || []} onSaved=${state.reload} />`)}
         <${Startup} d=${d} />`;
     }}<//>`;
 }
 
-function Section({ section, fields, stored, detectors, onSaved }) {
+function Section({ section, fields, stored, detectors, permissions, onSaved }) {
   const [draft, setDraft] = useState({});
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -235,7 +243,8 @@ function Section({ section, fields, stored, detectors, onSaved }) {
     ${section.note && html`<p class="muted small">${section.note}</p>`}
     <form class="form" onSubmit=${submit}>
       <${ErrorBox} error=${error} />
-      ${section.fields.map((f) => html`<${Setting} key=${f.path} f=${f} info=${fields[f.path] || {}} detectors=${detectors}
+      ${section.fields.map((f) => html`<${Setting} key=${f.path} f=${f} info=${fields[f.path] || {}} detectors=${detectors} permissions=${permissions}
+        customRoles=${('sso.custom_roles' in draft ? draft['sso.custom_roles'] : input({ type: 'customRoles' }, fields['sso.custom_roles']?.value)).map((r) => r.name.trim()).filter(Boolean)}
         value=${f.path in draft ? draft[f.path] : input(f, fields[f.path]?.value)}
         onChange=${(v) => setDraft({ ...draft, [f.path]: v })}
         onReset=${() => write((spec) => deletePath(spec, f.path))} />`)}
@@ -247,7 +256,7 @@ function Section({ section, fields, stored, detectors, onSaved }) {
   </section>`;
 }
 
-function Setting({ f, info, value, detectors, onChange, onReset }) {
+function Setting({ f, info, value, detectors, permissions, customRoles, onChange, onReset }) {
   const { catalog } = useSession();
   const set = (e) => onChange(e.target.value);
   let control;
@@ -279,7 +288,10 @@ function Setting({ f, info, value, detectors, onChange, onReset }) {
       </label>`)}</div>`;
       break;
     case 'roles':
-      control = html`<${RolesEditor} roles=${value} onChange=${onChange} />`;
+      control = html`<${RolesEditor} roles=${value} customRoles=${customRoles} onChange=${onChange} />`;
+      break;
+    case 'customRoles':
+      control = html`<${CustomRolesEditor} roles=${value} permissions=${permissions} onChange=${onChange} />`;
       break;
     default:
       control = html`<input value=${value} placeholder=${f.type === 'duration' ? (f.zero ? `Empty: ${f.zero.toLowerCase()}` : 'For example 30s, 5m, 24h or 7d') : ''} onInput=${set} />`;
@@ -294,22 +306,46 @@ function Setting({ f, info, value, detectors, onChange, onReset }) {
   </div>`;
 }
 
-function RolesEditor({ roles, onChange }) {
+function RolesEditor({ roles, customRoles, onChange }) {
   const set = (i, k, v) => onChange(roles.map((r, n) => (n === i ? { ...r, [k]: v } : r)));
   return html`<div>
     ${roles.length > 0 && html`<div class="table-wrap"><table>
-      <thead><tr><th>Group</th><th>or email</th><th>Role</th><th>Organization</th><th></th></tr></thead>
+      <thead><tr><th>Group</th><th>or email</th><th>Role</th><th>Organization</th><th>Team</th><th></th></tr></thead>
       <tbody>${roles.map((r, i) => html`<tr key=${i}>
         <td data-setting="sso.roles.group"><input value=${r.group || ''} onInput=${(e) => set(i, 'group', e.target.value)} /></td>
         <td data-setting="sso.roles.email"><input value=${r.email || ''} onInput=${(e) => set(i, 'email', e.target.value)} /></td>
         <td data-setting="sso.roles.role"><select value=${r.role || 'viewer'} onChange=${(e) => set(i, 'role', e.target.value)}>
           <option value="owner">Owner</option><option value="admin">Admin</option><option value="viewer">Viewer</option>
+          ${[...new Set([...customRoles, ...(r.role && !['owner', 'admin', 'viewer'].includes(r.role) ? [r.role] : [])])].map((n) => html`<option key=${n} value=${n}>${n}</option>`)}
         </select></td>
         <td data-setting="sso.roles.org"><input value=${r.org || ''} placeholder="All" onInput=${(e) => set(i, 'org', e.target.value)} /></td>
+        <td data-setting="sso.roles.team"><input value=${r.team || ''} placeholder="All" disabled=${!r.org} onInput=${(e) => set(i, 'team', e.target.value)} /></td>
         <td><button type="button" class="link danger" onClick=${() => onChange(roles.filter((_, n) => n !== i))}>Remove</button></td>
       </tr>`)}</tbody>
     </table></div>`}
     <button type="button" class="secondary" onClick=${() => onChange([...roles, { group: '', role: 'viewer' }])}>Add a role mapping</button>
+  </div>`;
+}
+
+// CustomRolesEditor edits named sets of permissions (docs/roles.md).
+function CustomRolesEditor({ roles, permissions, onChange }) {
+  const set = (i, k, v) => onChange(roles.map((r, n) => (n === i ? { ...r, [k]: v } : r)));
+  const toggle = (i, p) => {
+    const have = roles[i].permissions;
+    set(i, 'permissions', have.includes(p) ? have.filter((x) => x !== p) : [...have, p]);
+  };
+  return html`<div>
+    ${roles.map((r, i) => html`<fieldset class="custom-role" key=${i}>
+      <div class="row">
+        <label class="field"><span>Role</span><input value=${r.name} placeholder="billing" onInput=${(e) => set(i, 'name', e.target.value)} /></label>
+        <label class="field" data-setting="sso.custom_roles.description"><span>Description</span><input value=${r.description} onInput=${(e) => set(i, 'description', e.target.value)} /></label>
+        <button type="button" class="link danger" onClick=${() => onChange(roles.filter((_, n) => n !== i))}>Remove</button>
+      </div>
+      <div class="checks" data-setting="sso.custom_roles.permissions">${permissions.map((p) => html`<label class="check" key=${p}>
+        <input type="checkbox" checked=${r.permissions.includes(p)} onChange=${() => toggle(i, p)} /> <code>${p}</code>
+      </label>`)}</div>
+    </fieldset>`)}
+    <button type="button" class="secondary" onClick=${() => onChange([...roles, { name: '', description: '', permissions: [] }])}>Add a custom role</button>
   </div>`;
 }
 

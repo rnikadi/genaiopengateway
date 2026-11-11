@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/rnikadi/genaiopengateway/internal/auth"
+	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/policy"
 	"github.com/rnikadi/genaiopengateway/internal/provider"
 	"github.com/rnikadi/genaiopengateway/internal/store"
@@ -45,7 +46,7 @@ func (s *Server) playground(ep provider.Endpoint) func(http.ResponseWriter, *htt
 		if err != nil {
 			return err
 		}
-		if err := write(r, team.OrgID); err != nil {
+		if err := allow(r, config.PermPlayground, team.OrgID, team.ID); err != nil {
 			return err
 		}
 		org, err := s.store.GetOrg(ctx, team.OrgID)

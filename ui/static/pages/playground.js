@@ -58,7 +58,8 @@ function targetPrice(catalog, model, target) {
 // the gateway's own request path (docs/playground.md).
 export function Playground() {
   const s = useSession();
-  const writable = Object.keys(s.orgNames).filter((id) => s.canWrite(id));
+  const usable = (orgID, teamID) => s.can('playground.use', orgID, teamID);
+  const writable = Object.keys(s.orgNames).filter((id) => usable(id) || (s.me.operator.grants || []).some((g) => g.org_id === id && g.team_id && usable(id, g.team_id)));
   const [org, setOrg] = useState(writable[0] || '');
   const [teams, setTeams] = useState([]);
   const [team, setTeam] = useState('');
@@ -77,8 +78,9 @@ export function Playground() {
     Promise.all([api('GET', `/admin/v1/orgs/${encodeURIComponent(org)}`), api('GET', `/admin/v1/orgs/${encodeURIComponent(org)}/teams?limit=500`)]).then(
       ([o, t]) => {
         if (!current) return;
-        setTeams(t.data);
-        setTeam(t.data[0]?.id || '');
+        const allowed = t.data.filter((x) => usable(org, x.id));
+        setTeams(allowed);
+        setTeam(allowed[0]?.id || '');
         setPolicy({ org: o });
       },
       (err) => current && setError(err),

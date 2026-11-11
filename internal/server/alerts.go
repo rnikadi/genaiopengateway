@@ -232,7 +232,7 @@ func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	q := r.URL.Query()
-	if err := read(r, q.Get("org_id")); err != nil {
+	if err := allow(r, config.PermAlertsRead, q.Get("org_id"), ""); err != nil {
 		return err
 	}
 	items, more, err := s.store.ListAlerts(r.Context(), q.Get("org_id"), q.Get("event"), pg)

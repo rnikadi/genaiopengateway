@@ -51,7 +51,7 @@ const nav = [
   ['guardrails', '#/guardrails', 'Guardrails'],
   ['mcp', '#/mcp', 'MCP'],
   ['models', '#/models', 'Models'],
-  ['playground', '#/playground', 'Playground', 'writer'],
+  ['playground', '#/playground', 'Playground', 'playground.use'],
   ['providers', '#/providers', 'Providers'],
   ['alerts', '#/alerts', 'Alerts'],
   ['audit', '#/audit', 'Audit log'],
@@ -133,8 +133,8 @@ function Shell({ session, onSignOut }) {
   }
   const op = session.me.operator;
   const owner = op.grants.some((g) => g.role === 'owner');
-  // owner pages need the owner role; writer pages, owner or an organization's admin.
-  const may = (role) => !role || owner || (role === 'writer' && op.grants.some((g) => g.role === 'admin'));
+  // owner pages need the owner role; others, a grant with that permission.
+  const may = (need) => !need || owner || (need !== 'owner' && op.grants.some((g) => (g.permissions || []).includes(need)));
   return html`<${Session.Provider} value=${session}>
     <div class="layout">
       <aside class="sidebar">
@@ -159,7 +159,11 @@ function Shell({ session, onSignOut }) {
 
 function roleLabel(grants, orgNames) {
   return grants
-    .map((g) => (g.org_id ? `${g.role} of ${orgNames[g.org_id] || g.org_id}` : g.role === 'owner' ? 'owner' : `${g.role} of all organizations`))
+    .map((g) => {
+      const org = orgNames[g.org_id] || g.org_id;
+      if (g.team_id) return `${g.role} of ${g.team_name || 'a team'} in ${org}`;
+      return g.org_id ? `${g.role} of ${org}` : g.role === 'owner' ? 'owner' : `${g.role} of all organizations`;
+    })
     .join(', ');
 }
 

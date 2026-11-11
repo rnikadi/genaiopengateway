@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Added
+
+- Custom and per-team roles ([docs/roles.md](docs/roles.md), ADR 0032). Roles are now sets of permissions, such as `keys.write` or `usage.read`. `sso.custom_roles` defines new ones, and a role mapping with a `team` grants a role for one team: its keys, credentials, usage and playground, but not its policy. Both are editable on the Settings page. `GET /admin/v1/me` lists each grant's permissions.
+
 ## [0.10.0] - 2026-11-11
 
 Easy to use and reliable at scale: the v0.9 and v0.10 scope of the [roadmap](docs/roadmap.md). A new user gets a first completion without writing YAML, and a provider that fails mid-load costs no requests when another target exists.
