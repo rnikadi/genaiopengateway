@@ -262,3 +262,23 @@ func TestFileObjectsFromTheUI(t *testing.T) {
 		t.Errorf("audit = %v", actions)
 	}
 }
+
+func TestFileStdioServerHidesEnv(t *testing.T) {
+	e := newAdminEnv(t, `mcp: {servers: {local: {command: [mcp-local], env: {TOKEN: very-secret}}}}`)
+	var out struct{ Data []configEntry }
+	e.call("GET", "/admin/v1/config", "", 200, &out)
+	for _, c := range out.Data {
+		if c.Kind == "mcp_servers" && c.Name == "local" {
+			env, _ := c.Spec["env"].(map[string]any)
+			if env["TOKEN"] != "set" {
+				t.Fatalf("env = %v", c.Spec["env"])
+			}
+			// Saving it from the UI is refused: commands stay in the file.
+			if rec := do(e.h, "PUT", "/admin/v1/config/mcp_servers/local", adminToken, `{"command": ["mcp-local"], "env": {"TOKEN": "set"}}`); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "only in the config file") {
+				t.Fatalf("PUT = %d %s", rec.Code, rec.Body)
+			}
+			return
+		}
+	}
+	t.Fatal("the file's server is not listed")
+}

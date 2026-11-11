@@ -101,9 +101,14 @@ func (u *upstream) connect(ctx context.Context) (*mcp.ClientSession, error) {
 	if u.session != nil {
 		return u.session, nil
 	}
-	// The gateway only sends requests, so it needs no stream for
-	// server-initiated messages.
-	t := &mcp.StreamableClientTransport{Endpoint: u.cfg.URL, HTTPClient: u.http, DisableStandaloneSSE: true, MaxRetries: -1}
+	var t mcp.Transport
+	if len(u.cfg.Command) > 0 {
+		t = &mcp.CommandTransport{Command: u.command()}
+	} else {
+		// The gateway only sends requests, so it needs no stream for
+		// server-initiated messages.
+		t = &mcp.StreamableClientTransport{Endpoint: u.cfg.URL, HTTPClient: u.http, DisableStandaloneSSE: true, MaxRetries: -1}
+	}
 	cs, err := u.client.Connect(ctx, t, nil)
 	if err != nil {
 		return nil, err

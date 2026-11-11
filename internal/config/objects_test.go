@@ -99,3 +99,24 @@ func TestCheckSpec(t *testing.T) {
 		t.Error("IsSecretPath")
 	}
 }
+
+func TestStoredMCPServerCannotRunCommands(t *testing.T) {
+	t.Setenv("OBJ_TEST_KEY", "sk-file")
+	for _, field := range []string{"command", "env", "dir"} {
+		spec := `{"url":"https://h/mcp","` + field + `":["x"]}`
+		if field != "command" {
+			spec = `{"command":["x"],"` + field + `":{}}`
+		}
+		_, err := ParseWith([]byte(objectsBase), []Object{{KindMCPServers, "local", []byte(spec)}})
+		if err == nil || !strings.Contains(err.Error(), "only in the config file") {
+			t.Errorf("%s: %v", field, err)
+		}
+	}
+	c, err := Parse([]byte(`mcp: {servers: {local: {command: [mcp-x, --flag], env: {TOKEN: t}, dir: /srv}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := c.MCP.Servers["local"]; len(s.Command) != 2 || s.Env["TOKEN"] != "t" || s.Dir != "/srv" {
+		t.Fatalf("%+v", s)
+	}
+}

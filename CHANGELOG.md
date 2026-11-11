@@ -11,6 +11,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - Veo video jobs on `gemini` targets ([docs/modalities.md](docs/modalities.md#veo-on-the-gemini-api)): create, retrieve, content and delete through OpenAI's `videos` endpoints, metered by the second.
 - Nova Reel video jobs on `bedrock` targets with the new `s3_output_uri` setting ([docs/modalities.md](docs/modalities.md#nova-reel-on-bedrock)), including multi-shot videos up to two minutes. Content is read from S3 with SigV4.
 - A Gemini Live relay ([docs/modalities.md](docs/modalities.md#gemini-live)) at Google's BidiGenerateContent path, so Google's SDKs work unchanged: the setup's model is a virtual model, the session goes to a `gemini` target's Live model, and each turn's usage is charged with audio prices. The catalog gains the `live` kind.
+- Hosted stdio MCP servers ([docs/mcp.md](docs/mcp.md#hosted-stdio-servers)): an MCP server with `command` instead of `url` runs as a child process with only `PATH`, `HOME` and its own `env`, restarts when it exits, and logs its stderr. It can be set only in the config file; stored objects with `command`, `env` or `dir` are refused.
 
 ## [0.11.0] - 2026-11-11
 

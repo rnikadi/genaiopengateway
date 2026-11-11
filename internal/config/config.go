@@ -678,7 +678,14 @@ type OAuth struct {
 
 // MCPServer is an upstream MCP server reached over Streamable HTTP.
 type MCPServer struct {
-	URL      string            `yaml:"url"`
+	URL string `yaml:"url"`
+	// Command runs a stdio MCP server as a child process instead of
+	// calling URL (docs/mcp.md#hosted-stdio-servers). It sees only Env,
+	// PATH and HOME, and runs in Dir. Set only in the config file.
+	Command []string          `yaml:"command"`
+	Env     map[string]Secret `yaml:"env"`
+	Dir     string            `yaml:"dir"`
+
 	Headers  map[string]Secret `yaml:"headers"`
 	Timeout  Duration          `yaml:"timeout"`
 	PinTools PinMode           `yaml:"pin_tools"`
@@ -1378,8 +1385,22 @@ func (c *Config) validateMCP(add func(string, ...any)) {
 		if !mcpName.MatchString(name) {
 			add("mcp server %q: names use lowercase letters, digits, - and _", name)
 		}
-		if !httpURL(s.URL) {
+		switch {
+		case len(s.Command) > 0:
+			if s.URL != "" {
+				add("mcp server %q: set url or command, not both", name)
+			}
+			if s.Command[0] == "" {
+				add("mcp server %q: command must name a program", name)
+			}
+			if len(s.Headers) > 0 || s.UserAuth != nil {
+				add("mcp server %q: headers and user_auth are for url servers; a command server takes env", name)
+			}
+		case !httpURL(s.URL):
 			add("mcp server %q: url must be an http or https URL", name)
+		}
+		if len(s.Command) == 0 && (len(s.Env) > 0 || s.Dir != "") {
+			add("mcp server %q: env and dir are for command servers", name)
 		}
 		if s.Timeout <= 0 {
 			s.Timeout = Duration(DefaultMCPTimeout)

@@ -372,7 +372,7 @@ function CustomRolesEditor({ roles, permissions, onChange }) {
 function Startup({ d }) {
   return html`
     <section class="panel"><h2>Startup settings</h2>
-      <p class="muted small">Read when the gateway starts, so they stay in the configuration file and environment: ${d.startup.map((p, i) => html`${i ? ', ' : ''}<code>${p}</code>`)}.</p>
+      <p class="muted small">Read when the gateway starts, or able to run programs on its host, so they stay in the configuration file and environment: ${d.startup.map((p, i) => html`${i ? ', ' : ''}<code>${p}</code>`)}.</p>
       <${KV} items=${[
         ['Version', d.version],
         ['TLS on the gateway', d.tls ? 'Yes' : 'No'],

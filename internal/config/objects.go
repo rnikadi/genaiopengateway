@@ -42,7 +42,7 @@ var kindPath = map[string][]string{
 var SecretFields = map[string][][]string{
 	KindProviders:     {{"api_key"}},
 	KindGuardrails:    {{"url"}, {"secret"}},
-	KindMCPServers:    {{"headers", "*"}, {"user_auth", "client_secret"}},
+	KindMCPServers:    {{"headers", "*"}, {"env", "*"}, {"user_auth", "client_secret"}},
 	KindAlertWebhooks: {{"url"}, {"secret"}},
 	KindStreams:       {{"url"}, {"secret"}, {"headers", "*"}},
 	KindSettings:      {{"sso", "oidc", "client_secret"}},
@@ -129,6 +129,16 @@ func addObject(root *yaml.Node, o Object) error {
 			return fmt.Errorf("%s %q: the spec must be a JSON object", o.Kind, o.Name)
 		}
 		value = spec.Content[0]
+		if o.Kind == KindMCPServers {
+			for i := 0; i+1 < len(value.Content); i += 2 {
+				switch value.Content[i].Value {
+				case "command", "env", "dir":
+					// A stored command would let the admin API run
+					// programs on the gateway's host.
+					return fmt.Errorf("%s %q: command, env and dir can be set only in the config file", o.Kind, o.Name)
+				}
+			}
+		}
 	}
 	parent := root
 	for _, key := range path[:len(path)-1] {

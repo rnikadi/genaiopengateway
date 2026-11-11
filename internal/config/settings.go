@@ -31,6 +31,8 @@ var StartupPaths = []string{
 	"secrets.encryption_key", "secrets.previous_keys", "secrets.kms",
 	"ui.enabled",
 	"keys",
+	// Hosted stdio MCP servers run programs, so only the file sets them.
+	"mcp.servers.command", "mcp.servers.env", "mcp.servers.dir",
 }
 
 // Settings are the fields a settings object may set: every gateway-wide
