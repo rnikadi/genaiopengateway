@@ -11,6 +11,10 @@ providers:
   eleven: {type: elevenlabs, base_url: "http://127.0.0.1:18193", api_key: native-key}
   dg: {type: deepgram, base_url: "http://127.0.0.1:18193", api_key: native-key}
   aai: {type: assemblyai, base_url: "http://127.0.0.1:18193", api_key: native-key}
+  stab: {type: stability, base_url: "http://127.0.0.1:18193", api_key: native-key}
+  falai: {type: fal, base_url: "http://127.0.0.1:18193", api_key: native-key}
+  gem: {type: gemini, base_url: "http://127.0.0.1:18193", api_key: native-key}
+  co: {type: cohere, base_url: "http://127.0.0.1:18193", api_key: native-key}
 models:
   chat: {targets: [{provider: up, model: up-chat, price: {input_per_mtok: 1, output_per_mtok: 2, batch_discount: 0.5}}]}
   embed: {targets: [{provider: up, model: up-embed}]}
@@ -26,6 +30,12 @@ models:
   dg-speech: {targets: [{provider: dg, model: aura-2-thalia-en, price: {per_mchars: 30}}]}
   dg-transcribe: {targets: [{provider: dg, model: nova-3, price: {per_audio_minute: 0.006}}]}
   aai-transcribe: {targets: [{provider: aai, model: universal, price: {per_audio_minute: 0.006}}]}
+  stab-image: {targets: [{provider: stab, model: stable-image-core, price: {per_image: 0.03}}]}
+  fal-image: {targets: [{provider: falai, model: fal-ai/flux/dev, price: {per_image: 0.025}}]}
+  co-chat: {targets: [{provider: co, model: command-a-03-2025, price: {input_per_mtok: 2.5, output_per_mtok: 10}}]}
+  co-embed: {targets: [{provider: co, model: embed-v4.0}]}
+  co-rerank: {targets: [{provider: co, model: rerank-v3.5, price: {per_request: 0.002}}]}
+  veo: {targets: [{provider: gem, model: veo-3.0-fast-generate-001, price: {per_video_second: 0.15}}]}
 keys:
   - {name: conformance, key: conformance-key-0000000000}
   - {name: cached, key: conformance-cached-key-000000, cache: {mode: exact, ttl: 1h}}

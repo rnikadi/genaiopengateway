@@ -17,9 +17,9 @@ The `openai` type also passes through images, speech, transcription, translation
 
 A rerank service with the Cohere v2 shape is an `openai` provider whose `base_url` ends in `/v2`, such as `https://api.cohere.com/v2`; Jina and vLLM serve `/v1/rerank`.
 
-## Speech providers
+## Speech, image and Cohere providers
 
-`elevenlabs`, `deepgram` and `assemblyai` serve `audio.speech` and `audio.transcriptions` from APIs of their own. Their request and response mapping is in [modalities.md](modalities.md#speech-providers-with-their-own-apis). They share `internal/provider/native`, which writes OpenAI-shaped errors and transcripts in every `response_format`, and the conformance run calls each through the OpenAI SDK against a fake of its real paths (`test/conformance/fake_native.py`).
+`elevenlabs`, `deepgram` and `assemblyai` serve `audio.speech` and `audio.transcriptions`, `stability` and `fal` serve `images.generations`, and `cohere` serves chat, embeddings and rerank, each from an API of its own. Their request and response mapping is in [modalities.md](modalities.md#speech-providers-with-their-own-apis). They share `internal/provider/native`, which writes OpenAI-shaped errors and transcripts in every `response_format`, and the conformance run calls each through the OpenAI SDK against a fake of its real paths (`test/conformance/fake_native.py`).
 
 ## Anthropic translation rules (chat completions)
 

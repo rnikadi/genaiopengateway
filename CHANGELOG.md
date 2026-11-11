@@ -7,6 +7,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 ### Added
 
 - Provider types `elevenlabs`, `deepgram` and `assemblyai` ([docs/modalities.md](docs/modalities.md#speech-providers-with-their-own-apis)): ElevenLabs text to speech and Scribe, Deepgram Aura and pre-recorded transcription, and AssemblyAI transcription, served as OpenAI's `audio.speech` and `audio.transcriptions` with the usual metering, fallback and team credentials. AssemblyAI transcripts are deleted upstream once read. Presets and prices for all three are in the catalog, and the conformance run covers them.
+- Provider types `stability` and `fal` for image generation ([docs/modalities.md](docs/modalities.md#image-providers-with-their-own-apis)), and `cohere` for chat, embeddings and rerank ([docs/modalities.md](docs/modalities.md#cohere)), with catalog presets. The Mistral preset adds Voxtral transcription.
+- Veo video jobs on `gemini` targets ([docs/modalities.md](docs/modalities.md#veo-on-the-gemini-api)): create, retrieve, content and delete through OpenAI's `videos` endpoints, metered by the second.
 
 ## [0.11.0] - 2026-11-11
 

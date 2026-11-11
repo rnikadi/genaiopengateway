@@ -483,7 +483,7 @@ export function mediaSummary(r) {
   return parts.join(' · ');
 }
 
-export const providerTypes = { openai: 'OpenAI-compatible', anthropic: 'Anthropic', gemini: 'Gemini API', vertex: 'Vertex AI', bedrock: 'Amazon Bedrock', elevenlabs: 'ElevenLabs', deepgram: 'Deepgram', assemblyai: 'AssemblyAI' };
+export const providerTypes = { openai: 'OpenAI-compatible', anthropic: 'Anthropic', gemini: 'Gemini API', vertex: 'Vertex AI', bedrock: 'Amazon Bedrock', elevenlabs: 'ElevenLabs', deepgram: 'Deepgram', assemblyai: 'AssemblyAI', stability: 'Stability AI', fal: 'fal.ai', cohere: 'Cohere' };
 
 const pct = new Intl.NumberFormat(undefined, { style: 'percent', maximumFractionDigits: 1 });
 

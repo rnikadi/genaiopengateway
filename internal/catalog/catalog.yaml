@@ -57,6 +57,8 @@ providers:
       - {id: gemini-2.5-flash, kind: chat, price: {input_per_mtok: 0.3, output_per_mtok: 2.5}}
       - {id: gemini-2.5-flash-lite, kind: chat, price: {input_per_mtok: 0.1, output_per_mtok: 0.4}}
       - {id: gemini-embedding-001, kind: embeddings, price: {input_per_mtok: 0.15}}
+      - {id: veo-3.0-generate-001, kind: video, price: {per_video_second: 0.4}}
+      - {id: veo-3.0-fast-generate-001, kind: video, price: {per_video_second: 0.15}}
   - id: mistral
     name: Mistral AI
     type: openai
@@ -69,6 +71,7 @@ providers:
       - {id: mistral-small-latest, kind: chat, price: {input_per_mtok: 0.1, output_per_mtok: 0.3}}
       - {id: codestral-latest, kind: chat, price: {input_per_mtok: 0.3, output_per_mtok: 0.9}}
       - {id: mistral-embed, kind: embeddings, price: {input_per_mtok: 0.1}}
+      - {id: voxtral-mini-latest, kind: transcription, price: {per_audio_minute: 0.001}}
   - id: groq
     name: Groq
     type: openai
@@ -132,6 +135,41 @@ providers:
     models:
       - {id: gemini-2.5-pro, kind: chat, price: {input_per_mtok: 1.25, output_per_mtok: 10}}
       - {id: gemini-2.5-flash, kind: chat, price: {input_per_mtok: 0.3, output_per_mtok: 2.5}}
+  - id: cohere
+    name: Cohere
+    type: cohere
+    base_url: https://api.cohere.com
+    key_env: COHERE_API_KEY
+    key_url: https://dashboard.cohere.com/api-keys
+    pricing_url: https://cohere.com/pricing
+    models:
+      - {id: command-a-03-2025, kind: chat, price: {input_per_mtok: 2.5, output_per_mtok: 10}}
+      - {id: command-r7b-12-2024, kind: chat, price: {input_per_mtok: 0.0375, output_per_mtok: 0.15}}
+      - {id: embed-v4.0, kind: embeddings, price: {input_per_mtok: 0.12}}
+      - {id: rerank-v3.5, kind: rerank, price: {per_request: 0.002}}
+  - id: stability
+    name: Stability AI
+    type: stability
+    base_url: https://api.stability.ai
+    key_env: STABILITY_API_KEY
+    key_url: https://platform.stability.ai/account/keys
+    pricing_url: https://platform.stability.ai/pricing
+    models:
+      - {id: stable-image-core, kind: image, price: {per_image: 0.03}}
+      - {id: stable-image-ultra, kind: image, price: {per_image: 0.08}}
+      - {id: sd3.5-large, kind: image, price: {per_image: 0.065}}
+  - id: fal
+    name: fal.ai
+    type: fal
+    base_url: https://fal.run
+    key_env: FAL_KEY
+    key_url: https://fal.ai/dashboard/keys
+    pricing_url: https://fal.ai/pricing
+    custom_models: true
+    note: Models are fal endpoint ids. Images are returned as URLs on fal's CDN.
+    models:
+      - {id: fal-ai/flux/schnell, kind: image, price: {per_image: 0.003}}
+      - {id: fal-ai/flux/dev, kind: image, price: {per_image: 0.025}}
   - id: elevenlabs
     name: ElevenLabs
     type: elevenlabs

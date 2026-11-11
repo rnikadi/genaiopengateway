@@ -141,6 +141,24 @@ check("Deepgram transcription", r.text == "hello world" and r.duration == 30)
 r = client.audio.transcriptions.create(model="aai-transcribe", file=("a.wav", WAV, "audio/wav"), response_format="text")
 check("AssemblyAI transcription", r.strip() == "hello world")
 
+r = client.images.generate(model="stab-image", prompt="a falcon", n=2, size="1792x1024")
+check("Stability images", len(r.data) == 2 and r.data[0].b64_json == "aQ==")
+r = client.images.generate(model="fal-image", prompt="a falcon", n=3)
+check("fal images", [d.url for d in r.data] == [f"https://fal.example/{i}.png" for i in range(3)])
+r = client.chat.completions.create(model="co-chat", messages=[{"role": "user", "content": "hi"}])
+check("Cohere chat", r.choices[0].message.content == "cohere hi" and r.usage.total_tokens == 6)
+r = client.embeddings.create(model="co-embed", input="hi")
+check("Cohere embeddings", r.data[0].embedding == [0.5])
+r = httpx.post(BASE + "/v1/rerank", headers={"Authorization": "Bearer conformance-key-0000000000"},
+               json={"model": "co-rerank", "query": "q", "documents": ["a", "b"]})
+check("Cohere rerank", r.status_code == 200 and r.json()["results"][0]["index"] == 1)
+
+v = client.videos.create(model="veo", prompt="a falcon", seconds="6", size="1280x720")
+check("Veo videos.create", v.id.startswith("veo_") and v.status == "queued")
+statuses = [client.videos.retrieve(v.id).status for _ in range(2)]
+check("Veo videos.retrieve", statuses == ["in_progress", "completed"])
+check("Veo videos.download_content", client.videos.download_content(v.id).content == b"veo-mp4")
+
 
 def usage_by_model():
     req = urllib.request.Request(BASE + "/admin/v1/usage?group_by=model",
@@ -150,7 +168,8 @@ def usage_by_model():
 
 for _ in range(50):
     rows = usage_by_model()
-    if all(m in rows for m in ("eleven-speech", "eleven-scribe", "dg-speech", "dg-transcribe", "aai-transcribe")):
+    if all(m in rows for m in ("eleven-speech", "eleven-scribe", "dg-speech", "dg-transcribe", "aai-transcribe",
+                               "stab-image", "fal-image", "co-chat", "co-rerank", "veo")):
         break
     time.sleep(0.2)
 check("native speech metered", rows["eleven-speech"]["characters"] == 11 and rows["dg-speech"]["characters"] == 11)
@@ -158,4 +177,9 @@ check("native speech cost", abs(rows["eleven-speech"]["cost_usd"] - 11 * 50 / 1e
 check("native audio seconds metered", rows["eleven-scribe"]["audio_seconds"] == 120 and rows["dg-transcribe"]["audio_seconds"] == 30
       and rows["aai-transcribe"]["audio_seconds"] == 60)
 check("native transcription cost", abs(rows["aai-transcribe"]["cost_usd"] - 0.006) < 1e-9)
+check("native images metered", rows["stab-image"]["images"] == 2 and rows["fal-image"]["images"] == 3
+      and abs(rows["fal-image"]["cost_usd"] - 0.075) < 1e-9)
+check("Cohere chat and rerank cost", abs(rows["co-chat"]["cost_usd"] - (4 * 2.5 + 2 * 10) / 1e6) < 1e-12
+      and abs(rows["co-rerank"]["cost_usd"] - 0.002) < 1e-9)
+check("Veo seconds and cost", rows["veo"]["video_seconds"] == 6 and abs(rows["veo"]["cost_usd"] - 0.9) < 1e-9)
 print("conformance: all checks passed")

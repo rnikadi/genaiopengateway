@@ -17,3 +17,14 @@ func TestNewIsPrefixedUniqueAndSortable(t *testing.T) {
 		t.Fatalf("ids not unique and increasing: %s %s", a, b)
 	}
 }
+
+func TestNewIncreasesWithinAMillisecond(t *testing.T) {
+	prev := New("x")
+	for range 10000 {
+		next := New("x")
+		if next <= prev {
+			t.Fatalf("%s after %s", next, prev)
+		}
+		prev = next
+	}
+}
