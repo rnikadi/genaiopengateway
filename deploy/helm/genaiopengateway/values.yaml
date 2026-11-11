@@ -123,3 +123,19 @@ affinity: {}
 # Defaults spread pods across nodes and zones; set to replace them.
 topologySpreadConstraints: []
 priorityClassName: ""
+
+# The operator reconciles GatewayOrganization and GatewayConfigObject
+# resources into the gateway through its admin API (docs/operator.md).
+# The CRDs are in the chart's crds/ directory and installed with it.
+operator:
+  enabled: false
+  # A Secret key holding an admin token with the owner role.
+  adminTokenSecret:
+    name: genaiopengateway
+    key: GATEWAY_ADMIN_TOKEN
+  # Namespace whose resources are watched; empty watches every namespace.
+  watchNamespace: ""
+  interval: 15s
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {memory: 128Mi}

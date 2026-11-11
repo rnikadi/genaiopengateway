@@ -26,7 +26,37 @@ curl -sf localhost:18080/metrics >/dev/null && { echo "metrics should not be on 
 # Usage is written to the shared store by whichever pod served the call.
 usage() { curl -sf -H 'Authorization: Bearer ci-admin-token-0000000000000000000000' 'localhost:18080/admin/v1/usage?group_by=model'; }
 for _ in $(seq 30); do
-  usage | grep -q '"requests":6' && { echo "kind smoke test passed"; exit 0; }
+  usage | grep -q '"requests":6' && break
   sleep 1
 done
-usage; exit 1
+usage | grep -q '"requests":6' || { usage; exit 1; }
+
+# The operator makes an organization and a model from resources, and
+# removes the organization when its resource is deleted.
+kubectl rollout status deploy/gog-genaiopengateway-operator --timeout=120s
+kubectl apply -f - <<'YAML'
+apiVersion: genaiopengateway.io/v1
+kind: GatewayConfigObject
+metadata: {name: operator-chat}
+spec:
+  kind: models
+  spec: {targets: [{provider: fake, model: fake-model}]}
+---
+apiVersion: genaiopengateway.io/v1
+kind: GatewayOrganization
+metadata: {name: kind-org}
+spec:
+  allowed_models: [chat, operator-chat]
+  rpm: 100
+  teams: {search: {rpm: 10}}
+YAML
+admin() { curl -sf -H 'Authorization: Bearer ci-admin-token-0000000000000000000000' "localhost:18080$1"; }
+for _ in $(seq 60); do
+  admin /admin/v1/orgs | grep -q '"kind-org"' && admin /admin/v1/config | grep -q '"operator-chat"' && break
+  sleep 1
+done
+admin /admin/v1/orgs | grep -q '"kind-org"' || { kubectl logs deploy/gog-genaiopengateway-operator; exit 1; }
+kubectl wait --for=jsonpath='{.status.conditions[0].status}'=True gatewayorganization/kind-org --timeout=60s
+kubectl delete gatewayorganization kind-org --timeout=60s
+admin /admin/v1/orgs | grep -q '"kind-org"' && { echo "the organization outlived its resource"; exit 1; }
+echo "kind smoke test passed"

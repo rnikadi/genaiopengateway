@@ -29,4 +29,12 @@ grep -q 'image: "\?ghcr.io/rnikadi/genaiopengateway@sha256:0' <(render -f ci/all
 all=$(render -f ci/all-values.yaml)
 grep -q 'alert: GatewayHighErrorRate' <<<"$all" || { echo "PrometheusRule has no alerts"; exit 1; }
 grep -q '"uid": "genaiopengateway"' <<<"$all" || { echo "dashboard ConfigMap is empty"; exit 1; }
+# The operator: cluster-wide by default, one namespace when asked.
+grep -q 'kind: ClusterRole$' <<<"$all" || { echo "operator ClusterRole missing"; exit 1; }
+grep -q 'command: \[/gogctl, operator' <<<"$all" || { echo "operator Deployment missing"; exit 1; }
+scoped=$(render -f ci/operator-values.yaml)
+grep -q 'kind: Role$' <<<"$scoped" && grep -q 'GOG_WATCH_NAMESPACE' <<<"$scoped" || { echo "namespaced operator not rendered"; exit 1; }
+render -f ci/operator-values.yaml | schemas
+# The CRDs parse; kind.sh installs them into a real API server.
+for f in crds/*.yaml; do python3 -c 'import sys, yaml; yaml.safe_load(open(sys.argv[1]))' "$f"; done
 echo "chart checks passed"

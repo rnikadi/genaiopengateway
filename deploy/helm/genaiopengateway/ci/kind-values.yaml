@@ -30,3 +30,6 @@ config: |
   keys:
     - name: dev
       key: ${GATEWAY_DEV_KEY}
+operator:
+  enabled: true
+  interval: 2s

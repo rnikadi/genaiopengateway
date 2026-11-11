@@ -54,6 +54,9 @@ Commands:
   config import FILE [-dry-run] [-prune]
                                     makes the gateway match FILE: creates or updates what
                                     differs; -prune deletes what FILE's sections leave out
+  operator [-namespace NS] [-interval 15s] [-once] [-kube-url URL]
+                                    reconciles GatewayOrganization and GatewayConfigObject
+                                    resources from Kubernetes into the gateway
   version
 
 The URL and token come from -url and -token, or GOG_URL and
@@ -170,6 +173,9 @@ func run(args []string, stdout io.Writer) error {
 	}
 	if rest[0] == "usage" {
 		return c.usage(rest[1:])
+	}
+	if rest[0] == "operator" {
+		return c.runOperator(rest[1:])
 	}
 	fs.Usage()
 	return fmt.Errorf("unknown command %q", cmd)
@@ -393,7 +399,7 @@ func (c *client) export(all bool) error {
 }
 
 // kindOrder applies providers before the models that name them, and so on.
-var kindOrder = []string{"providers", "models", "guardrails", "mcp_servers", "mcp_virtual_servers", "alert_webhooks", "streams"}
+var kindOrder = []string{"providers", "models", "guardrails", "mcp_servers", "mcp_virtual_servers", "a2a_agents", "alert_webhooks", "streams"}
 
 func (c *client) importFile(path string, dry, prune bool) error {
 	raw, err := os.ReadFile(path)

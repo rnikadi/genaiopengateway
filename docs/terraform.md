@@ -49,7 +49,7 @@ The token is the gateway's admin token, which acts as an owner. Every change is 
 | `genaiopengateway_team` | A team of an organization and its policy | team id |
 | `genaiopengateway_key` | A virtual key. `secret` holds the key, which the gateway shows only at creation. Destroying the key revokes it | key id; `secret` is empty after import |
 | `genaiopengateway_cedar_policies` | An organization's [Cedar policies](cedar.md). Each change is a new version; destroying removes them | org id |
-| `genaiopengateway_config_object` | A stored provider, model, guardrail, MCP server, virtual MCP server, alert webhook or stream, with `spec` in JSON as in the [config file](config.md) | `kind/name`, such as `models/gpt-5-mini` |
+| `genaiopengateway_config_object` | A stored provider, model, guardrail, MCP server, virtual MCP server, alert webhook, stream or A2A agent, with `spec` in JSON as in the [config file](config.md) | `kind/name`, such as `models/gpt-5-mini` |
 
 The data source `genaiopengateway_organization` finds an organization by name, for example one created in the admin UI.
 
