@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"html"
+	"log"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -40,9 +41,14 @@ func (f *fakeSAMLIdP) GetServiceProvider(_ *http.Request, _ string) (*saml.Entit
 	rec := httptest.NewRecorder()
 	f.gateway.ServeHTTP(rec, httptest.NewRequest("GET", "/ui/auth/saml/metadata", nil))
 	if rec.Code != 200 {
+		log.Printf("metadata: %d %s", rec.Code, rec.Body)
 		return nil, os.ErrNotExist
 	}
-	return samlsp.ParseMetadata(rec.Body.Bytes())
+	md, err := samlsp.ParseMetadata(rec.Body.Bytes())
+	if err != nil {
+		log.Printf("metadata: %v\n%s", err, rec.Body)
+	}
+	return md, err
 }
 
 func newFakeSAMLIdP(t *testing.T) *fakeSAMLIdP {
@@ -68,7 +74,7 @@ func newFakeSAMLIdP(t *testing.T) *fakeSAMLIdP {
 	f.idp = &saml.IdentityProvider{
 		Key: key, Certificate: cert,
 		MetadataURL: *base.JoinPath("metadata"), SSOURL: *base.JoinPath("sso"),
-		ServiceProviderProvider: f, SessionProvider: f,
+		ServiceProviderProvider: f, SessionProvider: f, Logger: log.New(os.Stderr, "idp: ", 0),
 	}
 	mux.HandleFunc("/metadata", f.idp.ServeMetadata)
 	mux.HandleFunc("/sso", f.idp.ServeSSO)
@@ -173,6 +179,12 @@ sso:
 	if rec := f.post(nil, response); rec.Code != http.StatusBadRequest {
 		t.Errorf("no flow cookie = %d, want 400", rec.Code)
 	}
+
+	f.idp.SignatureMethod = "http://www.w3.org/2000/09/xmldsig#rsa-sha1"
+	if rec, _, _ := f.signIn(t, ""); rec.Code != http.StatusUnauthorized {
+		t.Errorf("a response signed with SHA-1 = %d, want 401", rec.Code)
+	}
+	f.idp.SignatureMethod = ""
 
 	f.user.CustomAttributes = f.user.CustomAttributes[1:]
 	if rec, _, _ := f.signIn(t, ""); rec.Code != http.StatusForbidden {
