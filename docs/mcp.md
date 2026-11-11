@@ -30,7 +30,7 @@ This document is the design for v0.2. Decisions are recorded in ADRs [0011](adr/
 
 | Feature | Why, and when |
 | --- | --- |
-| stdio servers | Running arbitrary local processes needs sandboxing; planned with hosted servers. Use a stdio-to-HTTP bridge meanwhile. |
+| stdio servers | Supported from v0.12 as [hosted stdio servers](#hosted-stdio-servers), set in the config file. |
 | The deprecated HTTP+SSE transport | Deprecated by the spec since 2025-03-26. |
 | Server-to-client requests: sampling, elicitation, roots, and the 2026-07-28 multi round-trip results that carry them | Rare in remote servers, and sampling, roots and logging are deprecated by the spec. A tool that needs input gets a clear error. |
 | The tasks extension, completions, subscriptions and list-changed notifications to clients | Clients see changes through `ttlMs` on list results and by listing again. |
@@ -72,6 +72,31 @@ The hash covers the whole definition except `_meta`, which carries nothing for t
 ## Upstream sessions
 
 The gateway keeps one client session per upstream server per replica, shared by every client, because static upstream credentials are per server, not per user. A server with `user_auth` gets one session per user instead ([mcp-user-credentials.md](mcp-user-credentials.md#calls-with-a-users-token)). Calls on a shared session are independent, which matches stateless servers and the way remote MCP servers are used for tools. When a call was never delivered, because the upstream expired the session (`404`) or the session had closed, the session is re-established and the call retried once. A call that may have reached the upstream is never retried, since tools can have side effects.
+
+## Hosted stdio servers
+
+From v0.12 the gateway can run a stdio MCP server itself, for servers that ship only as a local program. Give the server a `command` instead of a `url`:
+
+```yaml
+mcp:
+  servers:
+    filesystem:
+      command: [/opt/mcp/mcp-server-filesystem, /srv/shared]
+      env:
+        LOG_LEVEL: info
+        API_TOKEN: ${FS_API_TOKEN}   # expanded from the gateway's environment
+      dir: /srv                       # working directory; default: the gateway's
+      timeout: 30s
+```
+
+- Each replica starts the program on first use and talks to it over stdin and stdout. It is one shared session, like a server with static credentials. If the program exits, the next call starts it again.
+- The program sees only `PATH`, `HOME` and the variables in `env`. The gateway's own environment, with its provider keys and admin token, is not passed on.
+- Lines the program writes to stderr are logged as warnings with the server's name, each cut at 1 KiB.
+- `command`, `env` and `dir` can be set only in the config file. The admin API, `gogctl import` and the Terraform provider refuse them, so an operator with write access to MCP servers cannot run programs on the gateway's host.
+- `headers` and `user_auth` cannot be used with `command`; pass credentials through `env`.
+- Everything else works as for HTTP servers: virtual servers, prefixes, allow lists, pinning, guardrails, audit and metrics.
+
+The official container image is distroless and has no shell, Node.js or Python, so `npx` and `uvx` servers need an image built on it with the runtime added, or a static binary mounted into the container. The program runs as the gateway's user with the gateway's network access: run only programs you trust, and prefer a separate container with a stdio-to-HTTP bridge for anything that needs stronger isolation.
 
 ## Audit records
 
