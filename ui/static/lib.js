@@ -452,6 +452,7 @@ export const endpointNames = {
   videos: 'Videos',
   'videos.remix': 'Video remix',
   realtime: 'Realtime',
+  live: 'Gemini Live',
   batches: 'Batch',
   'cache.embeddings': 'Cache lookups (semantic)',
 };

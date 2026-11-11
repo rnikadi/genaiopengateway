@@ -270,7 +270,10 @@ function ProviderForm({ spec, onChange }) {
           <${Text} ...${p} path="credentials_file" />
         <//>`
       : t === 'bedrock'
-        ? html`<${Field} label="Region" setting="providers.region"><${Text} ...${p} path="region" placeholder="us-east-1" /><//>`
+        ? html`<${Field} label="Region" setting="providers.region"><${Text} ...${p} path="region" placeholder="us-east-1" /><//>
+          <${Field} label="Nova Reel output" setting="providers.s3_output_uri" hint="An S3 folder in the same region where Nova Reel writes videos. Empty turns Nova Reel off. Reading videos back needs AWS credentials, not an API key.">
+            <${Text} ...${p} path="s3_output_uri" placeholder="s3://bucket/videos" />
+          <//>`
         : ''}
     <${Field} label="Base URL" setting="providers.base_url" hint=${t === 'openai' ? 'Required.' : 'Empty uses the provider\'s own endpoint.'}><${Text} ...${p} path="base_url" /><//>
     ${t !== 'vertex' && html`<${Field} label="API key" setting="providers.api_key" hint=${t === 'bedrock' ? 'Leave empty to use the AWS default credential chain.' : 'Encrypted in the database and never shown again.'}>
@@ -309,8 +312,8 @@ const targetPrices = [
   ['models.targets.price.per_audio_minute', 'USD per audio minute (transcription)'],
   ['models.targets.price.per_video_second', 'USD per video second'],
   ['models.targets.price.per_request', 'USD per request'],
-  ['models.targets.price.audio_input_per_mtok', 'USD per million audio input tokens (realtime)'],
-  ['models.targets.price.audio_output_per_mtok', 'USD per million audio output tokens (realtime)'],
+  ['models.targets.price.audio_input_per_mtok', 'USD per million audio input tokens (realtime and Gemini Live)'],
+  ['models.targets.price.audio_output_per_mtok', 'USD per million audio output tokens (realtime and Gemini Live)'],
   ['models.targets.price.batch_discount', 'Fraction off in batches, such as 0.5 for half price'],
 ];
 

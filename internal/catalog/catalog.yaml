@@ -4,7 +4,7 @@
 # and override any price per target in the config or the admin UI.
 #
 # kind is the endpoint a model serves: chat, embeddings, image, speech,
-# transcription, moderation, rerank, video or realtime.
+# transcription, moderation, rerank, video, realtime or live (Gemini Live).
 version: "2026-11-11"
 providers:
   - id: openai
@@ -59,6 +59,7 @@ providers:
       - {id: gemini-embedding-001, kind: embeddings, price: {input_per_mtok: 0.15}}
       - {id: veo-3.0-generate-001, kind: video, price: {per_video_second: 0.4}}
       - {id: veo-3.0-fast-generate-001, kind: video, price: {per_video_second: 0.15}}
+      - {id: gemini-live-2.5-flash-preview, kind: live, price: {input_per_mtok: 0.5, output_per_mtok: 2, audio_input_per_mtok: 3, audio_output_per_mtok: 12}}
   - id: mistral
     name: Mistral AI
     type: openai
@@ -118,12 +119,13 @@ providers:
     key_env: AWS_BEARER_TOKEN_BEDROCK
     pricing_url: https://aws.amazon.com/bedrock/pricing/
     key_optional: true
-    note: Without an API key, requests are signed with the AWS default credential chain.
+    note: Without an API key, requests are signed with the AWS default credential chain. Nova Reel also needs s3_output_uri and AWS credentials to read videos back.
     custom_models: true
     models:
       - {id: amazon.nova-pro-v1:0, kind: chat, price: {input_per_mtok: 0.8, output_per_mtok: 3.2}}
       - {id: amazon.nova-lite-v1:0, kind: chat, price: {input_per_mtok: 0.06, output_per_mtok: 0.24}}
       - {id: amazon.titan-embed-text-v2:0, kind: embeddings, price: {input_per_mtok: 0.02}}
+      - {id: amazon.nova-reel-v1:1, kind: video, price: {per_video_second: 0.08}}
   - id: vertex
     name: Google Vertex AI
     type: vertex

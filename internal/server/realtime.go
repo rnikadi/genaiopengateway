@@ -276,6 +276,8 @@ type realtimeSession struct {
 	target config.Target
 	model  string
 	start  time.Time
+	// endpoint is what usage records name; empty is realtime.
+	endpoint provider.Endpoint
 
 	mu    sync.Mutex
 	total usage.Tokens
@@ -315,6 +317,17 @@ func (rs *realtimeSession) observe(data []byte) []byte {
 		InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, CachedInputTokens: u.InputTokenDetails.CachedTokens,
 		AudioInputTokens: u.InputTokenDetails.AudioTokens, AudioOutputTokens: u.OutputTokenDetails.AudioTokens, Reported: true,
 	}
+	if rs.charge(tok) {
+		// The client still gets the response it paid for.
+		_ = rs.writeClient(data)
+		return nil
+	}
+	return data
+}
+
+// charge records and charges one response of the session, and reports
+// whether it spent a budget.
+func (rs *realtimeSession) charge(tok usage.Tokens) bool {
 	cost := usage.Cost(tok, rs.target.Price)
 	rs.mu.Lock()
 	rs.total.InputTokens += tok.InputTokens
@@ -330,21 +343,23 @@ func (rs *realtimeSession) observe(data []byte) []byte {
 		s.log.Error("charging limits failed", "request_id", rs.rec.RequestID, "err", err)
 	}
 	s.budgetAlerts(ctx, rs.p, spent)
+	ep := rs.endpoint
+	if ep == "" {
+		ep = provider.Realtime
+	}
 	if s.usage != nil {
 		s.usage.Add(usage.Record{
 			RequestID: rs.rec.RequestID, Time: time.Now(), OrgID: rs.p.OrgID, TeamID: rs.p.TeamID, KeyID: rs.p.KeyID,
-			Endpoint: string(provider.Realtime), Model: rs.model, Provider: rs.target.Provider, UpstreamModel: rs.target.Model,
+			Endpoint: string(ep), Model: rs.model, Provider: rs.target.Provider, UpstreamModel: rs.target.Model,
 			Status: http.StatusOK, LatencyMS: time.Since(rs.start).Milliseconds(), Tokens: tok, CostUSD: cost,
 		})
 	}
 	for _, sp := range spent {
 		if sp.After >= sp.Budget.AmountUSD {
-			// The client still gets the response it paid for.
-			_ = rs.writeClient(data)
-			return nil
+			return true
 		}
 	}
-	return data
+	return false
 }
 
 // writeClient sends the client a message outside the relay loop.

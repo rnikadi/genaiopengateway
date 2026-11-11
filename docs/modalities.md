@@ -92,9 +92,35 @@ A `gemini` target whose model starts with `veo-`, such as `veo-3.0-generate-001`
 - **Content** downloads the video from the Gemini API's file service with the provider's key. The gateway only sends the key to the provider's own host.
 - **Delete** forgets the job in the gateway; Veo keeps generated videos for two days and has no delete.
 
-Veo through Vertex AI, Nova Reel, and cloud rerank stay in issue #35: their outputs go to Cloud Storage and S3, which do not map onto the OpenAI shapes without a store of their own.
+### Nova Reel on Bedrock
 
-Realtime APIs other than OpenAI's (Gemini Live, Nova Sonic) and WebRTC are not in this design: WebRTC media goes from the client straight to the provider, so the gateway could neither meter nor guard it.
+A `bedrock` target whose model is Nova Reel, such as `amazon.nova-reel-v1:1`, serves `videos` when the provider sets `s3_output_uri`, an S3 folder in the provider's region that Bedrock can write to:
+
+```yaml
+providers:
+  bedrock:
+    type: bedrock
+    region: us-east-1
+    s3_output_uri: s3://acme-videos/reel
+```
+
+- **Create** calls StartAsyncInvoke. Six seconds (the default) is one shot; `seconds` may also be a multiple of six up to 120, which makes an automated multi-shot video. Nova Reel makes 1280x720 at 24 frames a second, so other sizes get `400`. The requested seconds are metered.
+- **Retrieve** reads the invocation with GetAsyncInvoke: `in_progress`, `completed`, or `failed` with Bedrock's message.
+- **Content** reads `output.mp4` from the invocation's folder in S3, signed with SigV4. S3 does not take Bedrock API keys, so this needs credentials from the AWS default chain with `s3:GetObject` on the folder; with only an API key, content answers `501`.
+- **Delete** forgets the job in the gateway and leaves the video in the bucket, where your lifecycle rules apply.
+
+Veo through Vertex AI and cloud rerank stay in issue #35: Vertex writes videos to Cloud Storage, which needs a design of its own.
+
+### Gemini Live
+
+The gateway relays the Gemini Live API at Google's own path, `GET /ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent`, so Google's SDKs work with the gateway as their base URL and a gateway key as their API key (in the `key` query parameter, `x-goog-api-key`, or a bearer token).
+
+- The client's first message is its `setup`, whose `model` names a virtual model, such as `models/live`. The gateway checks it as it checks the `model` of any request, then dials the first target that accepts (a `gemini` provider with a Live model such as `gemini-live-2.5-flash-preview` or a `native-audio` model), and sends the setup with the target's model. A later `setup` is dropped, so a client cannot change models.
+- Every server message with `usageMetadata` is charged, with audio tokens at the audio prices, and the request line totals the session, as for OpenAI realtime.
+- Before the setup is read the session is already a WebSocket, so a refused model closes it with code 1008 and the reason, rather than an HTTP status.
+- Keys with guardrails are refused, budgets close a session after the message that spent them, and `limits.max_realtime_session` applies.
+
+Nova Sonic, which Bedrock serves over a bidirectional HTTP/2 stream rather than a WebSocket, and WebRTC are not in this design: WebRTC media goes from the client straight to the provider, so the gateway could neither meter nor guard it.
 
 ## Request handling
 

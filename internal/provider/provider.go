@@ -39,6 +39,9 @@ const (
 	VideoRemix Endpoint = "videos.remix"
 	// Realtime is a WebSocket session, served by Dialer.
 	Realtime Endpoint = "realtime"
+	// Live is a Gemini Live API session (BidiGenerateContent), a
+	// WebSocket served by LiveDialer.
+	Live Endpoint = "live"
 	// Batches is the Batch API with its input files (docs/batch.md),
 	// served by Forwarder, not Send.
 	Batches Endpoint = "batches"
@@ -110,6 +113,13 @@ type Forwarder interface {
 // returned with its body.
 type Dialer interface {
 	DialRealtime(ctx context.Context, model string, header http.Header, subprotocols []string) (*websocket.Conn, *http.Response, error)
+}
+
+// LiveDialer is implemented by adapters that serve Gemini Live
+// sessions. The session's model is sent in its first message, so the
+// connection does not depend on it. The caller closes the connection.
+type LiveDialer interface {
+	DialLive(ctx context.Context, header http.Header) (*websocket.Conn, *http.Response, error)
 }
 
 // ModelSupporter is implemented by adapters whose endpoints depend on

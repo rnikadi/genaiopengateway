@@ -497,6 +497,13 @@ func (r *Router) Dialer(ctx context.Context, providerName string) (provider.Dial
 	return d, ok
 }
 
+// LiveDialer returns a provider's adapter for Gemini Live sessions, or
+// false when the provider is gone or does not serve them.
+func (r *Router) LiveDialer(ctx context.Context, providerName string) (provider.LiveDialer, bool) {
+	d, ok := r.adapter(ctx, providerName).(provider.LiveDialer)
+	return d, ok
+}
+
 // Forwarder returns a provider's adapter for calls on upstream objects,
 // or false when the provider is gone or does not serve them.
 func (r *Router) Forwarder(ctx context.Context, providerName string) (provider.Forwarder, bool) {
@@ -508,7 +515,7 @@ func (r *Router) Forwarder(ctx context.Context, providerName string) (provider.F
 var AllEndpoints = []provider.Endpoint{
 	provider.ChatCompletions, provider.Responses, provider.Messages, provider.GenerateContent, provider.Embeddings,
 	provider.ImageGenerations, provider.ImageEdits, provider.Speech, provider.Transcriptions, provider.Translations,
-	provider.Moderations, provider.Rerank, provider.Videos, provider.Realtime, provider.Batches,
+	provider.Moderations, provider.Rerank, provider.Videos, provider.Realtime, provider.Live, provider.Batches,
 }
 
 // Endpoints lists what a provider serves for an upstream model.

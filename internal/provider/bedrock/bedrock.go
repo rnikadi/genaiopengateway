@@ -42,6 +42,9 @@ type Provider struct {
 	cfg    config.Provider
 	client *http.Client
 	base   string
+	// s3URL returns the HTTPS URL of an S3 object; tests point it at a
+	// fake.
+	s3URL  func(bucket, key string) string
 	auth   *signer
 	claude *anthropic.Provider
 }
@@ -58,6 +61,9 @@ func newWithCredentials(cfg config.Provider, client *http.Client, creds aws.Cred
 		auth: &signer{apiKey: cfg.APIKey.Value(), region: cfg.Region, creds: creds, v4: v4.NewSigner()}}
 	if p.base == "" {
 		p.base = "https://bedrock-runtime." + cfg.Region + ".amazonaws.com"
+	}
+	p.s3URL = func(bucket, key string) string {
+		return "https://" + bucket + ".s3." + cfg.Region + ".amazonaws.com/" + key
 	}
 	p.claude = anthropic.NewUpstream(cfg, client, anthropic.Upstream{
 		URL: func(model string, stream bool) string {
@@ -88,17 +94,19 @@ func isEmbedding(model string) bool {
 
 // Supports implements provider.Provider.
 func (p *Provider) Supports(e provider.Endpoint) bool {
-	return e == provider.ChatCompletions || e == provider.Messages || e == provider.Embeddings || e == provider.ImageGenerations
+	return e == provider.ChatCompletions || e == provider.Messages || e == provider.Embeddings || e == provider.ImageGenerations || e == provider.Videos
 }
 
 // SupportsModel implements provider.ModelSupporter: Messages is served
 // for Claude models, embeddings for Titan and Cohere embedding models,
-// images for Nova Canvas and Titan Image, and chat completions for
-// every other model.
+// images for Nova Canvas and Titan Image, videos for Nova Reel when an
+// S3 output is configured, and chat completions for every other model.
 func (p *Provider) SupportsModel(e provider.Endpoint, model string) bool {
 	switch e {
+	case provider.Videos:
+		return isReel(model) && p.cfg.S3OutputURI != ""
 	case provider.ChatCompletions:
-		return !isEmbedding(model) && !isImageModel(model)
+		return !isEmbedding(model) && !isImageModel(model) && !isReel(model)
 	case provider.ImageGenerations:
 		return isImageModel(model)
 	case provider.Messages:
@@ -118,6 +126,8 @@ func (p *Provider) Send(ctx context.Context, req *provider.Request) (*provider.R
 		return p.embed(ctx, req)
 	case provider.ImageGenerations:
 		return p.images(ctx, req)
+	case provider.Videos:
+		return p.video(ctx, req)
 	}
 	resp, err := p.claude.Send(ctx, req)
 	if err != nil || resp.StatusCode == http.StatusOK {
@@ -200,6 +210,23 @@ func (s *signer) authorize(r *http.Request) error {
 		_, _ = io.Copy(sum, body)
 	}
 	return s.v4.SignHTTP(r.Context(), c, r, hex.EncodeToString(sum.Sum(nil)), "bedrock", s.region, time.Now())
+}
+
+// signS3 signs a bodyless S3 request with SigV4. S3 takes no Bedrock
+// API key, so it needs credentials from the AWS default chain.
+func (s *signer) signS3(r *http.Request) error {
+	creds, err := s.credentials(r.Context())
+	if err != nil {
+		return err
+	}
+	c, err := creds.Retrieve(r.Context())
+	if err != nil {
+		return err
+	}
+	empty := sha256.Sum256(nil)
+	hash := hex.EncodeToString(empty[:])
+	r.Header.Set("X-Amz-Content-Sha256", hash)
+	return s.v4.SignHTTP(r.Context(), c, r, hash, "s3", s.region, time.Now())
 }
 
 // credentials loads the AWS default credential chain on first use, so a

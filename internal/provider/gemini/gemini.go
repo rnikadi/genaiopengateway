@@ -54,18 +54,21 @@ func NewUpstream(cfg config.Provider, client *http.Client, up Upstream) *Provide
 
 // Supports implements provider.Provider.
 func (p *Provider) Supports(e provider.Endpoint) bool {
-	return e == provider.ChatCompletions || e == provider.GenerateContent || e == provider.ImageGenerations || e == provider.Speech || e == provider.Videos
+	return e == provider.ChatCompletions || e == provider.GenerateContent || e == provider.ImageGenerations || e == provider.Speech || e == provider.Videos || e == provider.Live
 }
 
 // SupportsModel implements provider.ModelSupporter: Imagen models make
-// images, text to speech models speak, Veo models make videos, and
-// other models chat.
+// images, text to speech models speak, Veo models make videos, Live
+// models hold Live sessions, and other models chat.
 func (p *Provider) SupportsModel(e provider.Endpoint, model string) bool {
 	switch {
 	case isImagen(model):
 		return e == provider.ImageGenerations
 	case isTTS(model):
 		return e == provider.Speech
+	case isLive(model):
+		// Live models serve only Live sessions, through the Gemini API.
+		return e == provider.Live && p.up.URL == nil
 	case isVeo(model):
 		// Veo jobs are served by the Gemini API only, not through
 		// another upstream such as Vertex AI.
