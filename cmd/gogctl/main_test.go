@@ -97,7 +97,7 @@ func TestConfigExportImport(t *testing.T) {
 	if out := ctl(t, src, "config", "import", file, "-dry-run"); !strings.Contains(out, "would put providers/up") {
 		t.Fatalf("dry run: %s", out)
 	}
-	if out := ctl(t, src, "config", "import", file); !strings.Contains(out, "2 objects imported") {
+	if out := ctl(t, src, "config", "import", file); !strings.Contains(out, "2 changes applied") {
 		t.Fatalf("import: %s", out)
 	}
 	exported := ctl(t, src, "config", "export")
@@ -128,4 +128,90 @@ func field(t *testing.T, out, name string) string {
 	}
 	rest := out[i+len(name)+5:]
 	return rest[:strings.Index(rest, `"`)]
+}
+
+func TestDeclarativeTenants(t *testing.T) {
+	gw := gateway(t)
+	write := func(body string) string {
+		t.Helper()
+		f := filepath.Join(t.TempDir(), "gateway.yaml")
+		if err := os.WriteFile(f, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+	first := write(`objects:
+  providers:
+    up: {type: openai, base_url: "http://127.0.0.1:9/v1", api_key: secret-value}
+  models:
+    chat: {targets: [{provider: up, model: m}]}
+orgs:
+  acme:
+    rpm: 100
+    budget: {amount_usd: 50, period: monthly}
+    cedar: |
+      @id("base")
+      permit (principal, action, resource);
+    teams:
+      search: {allowed_models: [chat]}
+      ads: {}
+  globex: {}
+`)
+	if out := ctl(t, gw, "config", "import", first, "-dry-run"); !strings.Contains(out, "would create org acme") || !strings.Contains(out, "would create team acme/search") || !strings.Contains(out, "would update cedar policies of acme") {
+		t.Fatalf("dry run:\n%s", out)
+	}
+	if out := ctl(t, gw, "orgs", "list"); strings.Contains(out, "acme") {
+		t.Fatalf("a dry run changed the gateway:\n%s", out)
+	}
+	if out := ctl(t, gw, "config", "import", first); !strings.Contains(out, "7 changes applied") {
+		t.Fatalf("import:\n%s", out)
+	}
+	// Importing the same file again only puts the provider again, since
+	// its secret cannot be compared; importing the export, whose secrets
+	// read "set", changes nothing.
+	if out := ctl(t, gw, "config", "import", first); !strings.Contains(out, "put providers/up\n1 changes applied") {
+		t.Fatalf("second import:\n%s", out)
+	}
+	exported := ctl(t, gw, "config", "export")
+	for _, want := range []string{"acme:", "rpm: 100", "amount_usd: 50", "search:", "- chat", `@id("base")`, "globex: {}"} {
+		if !strings.Contains(exported, want) {
+			t.Fatalf("export lacks %q:\n%s", want, exported)
+		}
+	}
+	if out := ctl(t, gw, "config", "import", write(exported)); !strings.Contains(out, "nothing to change") {
+		t.Fatalf("importing the export:\n%s", out)
+	}
+
+	// A smaller file updates what differs; -prune removes the rest.
+	second := write(`orgs:
+  acme:
+    rpm: 200
+    teams:
+      search: {}
+`)
+	out := ctl(t, gw, "config", "import", second)
+	if !strings.Contains(out, "updated org acme") || !strings.Contains(out, "updated team acme/search") || strings.Contains(out, "deleted") {
+		t.Fatalf("update:\n%s", out)
+	}
+	out = ctl(t, gw, "config", "import", second, "-prune")
+	for _, want := range []string{"deleted team acme/ads", "deleted cedar policies of acme", "deleted org globex", "3 changes applied"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("prune lacks %q:\n%s", want, out)
+		}
+	}
+	exported = ctl(t, gw, "config", "export")
+	if strings.Contains(exported, "budget") || strings.Contains(exported, "globex") || strings.Contains(exported, "ads") || !strings.Contains(exported, "rpm: 200") {
+		t.Fatalf("after prune:\n%s", exported)
+	}
+
+	// Pruning objects deletes stored ones the file leaves out and keeps
+	// organizations, since the file has no orgs section.
+	out = ctl(t, gw, "config", "import", write("objects:\n  providers:\n    up: {type: openai, base_url: \"http://127.0.0.1:9/v1\", api_key: set}\n"), "-prune")
+	if !strings.Contains(out, "deleted models/chat\n1 changes applied") {
+		t.Fatalf("prune objects:\n%s", out)
+	}
+
+	if err := run([]string{"-url", gw, "-token", token, "config", "import", write("orgs: {acme: {teams: {x: {bogus: 1}}}}\n")}, io.Discard); err == nil || !strings.Contains(err.Error(), "bogus") {
+		t.Fatalf("unknown setting: %v", err)
+	}
 }

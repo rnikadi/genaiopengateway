@@ -15,12 +15,17 @@ gogctl usage -group-by team
 
 ## Configuration as code
 
-`gogctl config export` writes the objects stored through the admin UI or API (providers, models, guardrails, MCP servers, virtual MCP servers and alert webhooks) as YAML, and `gogctl config import FILE` creates or replaces each of them, providers first so models can name them. Keep the file in Git and import it from CI to manage the gateway declaratively:
+`gogctl config export` writes the gateway's declarative state as YAML:
+
+- `objects`: what is stored through the admin UI or API (providers, models, guardrails, MCP servers, virtual MCP servers, alert webhooks and streams);
+- `orgs`: every organization by name, with its policy, its [Cedar policies](cedar.md) and its teams by name with their policies.
+
+`gogctl config import FILE` makes the gateway match the file: it creates what is missing and updates what differs, providers before the models that name them and objects before the organizations whose policies name them. Keep the file in Git and import it from CI:
 
 ```
-gogctl config export > gateway-objects.yaml
-gogctl config import gateway-objects.yaml -dry-run
-gogctl config import gateway-objects.yaml
+gogctl config export > gateway.yaml
+gogctl config import gateway.yaml -dry-run    # prints what would change
+gogctl config import gateway.yaml
 ```
 
 ```yaml
@@ -30,7 +35,26 @@ objects:
   models:
     gpt-5-mini:
       targets: [{provider: openai, model: gpt-5-mini, price: {input_per_mtok: 0.25, output_per_mtok: 2}}]
+orgs:
+  acme:
+    budget: {amount_usd: 500, period: monthly}
+    cedar: |
+      @id("allow-by-default")
+      permit (principal, action, resource);
+    teams:
+      search: {allowed_models: [gpt-5-mini], rpm: 600}
+      ads: {}
 ```
+
+An organization or team takes the policy settings of the [admin API](api.md#admin-api): `allowed_models`, `allowed_mcp_servers`, `rpm`, `tpm`, `budget`, `log_bodies`, `guardrails`, `cache` and `residency`. A setting the file leaves out is cleared, so the file is the whole policy. An organization without a `cedar` entry keeps its Cedar policies; an empty `cedar` removes them. Names match organizations without case, and teams within their organization exactly.
+
+Keys are not part of the file: their secrets are shown once, when created. Create them with `gogctl keys create` or the admin UI.
+
+Importing the same file twice changes nothing, except objects whose secrets are written out in the file: the gateway cannot compare those, so they are put again.
+
+### Pruning
+
+`-prune` also deletes what the file leaves out, in the sections the file has: stored objects (not those from the config file) when it has `objects`, and organizations, teams and Cedar policies when it has `orgs`. A file without an `orgs` section never deletes an organization. A team with active keys cannot be deleted, so revoke its keys first; the import stops at the first error. Run with `-dry-run` first.
 
 Secrets are never exported: they read `set`. Importing `set` into the same gateway keeps the stored secret; for another gateway, replace it with the real value before importing. `-all` also exports objects that come from the config file.
 

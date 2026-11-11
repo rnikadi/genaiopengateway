@@ -13,6 +13,8 @@ for platform in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 
     -ldflags "-s -w -X main.version=$version" -o "dist/$name/genaiopengateway$ext" ./cmd/gateway
   CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
     -ldflags "-s -w -X main.version=$version" -o "dist/$name/gogctl$ext" ./cmd/gogctl
+  (cd terraform && CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
+    -ldflags "-s -w -X main.version=$version" -o "../dist/$name/terraform-provider-genaiopengateway$ext" .)
   cp LICENSE README.md CHANGELOG.md config.example.yaml "dist/$name/"
   if [ "$os" = windows ]; then
     (cd dist && zip -qr "$name.zip" "$name")

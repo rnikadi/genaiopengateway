@@ -50,6 +50,31 @@ jobs:
         # Fails when the gateway adds more than 10 ms at p50 (docs/benchmarks.md).
         run: N=2000 C=16 GATE=10ms scripts/bench.sh
 
+  terraform:
+    # The Terraform provider is its own module (docs/terraform.md); its
+    # acceptance tests build the gateway and run the terraform CLI.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          check-latest: true
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.13.5
+          terraform_wrapper: false
+      - run: go vet ./...
+      - name: staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - name: Acceptance tests
+        run: TF_ACC=1 go test -count=1 ./...
+
   docker:
     runs-on: ubuntu-latest
     steps:
