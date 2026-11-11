@@ -60,12 +60,15 @@ spec:
   strategy: {type: Recreate}
   selector:
     matchLabels:
-      {{- include "gog.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: operator
+      app.kubernetes.io/name: {{ include "gog.name" . }}-operator
+      app.kubernetes.io/instance: {{ .Release.Name }}
   template:
     metadata:
       labels:
-        {{- include "gog.selectorLabels" . | nindent 8 }}
+        # Not the gateway's selector labels, so the Service, the PDB
+        # and the gateway's Deployment never select the operator.
+        app.kubernetes.io/name: {{ include "gog.name" . }}-operator
+        app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/component: operator
     spec:
       serviceAccountName: {{ $name }}
