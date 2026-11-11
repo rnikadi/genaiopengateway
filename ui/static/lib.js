@@ -453,6 +453,7 @@ export const endpointNames = {
   'videos.remix': 'Video remix',
   realtime: 'Realtime',
   live: 'Gemini Live',
+  bidi_stream: 'Nova Sonic',
   batches: 'Batch',
   'cache.embeddings': 'Cache lookups (semantic)',
 };

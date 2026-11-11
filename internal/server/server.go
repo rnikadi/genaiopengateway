@@ -457,6 +457,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/batches/{id}/cancel", s.batchCall(http.MethodPost, "/cancel"))
 	mux.HandleFunc("GET /v1/realtime", s.realtime)
 	mux.HandleFunc("GET /ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent", s.live)
+	mux.HandleFunc("GET /bedrock/model/{model}/invoke-with-bidirectional-stream", s.bidi)
 	mux.HandleFunc("/mcp/{name}", s.serveMCP)
 	if s.store != nil {
 		mux.HandleFunc("GET /mcp/connect/callback", s.connectCallback)

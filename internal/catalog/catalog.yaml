@@ -4,7 +4,8 @@
 # and override any price per target in the config or the admin UI.
 #
 # kind is the endpoint a model serves: chat, embeddings, image, speech,
-# transcription, moderation, rerank, video, realtime or live (Gemini Live).
+# transcription, moderation, rerank, video, realtime, live (Gemini Live) or
+# bidi_stream (Bedrock bidirectional streams, such as Nova Sonic).
 version: "2026-11-11"
 providers:
   - id: openai
@@ -126,6 +127,7 @@ providers:
       - {id: amazon.nova-lite-v1:0, kind: chat, price: {input_per_mtok: 0.06, output_per_mtok: 0.24}}
       - {id: amazon.titan-embed-text-v2:0, kind: embeddings, price: {input_per_mtok: 0.02}}
       - {id: amazon.nova-reel-v1:1, kind: video, price: {per_video_second: 0.08}}
+      - {id: amazon.nova-sonic-v1:0, kind: bidi_stream, price: {input_per_mtok: 0.06, output_per_mtok: 0.24, audio_input_per_mtok: 3.4, audio_output_per_mtok: 13.6}}
   - id: vertex
     name: Google Vertex AI
     type: vertex

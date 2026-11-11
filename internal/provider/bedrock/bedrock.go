@@ -94,19 +94,22 @@ func isEmbedding(model string) bool {
 
 // Supports implements provider.Provider.
 func (p *Provider) Supports(e provider.Endpoint) bool {
-	return e == provider.ChatCompletions || e == provider.Messages || e == provider.Embeddings || e == provider.ImageGenerations || e == provider.Videos
+	return e == provider.ChatCompletions || e == provider.Messages || e == provider.Embeddings || e == provider.ImageGenerations || e == provider.Videos || e == provider.BidiStream
 }
 
 // SupportsModel implements provider.ModelSupporter: Messages is served
 // for Claude models, embeddings for Titan and Cohere embedding models,
 // images for Nova Canvas and Titan Image, videos for Nova Reel when an
-// S3 output is configured, and chat completions for every other model.
+// S3 output is configured, bidirectional streams for Nova Sonic, and
+// chat completions for every other model.
 func (p *Provider) SupportsModel(e provider.Endpoint, model string) bool {
 	switch e {
 	case provider.Videos:
 		return isReel(model) && p.cfg.S3OutputURI != ""
+	case provider.BidiStream:
+		return isSonic(model)
 	case provider.ChatCompletions:
-		return !isEmbedding(model) && !isImageModel(model) && !isReel(model)
+		return !isEmbedding(model) && !isImageModel(model) && !isReel(model) && !isSonic(model)
 	case provider.ImageGenerations:
 		return isImageModel(model)
 	case provider.Messages:

@@ -120,7 +120,27 @@ The gateway relays the Gemini Live API at Google's own path, `GET /ws/google.ai.
 - Before the setup is read the session is already a WebSocket, so a refused model closes it with code 1008 and the reason, rather than an HTTP status.
 - Keys with guardrails are refused, budgets close a session after the message that spent them, and `limits.max_realtime_session` applies.
 
-Nova Sonic, which Bedrock serves over a bidirectional HTTP/2 stream rather than a WebSocket, and WebRTC are not in this design: WebRTC media goes from the client straight to the provider, so the gateway could neither meter nor guard it.
+### Nova Sonic
+
+Bedrock serves Nova Sonic over `InvokeModelWithBidirectionalStream`, an HTTP/2 request whose body and response are both AWS event streams. Browsers and most WebSocket libraries cannot speak that, and clients would need AWS credentials, so the gateway offers it as a WebSocket at `GET /bedrock/model/{model}/invoke-with-bidirectional-stream`, where `{model}` is a virtual model:
+
+- Each WebSocket message, either way, is one Nova Sonic event's JSON, such as `{"event":{"sessionStart":{...}}}` or `{"event":{"audioOutput":{...}}}`: the payload Bedrock carries base64 encoded in its event stream chunks. Clients build events exactly as in AWS's Nova Sonic examples and skip the event stream framing.
+- The gateway key goes in a bearer token, `x-api-key`, or the `key` query parameter for browsers.
+- The gateway opens the stream to the first target that accepts it (a `bedrock` provider with a model whose id contains `-sonic-`, such as `amazon.nova-sonic-v1:0`), sending the client's first event with it, so the client sends `sessionStart` before it expects output. Each later event is sent as it arrives. With SigV4, each message is signed in a chain from the request's signature, as the AWS SDKs do; with a Bedrock API key, the key is sent as a bearer token.
+- Each `usageEvent` is charged by its `delta`: speech tokens at the audio prices, text tokens at the token prices. When the client closes, the gateway ends the input and waits up to five seconds for the last usage.
+- An upstream exception closes the WebSocket with code 1011 and the exception's message; the end of the stream closes it normally.
+- Keys with guardrails are refused, budgets close a session after the event that spent them, and `limits.max_realtime_session` applies.
+
+```yaml
+models:
+  voice:
+    targets:
+      - provider: bedrock
+        model: amazon.nova-sonic-v1:0
+        price: {input_per_mtok: 0.06, output_per_mtok: 0.24, audio_input_per_mtok: 3.4, audio_output_per_mtok: 13.6}
+```
+
+WebRTC is not in this design: its media goes from the client straight to the provider, so the gateway could neither meter nor guard it.
 
 ## Request handling
 

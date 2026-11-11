@@ -42,6 +42,10 @@ const (
 	// Live is a Gemini Live API session (BidiGenerateContent), a
 	// WebSocket served by LiveDialer.
 	Live Endpoint = "live"
+	// BidiStream is a Bedrock bidirectional stream
+	// (InvokeModelWithBidirectionalStream), as Nova Sonic uses, served by
+	// BidiOpener.
+	BidiStream Endpoint = "bidi_stream"
 	// Batches is the Batch API with its input files (docs/batch.md),
 	// served by Forwarder, not Send.
 	Batches Endpoint = "batches"
@@ -120,6 +124,27 @@ type Dialer interface {
 // connection does not depend on it. The caller closes the connection.
 type LiveDialer interface {
 	DialLive(ctx context.Context, header http.Header) (*websocket.Conn, *http.Response, error)
+}
+
+// BidiOpener is implemented by adapters that serve Bedrock
+// bidirectional streams. first is the session's first input event,
+// sent before the response is awaited. When the upstream refuses the
+// stream, the error comes with its HTTP status for fallback.
+type BidiOpener interface {
+	OpenBidi(ctx context.Context, model string, first []byte) (Bidi, int, error)
+}
+
+// Bidi is an open bidirectional stream of JSON events.
+type Bidi interface {
+	// Send writes one input event.
+	Send(event []byte) error
+	// Recv returns the next output event, or io.EOF once the stream
+	// has ended.
+	Recv() ([]byte, error)
+	// CloseSend ends the input; output may still follow.
+	CloseSend() error
+	// Close abandons the stream.
+	Close() error
 }
 
 // ModelSupporter is implemented by adapters whose endpoints depend on
