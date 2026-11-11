@@ -8,10 +8,12 @@ import (
 	"time"
 )
 
-// Grant is one operator role, gateway-wide when OrgID is empty.
+// Grant is one operator role: gateway-wide when OrgID is empty, and for
+// one team of the organization when TeamID is set.
 type Grant struct {
-	Role  string `json:"role"`
-	OrgID string `json:"org_id,omitempty"`
+	Role   string `json:"role"`
+	OrgID  string `json:"org_id,omitempty"`
+	TeamID string `json:"team_id,omitempty"`
 }
 
 // Session is a signed-in operator of the admin UI. IDHash is the SHA-256

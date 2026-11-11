@@ -66,19 +66,25 @@ export function useLoad(loader, deps = []) {
 
 export const Session = createContext(null);
 
-// can answers role questions for the signed-in operator; the API enforces
+// useSession answers role questions for the signed-in operator; the API enforces
 // the same rules, so this only hides what would be refused.
+export const none = Promise.resolve({ data: [] });
+
 export function useSession() {
   const s = useContext(Session);
   const grants = s.me.operator.grants || [];
   const owner = grants.some((g) => g.role === 'owner');
-  const readsAll = owner || grants.some((g) => g.role === 'viewer' && !g.org_id);
+  // can mirrors the API: a grant covers every organization, one
+  // organization, or one team of it (docs/roles.md).
+  const can = (perm, orgID, teamID) =>
+    owner ||
+    grants.some((g) => (g.permissions || []).includes(perm) && (!g.org_id || (orgID && g.org_id === orgID && (!g.team_id || g.team_id === teamID))));
   return {
     ...s,
     owner,
-    readsAll,
+    can,
+    readsAll: can('org.read'),
     orgIDs: [...new Set(grants.filter((g) => g.org_id).map((g) => g.org_id))],
-    canWrite: (orgID) => owner || grants.some((g) => g.role === 'admin' && g.org_id === orgID),
   };
 }
 

@@ -72,6 +72,7 @@ nav:
       - Encryption keys and KMS: secrets.md
   - Admin UI:
       - Admin UI and SSO: admin-ui.md
+      - Roles and permissions: roles.md
       - Configuration views: admin-ui-config.md
       - Editing configuration: admin-ui-config-editing.md
       - Every setting in the UI: admin-ui-settings.md

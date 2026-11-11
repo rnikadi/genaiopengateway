@@ -1,6 +1,6 @@
 import {
   html, useState, api, useLoad, useSession, Loading, Table, Modal, PolicyForm, Confirm, PageHeader, Card, CopyButton,
-  usageQuery, totals, policySummary, usd, num, day, when, Field, ErrorBox,
+  usageQuery, totals, policySummary, usd, num, day, when, Field, ErrorBox, none,
 } from '../lib.js';
 import { keyStatus, KeyActions, KeyModals } from './keys.js';
 
@@ -42,11 +42,12 @@ export function Org({ args: [id] }) {
     const [org, teams, usage] = await Promise.all([
       api('GET', `/admin/v1/orgs/${encodeURIComponent(id)}`),
       api('GET', `/admin/v1/orgs/${encodeURIComponent(id)}/teams?limit=500`),
-      api('GET', usageQuery({ org: id, group_by: 'team' })),
+      s.can('usage.read', id) ? api('GET', usageQuery({ org: id, group_by: 'team' })) : none,
     ]);
     return { org, teams: teams.data, usage: usage.data };
   }, [id]);
-  const canWrite = s.canWrite(id);
+  const canWrite = s.can('teams.write', id);
+  const canClear = s.can('cache.clear', id);
   const close = () => setModal(null);
 
   return html`<${Loading} state=${state}>${({ org, teams, usage }) => {
@@ -56,7 +57,7 @@ export function Org({ args: [id] }) {
       <p class="crumbs"><a href="#/orgs">Organizations</a></p>
       <${PageHeader} title=${org.name} sub=${policySummary(org)}>
         ${s.owner && html`<button class="secondary" onClick=${() => setModal('edit')}>Edit policy</button>`}
-        ${canWrite && html`<button class="secondary" onClick=${() => setModal('clear')}>Clear cache</button>`}
+        ${canClear && html`<button class="secondary" onClick=${() => setModal('clear')}>Clear cache</button>`}
         ${s.owner && html`<button class="danger" disabled=${teams.length > 0} title=${teams.length ? 'Delete its teams first' : ''} onClick=${() => setModal('delete')}>Delete</button>`}
         <a class="button secondary" href=${`#/usage?org=${encodeURIComponent(id)}`}>Usage</a>
       <//>
@@ -110,22 +111,25 @@ export function Team({ args: [id] }) {
     const team = await api('GET', `/admin/v1/teams/${encodeURIComponent(id)}`);
     const [org, keys, usage] = await Promise.all([
       api('GET', `/admin/v1/orgs/${encodeURIComponent(team.org_id)}`),
-      api('GET', `/admin/v1/teams/${encodeURIComponent(id)}/keys?limit=500`),
-      api('GET', usageQuery({ team: id, group_by: 'key' })),
+      s.can('keys.read', team.org_id, id) ? api('GET', `/admin/v1/teams/${encodeURIComponent(id)}/keys?limit=500`) : none,
+      s.can('usage.read', team.org_id, id) ? api('GET', usageQuery({ team: id, group_by: 'key' })) : none,
     ]);
     return { team, org, keys: keys.data, usage: usage.data };
   }, [id]);
   const close = () => setModal(null);
 
   return html`<${Loading} state=${state}>${({ team, org, keys, usage }) => {
-    const canWrite = s.canWrite(team.org_id);
+    const canWrite = s.can('teams.write', team.org_id);
+    const canKeys = s.can('keys.write', team.org_id, team.id);
+    const canClear = s.can('cache.clear', team.org_id, team.id);
+    const canCredentials = s.can('credentials.write', team.org_id, team.id);
     const byKey = usageBy(usage);
     const t = totals(usage);
     return html`
       <p class="crumbs"><a href="#/orgs">Organizations</a> / <a href=${`#/orgs/${encodeURIComponent(org.id)}`}>${org.name}</a></p>
       <${PageHeader} title=${team.name} sub=${policySummary(team)}>
         ${canWrite && html`<button class="secondary" onClick=${() => setModal({ kind: 'edit' })}>Edit policy</button>`}
-        ${canWrite && html`<button class="secondary" onClick=${() => setModal({ kind: 'clear' })}>Clear cache</button>`}
+        ${canClear && html`<button class="secondary" onClick=${() => setModal({ kind: 'clear' })}>Clear cache</button>`}
         ${canWrite && html`<button class="danger" disabled=${keys.some((k) => !k.revoked_at)} title=${keys.some((k) => !k.revoked_at) ? 'Revoke its keys first' : ''} onClick=${() => setModal({ kind: 'delete' })}>Delete</button>`}
         <a class="button secondary" href=${`#/usage?org=${encodeURIComponent(org.id)}&team=${encodeURIComponent(id)}`}>Usage</a>
       <//>
@@ -136,7 +140,7 @@ export function Team({ args: [id] }) {
         <${Card} label="Active keys" value=${num(keys.filter((k) => !k.revoked_at).length)} />
       </div>
       <section class="panel">
-        <div class="panel-header"><h2>Virtual keys</h2>${canWrite && html`<button onClick=${() => setModal({ kind: 'key' })}>New key</button>`}</div>
+        <div class="panel-header"><h2>Virtual keys</h2>${canKeys && html`<button onClick=${() => setModal({ kind: 'key' })}>New key</button>`}</div>
         <${Table}
           rows=${keys}
           empty="No keys yet."
@@ -149,12 +153,12 @@ export function Team({ args: [id] }) {
             { label: 'Expires', render: (k) => (k.expires_at ? day(k.expires_at) : html`<span class="muted">Never</span>`) },
             {
               label: '',
-              render: (k) => html`<${KeyActions} k=${k} canWrite=${canWrite} setModal=${setModal} />`,
+              render: (k) => html`<${KeyActions} k=${k} canWrite=${canKeys} setModal=${setModal} />`,
             },
           ]}
         />
       </section>
-      <${Credentials} team=${team} canWrite=${canWrite} />
+      <${Credentials} team=${team} canWrite=${canCredentials} />
       ${modal?.kind === 'edit' && html`<${Modal} title="Edit team" onClose=${close}>
         <${PolicyForm} kind="team" initial=${team} submitLabel="Save" onCancel=${close}
           onSubmit=${async (body) => { await api('PATCH', `/admin/v1/teams/${encodeURIComponent(id)}`, body); close(); state.reload(); }} />

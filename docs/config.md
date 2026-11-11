@@ -31,6 +31,14 @@ sso:                                 # operator sign-in to the admin UI; see adm
       org: acme
     - group: finance
       role: viewer                   # read only; omit org for every organization
+    - group: search-leads
+      role: admin                    # one team: its keys, credentials and usage
+      org: acme
+      team: search
+  custom_roles:                      # more roles from the permissions in roles.md
+    billing:
+      description: Finance reads spend
+      permissions: [org.read, usage.read, alerts.read]
 
 ui:
   enabled: true                      # default when the admin API is enabled
@@ -198,7 +206,7 @@ Prices in the example are placeholders; set them from your contracts.
 
 The admin API and UI are enabled when there is a `store` and either `admin.token` or `sso.oidc`. The UI is served at `/ui/`.
 
-Startup fails if a model references an unknown provider, a virtual MCP server references an unknown upstream or two of its names collide, a provider other than `gemini`, `vertex` or `bedrock` has no `base_url`, a `vertex` provider has no `project` or `location`, a `bedrock` provider has no `region`, a target has no `model`, a static key is empty or duplicated, a duration or number is malformed, a guardrail is incomplete or names an unknown model, or a virtual server names an unknown guardrail, or `sso` is incomplete (an http(s) issuer, a client id and secret, a redirect URL ending in `/ui/auth/callback`, at least one role mapping with exactly one of `group` or `email`, `org` on every `admin`, none on `owner`).
+Startup fails if a model references an unknown provider, a virtual MCP server references an unknown upstream or two of its names collide, a provider other than `gemini`, `vertex` or `bedrock` has no `base_url`, a `vertex` provider has no `project` or `location`, a `bedrock` provider has no `region`, a target has no `model`, a static key is empty or duplicated, a duration or number is malformed, a guardrail is incomplete or names an unknown model, or a virtual server names an unknown guardrail, or `sso` is incomplete (an http(s) issuer, a client id and secret, a redirect URL ending in `/ui/auth/callback`, at least one role mapping with exactly one of `group` or `email`, `org` on every `admin` and every `team`, none on `owner`, and roles that are built in or in `sso.custom_roles` with known permissions).
 
 ## Data model
 

@@ -251,7 +251,7 @@ func (s *Server) listGuardrailEvents(w http.ResponseWriter, r *http.Request) err
 		return err
 	}
 	q := r.URL.Query()
-	if err := s.readScope(r, q.Get("org_id"), q.Get("team_id"), q.Get("key_id")); err != nil {
+	if err := s.readScope(r, config.PermUsageRead, q.Get("org_id"), q.Get("team_id"), q.Get("key_id")); err != nil {
 		return err
 	}
 	gq := store.GuardrailEventQuery{

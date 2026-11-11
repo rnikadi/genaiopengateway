@@ -51,7 +51,7 @@ export function Jobs({ params }) {
       return c ? html`${num(c.completed)} / ${num(c.total)}${c.failed > 0 && html` <span class="badge bad">${num(c.failed)} failed</span>`}` : html`<span class="muted">—</span>`;
     } },
     { label: 'Cost', num: true, render: (b) => (b.charged_at ? usd(b.cost_usd) : html`<span class="muted small">When finished</span>`) },
-    { label: '', render: (b) => !done(b.status) && b.status !== 'cancelling' && s.canWrite(b.org_id) && html`<button class="secondary small" onClick=${() => setCancelling(b)}>Cancel</button>` },
+    { label: '', render: (b) => !done(b.status) && b.status !== 'cancelling' && s.can('batches.write', b.org_id, b.team_id) && html`<button class="secondary small" onClick=${() => setCancelling(b)}>Cancel</button>` },
   ];
   const videoColumns = [
     ...common,

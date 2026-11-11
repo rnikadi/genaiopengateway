@@ -11,6 +11,7 @@ import (
 
 	"github.com/rnikadi/genaiopengateway/internal/auth"
 	"github.com/rnikadi/genaiopengateway/internal/cache"
+	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/guardrail"
 	"github.com/rnikadi/genaiopengateway/internal/policy"
 	"github.com/rnikadi/genaiopengateway/internal/provider"
@@ -195,7 +196,7 @@ func (s *Server) clearCache(w http.ResponseWriter, r *http.Request) error {
 			return store.ErrNotFound
 		}
 	}
-	if err := write(r, orgID); err != nil {
+	if err := allow(r, config.PermCacheClear, orgID, teamID); err != nil {
 		return err
 	}
 	prefix := cache.Prefix(orgID, teamID)

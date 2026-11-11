@@ -86,7 +86,7 @@ curl -s -H "$ADMIN" "localhost:8080/admin/v1/usage?org_id=$ORG&group_by=team"
 
 Every change is recorded in the audit log (`GET /admin/v1/audit`).
 
-The same is available in the browser at `http://localhost:8080/ui/`: organizations, teams and keys, usage and spend, MCP tool approvals and the audit log. People sign in with your identity provider over OIDC, and roles (owner, organization admin, viewer) come from their groups; without SSO, the admin token signs in. See [docs/admin-ui.md](docs/admin-ui.md).
+The same is available in the browser at `http://localhost:8080/ui/`: organizations, teams and keys, usage and spend, MCP tool approvals and the audit log. People sign in with your identity provider over OIDC, and roles (owner, admin, viewer or custom roles, for every organization, one organization or one team) come from their groups; without SSO, the admin token signs in. See [docs/admin-ui.md](docs/admin-ui.md).
 
 ## MCP gateway
 

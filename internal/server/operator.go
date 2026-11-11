@@ -29,6 +29,8 @@ type operator struct {
 	session string
 	// claims are what role mappings match, for SSO sign-ins only.
 	claims *store.SessionClaims
+	// customRoles are sso.custom_roles when the operator was resolved.
+	customRoles map[string]config.CustomRole
 }
 
 // tokenOperator is the admin token, which acts as owner.
@@ -64,19 +66,59 @@ func (o *operator) isOwner() bool {
 	return o.has(func(g store.Grant) bool { return g.Role == config.RoleOwner })
 }
 
-// readsAll reports whether the operator may read every organization.
-func (o *operator) readsAll() bool {
+// permissions returns what a grant's role may do (docs/roles.md).
+func (o *operator) permissions(role string) []string {
+	sso := &config.SSO{CustomRoles: o.customRoles}
+	return sso.RolePermissions(role)
+}
+
+// can reports whether the operator holds a permission for an
+// organization, or for one of its teams when teamID is set. A team grant
+// covers only its team, so it never answers for the organization as a
+// whole; an empty orgID asks about every organization.
+func (o *operator) can(perm, orgID, teamID string) bool {
 	return o.has(func(g store.Grant) bool {
-		return g.Role == config.RoleOwner || (g.Role == config.RoleViewer && g.OrgID == "")
+		if g.Role == config.RoleOwner {
+			return true
+		}
+		if !slices.Contains(o.permissions(g.Role), perm) {
+			return false
+		}
+		return g.OrgID == "" || (orgID != "" && g.OrgID == orgID && (g.TeamID == "" || g.TeamID == teamID))
 	})
 }
 
-func (o *operator) canRead(orgID string) bool {
-	return o.readsAll() || (orgID != "" && o.has(func(g store.Grant) bool { return g.OrgID == orgID }))
+// global reports whether the operator holds a permission in every
+// organization.
+func (o *operator) global(perm string) bool { return o.can(perm, "", "") }
+
+// sees reports whether the operator has any role in an organization, so
+// may see its name, including through a team grant.
+func (o *operator) sees(orgID string) bool {
+	return o.global(config.PermOrgRead) || o.has(func(g store.Grant) bool { return orgID != "" && g.OrgID == orgID })
 }
 
-func (o *operator) canWrite(orgID string) bool {
-	return o.isOwner() || (orgID != "" && o.has(func(g store.Grant) bool { return g.Role == config.RoleAdmin && g.OrgID == orgID }))
+// scope lists where the operator holds a permission: the organizations it
+// holds it in as a whole, and the teams it holds it in alone. all is true
+// when it holds it everywhere.
+func (o *operator) scope(perm string) (all bool, orgIDs, teamIDs []string) {
+	if o.global(perm) {
+		return true, nil, nil
+	}
+	orgIDs, teamIDs = []string{}, []string{}
+	for _, g := range o.Grants {
+		if !slices.Contains(o.permissions(g.Role), perm) {
+			continue
+		}
+		if g.TeamID != "" {
+			if !slices.Contains(teamIDs, g.TeamID) {
+				teamIDs = append(teamIDs, g.TeamID)
+			}
+		} else if !slices.Contains(orgIDs, g.OrgID) {
+			orgIDs = append(orgIDs, g.OrgID)
+		}
+	}
+	return false, orgIDs, teamIDs
 }
 
 // orgIDs lists the organizations the operator has a role in.
@@ -92,17 +134,10 @@ func (o *operator) orgIDs() []string {
 
 var errForbidden = &apiError{http.StatusForbidden, "forbidden", "your role does not allow this"}
 
-// read and write check the caller's role for an organization; an empty
-// orgID means data not tied to one organization.
-func read(r *http.Request, orgID string) error {
-	if !operatorFrom(r.Context()).canRead(orgID) {
-		return errForbidden
-	}
-	return nil
-}
-
-func write(r *http.Request, orgID string) error {
-	if !operatorFrom(r.Context()).canWrite(orgID) {
+// allow checks that the caller holds a permission for an organization or
+// one of its teams; an empty orgID means every organization.
+func allow(r *http.Request, perm, orgID, teamID string) error {
+	if !operatorFrom(r.Context()).can(perm, orgID, teamID) {
 		return errForbidden
 	}
 	return nil
@@ -116,11 +151,12 @@ func requireOwner(r *http.Request) error {
 }
 
 // resolveGrants maps the identity provider's view of a user to roles,
-// naming organizations by id. Mappings to organizations that do not
-// exist are skipped.
+// naming organizations and teams by id. Mappings to organizations or
+// teams that do not exist are skipped.
 func (s *Server) resolveGrants(mappings []config.RoleMapping, email string, groups []string) []store.Grant {
+	t := s.tenants.Load()
 	var orgs map[string]*store.Org
-	if t := s.tenants.Load(); t != nil {
+	if t != nil {
 		orgs = t.orgs
 	}
 	var out []store.Grant
@@ -135,6 +171,14 @@ func (s *Server) resolveGrants(mappings []config.RoleMapping, email string, grou
 				s.log.Warn("a role mapping names an organization that does not exist", "org", m.Org)
 				continue
 			}
+		}
+		if m.Team != "" {
+			team := t.team(g.OrgID, m.Team)
+			if team == nil {
+				s.log.Warn("a role mapping names a team that does not exist", "org", m.Org, "team", m.Team)
+				continue
+			}
+			g.TeamID = team.ID
 		}
 		if !slices.Contains(out, g) {
 			out = append(out, g)
@@ -229,7 +273,7 @@ func (s *Server) sessionOperator(r *http.Request) (*operator, error) {
 	if err != nil {
 		return nil, err
 	}
-	o := &operator{Subject: ss.Subject, Email: ss.Email, Name: ss.Name, Grants: ss.Grants, session: h}
+	o := &operator{Subject: ss.Subject, Email: ss.Email, Name: ss.Name, Grants: ss.Grants, session: h, customRoles: s.rt.Load().cfg.SSO.CustomRoles}
 	// Roles follow the current sso.roles, so removing a mapping takes
 	// effect at once rather than at the next sign-in.
 	if cfg := s.rt.Load().cfg; ss.Claims != nil && cfg.SSO.OIDC != nil {

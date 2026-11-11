@@ -202,7 +202,7 @@ func (s *Server) listRequests(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	q := r.URL.Query()
-	if err := s.readScope(r, q.Get("org_id"), q.Get("team_id"), q.Get("key_id")); err != nil {
+	if err := s.readScope(r, config.PermUsageRead, q.Get("org_id"), q.Get("team_id"), q.Get("key_id")); err != nil {
 		return err
 	}
 	rq := store.RequestQuery{OrgID: q.Get("org_id"), TeamID: q.Get("team_id"), KeyID: q.Get("key_id")}
@@ -248,7 +248,7 @@ func (s *Server) getRequestBody(w http.ResponseWriter, r *http.Request) error {
 	op := operatorFrom(ctx)
 	var b *store.RequestBody
 	for _, x := range bodies {
-		if op.canRead(x.OrgID) {
+		if op.can(config.PermUsageRead, x.OrgID, x.TeamID) {
 			b = x
 			break
 		}
@@ -256,8 +256,8 @@ func (s *Server) getRequestBody(w http.ResponseWriter, r *http.Request) error {
 	if b == nil {
 		return store.ErrNotFound // do not confirm another organization's request exists
 	}
-	if !op.canWrite(b.OrgID) {
-		return &apiError{http.StatusForbidden, "forbidden", "reading request bodies needs the owner or admin role"}
+	if !op.can(config.PermBodiesRead, b.OrgID, b.TeamID) {
+		return &apiError{http.StatusForbidden, "forbidden", "reading request bodies needs the bodies.read permission, which owners and admins hold"}
 	}
 	box, err := secretBox(s.rt.Load().cfg.Secrets)
 	if err != nil {

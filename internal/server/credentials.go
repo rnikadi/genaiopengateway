@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rnikadi/genaiopengateway/internal/auth"
+	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/router"
 	"github.com/rnikadi/genaiopengateway/internal/store"
 )
@@ -120,7 +121,7 @@ func (s *Server) listTeamCredentials(w http.ResponseWriter, r *http.Request) err
 	if err != nil {
 		return err
 	}
-	if err := read(r, t.OrgID); err != nil {
+	if err := allow(r, config.PermTeamsRead, t.OrgID, t.ID); err != nil {
 		return err
 	}
 	rows, err := s.store.ListTeamCredentials(r.Context(), t.ID)
@@ -159,7 +160,7 @@ func (s *Server) putTeamCredential(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return err
 	}
-	if err := write(r, t.OrgID); err != nil {
+	if err := allow(r, config.PermCredentialsWrite, t.OrgID, t.ID); err != nil {
 		return err
 	}
 	name := r.PathValue("provider")
@@ -198,7 +199,7 @@ func (s *Server) deleteTeamCredential(w http.ResponseWriter, r *http.Request) er
 	if err != nil {
 		return err
 	}
-	if err := write(r, t.OrgID); err != nil {
+	if err := allow(r, config.PermCredentialsWrite, t.OrgID, t.ID); err != nil {
 		return err
 	}
 	name := r.PathValue("provider")

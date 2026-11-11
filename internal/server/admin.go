@@ -348,7 +348,7 @@ func (s *Server) listOrgs(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	op := operatorFrom(r.Context())
-	if !op.readsAll() {
+	if !op.global(config.PermOrgRead) {
 		// Operators with roles in a few organizations see just those.
 		items := []*store.Org{}
 		for _, id := range op.orgIDs() {
@@ -372,8 +372,8 @@ func (s *Server) listOrgs(w http.ResponseWriter, r *http.Request) error {
 
 // getOrg returns one organization and its policy.
 func (s *Server) getOrg(w http.ResponseWriter, r *http.Request) error {
-	if err := read(r, r.PathValue("org_id")); err != nil {
-		return err
+	if !operatorFrom(r.Context()).sees(r.PathValue("org_id")) {
+		return errForbidden
 	}
 	o, err := s.store.GetOrg(r.Context(), r.PathValue("org_id"))
 	if err != nil {
@@ -432,7 +432,7 @@ func (s *Server) deleteOrg(w http.ResponseWriter, r *http.Request) error {
 
 // createTeam creates a team in an organization with an optional policy.
 func (s *Server) createTeam(w http.ResponseWriter, r *http.Request) error {
-	if err := write(r, r.PathValue("org_id")); err != nil {
+	if err := allow(r, config.PermTeamsWrite, r.PathValue("org_id"), ""); err != nil {
 		return err
 	}
 	var p patch
@@ -459,13 +459,33 @@ func (s *Server) listTeams(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if err := read(r, r.PathValue("org_id")); err != nil {
+	orgID := r.PathValue("org_id")
+	op := operatorFrom(r.Context())
+	if !op.sees(orgID) {
+		return errForbidden
+	}
+	if _, err := s.store.GetOrg(r.Context(), orgID); err != nil {
 		return err
 	}
-	if _, err := s.store.GetOrg(r.Context(), r.PathValue("org_id")); err != nil {
-		return err
+	if !op.can(config.PermTeamsRead, orgID, "") {
+		// A team role sees just its teams.
+		items := []*store.Team{}
+		_, _, teamIDs := op.scope(config.PermTeamsRead)
+		for _, id := range teamIDs {
+			t, err := s.store.GetTeam(r.Context(), id)
+			if errors.Is(err, store.ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if t.OrgID == orgID {
+				items = append(items, t)
+			}
+		}
+		return writeList(w, items, false)
 	}
-	items, more, err := s.store.ListTeams(r.Context(), r.PathValue("org_id"), pg)
+	items, more, err := s.store.ListTeams(r.Context(), orgID, pg)
 	if err != nil {
 		return err
 	}
@@ -478,7 +498,7 @@ func (s *Server) getTeam(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if err := read(r, t.OrgID); err != nil {
+	if err := allow(r, config.PermTeamsRead, t.OrgID, t.ID); err != nil {
 		return err
 	}
 	writeJSON(w, http.StatusOK, t)
@@ -495,7 +515,7 @@ func (s *Server) updateTeam(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if err := write(r, t.OrgID); err != nil {
+	if err := allow(r, config.PermTeamsWrite, t.OrgID, ""); err != nil {
 		return err
 	}
 	before := *t
@@ -518,7 +538,7 @@ func (s *Server) deleteTeam(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if err := write(r, t.OrgID); err != nil {
+	if err := allow(r, config.PermTeamsWrite, t.OrgID, ""); err != nil {
 		return err
 	}
 	if err := s.store.DeleteTeam(r.Context(), t.ID); err != nil {
@@ -543,7 +563,7 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if err := write(r, t.OrgID); err != nil {
+	if err := allow(r, config.PermKeysWrite, t.OrgID, t.ID); err != nil {
 		return err
 	}
 	k := &store.Key{TeamID: t.ID}
@@ -581,7 +601,7 @@ func (s *Server) listKeys(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if err := read(r, t.OrgID); err != nil {
+	if err := allow(r, config.PermKeysRead, t.OrgID, t.ID); err != nil {
 		return err
 	}
 	items, more, err := s.store.ListKeys(r.Context(), r.PathValue("team_id"), pg)
@@ -603,11 +623,8 @@ func (s *Server) listAllKeys(w http.ResponseWriter, r *http.Request) error {
 	if f.Status != "" && !slices.Contains(store.KeyStatuses, f.Status) {
 		return badRequest("status is one of %s", strings.Join(store.KeyStatuses, ", "))
 	}
-	if op := operatorFrom(r.Context()); !op.readsAll() {
-		f.OrgIDs = op.orgIDs()
-		if f.OrgIDs == nil {
-			f.OrgIDs = []string{}
-		}
+	if all, orgIDs, teamIDs := operatorFrom(r.Context()).scope(config.PermKeysRead); !all {
+		f.OrgIDs, f.TeamIDs = orgIDs, teamIDs
 	}
 	items, more, err := s.store.ListAllKeys(r.Context(), f, pg)
 	if err != nil {
@@ -644,7 +661,7 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if err := write(r, k.OrgID); err != nil {
+	if err := allow(r, config.PermKeysWrite, k.OrgID, k.TeamID); err != nil {
 		return err
 	}
 	if k.RevokedAt != nil {
@@ -677,7 +694,7 @@ func (s *Server) getKey(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if err := read(r, k.OrgID); err != nil {
+	if err := allow(r, config.PermKeysRead, k.OrgID, k.TeamID); err != nil {
 		return err
 	}
 	writeJSON(w, http.StatusOK, k)
@@ -694,7 +711,7 @@ func (s *Server) updateKey(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if err := write(r, k.OrgID); err != nil {
+	if err := allow(r, config.PermKeysWrite, k.OrgID, k.TeamID); err != nil {
 		return err
 	}
 	if k.RevokedAt != nil {
@@ -723,7 +740,7 @@ func (s *Server) revokeKey(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if err := write(r, k.OrgID); err != nil {
+	if err := allow(r, config.PermKeysWrite, k.OrgID, k.TeamID); err != nil {
 		return err
 	}
 	if err := s.store.RevokeKey(r.Context(), k.ID); err != nil {
@@ -745,7 +762,7 @@ func (s *Server) revokeKey(w http.ResponseWriter, r *http.Request) error {
 // queryUsage sums usage and cost over a time range, grouped by model, team, key, provider, endpoint or day.
 func (s *Server) queryUsage(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
-	if err := s.readScope(r, q.Get("org_id"), q.Get("team_id"), q.Get("key_id")); err != nil {
+	if err := s.readScope(r, config.PermUsageRead, q.Get("org_id"), q.Get("team_id"), q.Get("key_id")); err != nil {
 		return err
 	}
 	now := time.Now().UTC()
@@ -789,7 +806,7 @@ func (s *Server) listAudit(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	orgID := r.URL.Query().Get("org_id")
-	if err := read(r, orgID); err != nil {
+	if err := allow(r, config.PermAuditRead, orgID, ""); err != nil {
 		return err
 	}
 	items, more, err := s.store.ListAudit(r.Context(), orgID, pg)
@@ -799,11 +816,12 @@ func (s *Server) listAudit(w http.ResponseWriter, r *http.Request) error {
 	return writeList(w, items, more)
 }
 
-// readScope checks that the caller may read data filtered by organization,
-// team or key. Without any filter it is data across all organizations.
-func (s *Server) readScope(r *http.Request, orgID, teamID, keyID string) error {
+// readScope checks that the caller holds a permission for data filtered
+// by organization, team or key. Without any filter it is data across all
+// organizations.
+func (s *Server) readScope(r *http.Request, perm, orgID, teamID, keyID string) error {
 	op := operatorFrom(r.Context())
-	if op.readsAll() {
+	if op.global(perm) {
 		return nil
 	}
 	ctx := r.Context()
@@ -812,19 +830,19 @@ func (s *Server) readScope(r *http.Request, orgID, teamID, keyID string) error {
 		if err != nil {
 			return err
 		}
-		return read(r, k.OrgID)
+		return allow(r, perm, k.OrgID, k.TeamID)
 	}
 	if teamID != "" {
 		t, err := s.store.GetTeam(ctx, teamID)
 		if err != nil {
 			return err
 		}
-		return read(r, t.OrgID)
+		return allow(r, perm, t.OrgID, t.ID)
 	}
 	if orgID == "" {
-		return &apiError{http.StatusForbidden, "forbidden", "org_id is required: your roles are limited to some organizations"}
+		return &apiError{http.StatusForbidden, "forbidden", "org_id or team_id is required: your roles are limited to some organizations or teams"}
 	}
-	return read(r, orgID)
+	return allow(r, perm, orgID, "")
 }
 
 // --- operator and configuration ---
@@ -832,8 +850,26 @@ func (s *Server) readScope(r *http.Request, orgID, teamID, keyID string) error {
 // me describes the signed-in operator: subject, roles and organizations.
 func (s *Server) me(w http.ResponseWriter, r *http.Request) error {
 	cfg := s.rt.Load().cfg
+	op := operatorFrom(r.Context())
+	// Each grant carries its permissions, so the UI hides what the API
+	// would refuse without knowing the roles (docs/roles.md).
+	type grantView struct {
+		store.Grant
+		TeamName    string   `json:"team_name,omitempty"`
+		Permissions []string `json:"permissions"`
+	}
+	t := s.tenants.Load()
+	grants := make([]grantView, len(op.Grants))
+	for i, g := range op.Grants {
+		grants[i] = grantView{Grant: g, Permissions: op.permissions(g.Role)}
+		if team := t.team(g.OrgID, g.TeamID); team != nil {
+			grants[i].TeamName = team.Name
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"operator":       operatorFrom(r.Context()),
+		"operator": map[string]any{
+			"subject": op.Subject, "email": op.Email, "name": op.Name, "grants": grants,
+		},
 		"sso":            cfg.SSO.OIDC != nil,
 		"body_logging":   cfg.BodyLogging.Enabled,
 		"semantic_cache": cfg.Cache.Semantic.Model != "",

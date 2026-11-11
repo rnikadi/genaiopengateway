@@ -33,5 +33,6 @@
 | [0029](0029-sign-in-roles-resolve-safely.md) | Sign-in roles resolve to one organization and a verified email |
 | [0030](0030-owners-set-organization-limits.md) | Only owners change an organization |
 | [0031](0031-routing-strategies.md) | Routing strategies, retries and circuit breakers live in the router, per replica |
+| [0032](0032-roles-are-permission-sets.md) | Roles are sets of permissions, granted for every organization, one organization or one team |
 
 New ADRs copy [0000-template.md](0000-template.md).

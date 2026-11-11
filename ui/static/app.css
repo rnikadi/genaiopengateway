@@ -136,6 +136,8 @@ input, select { font: inherit; color: var(--text); background: var(--surface); b
 .field > span { font-weight: 500; }
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .checks { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.custom-role { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; margin: 0 0 10px; }
+.custom-role .row { grid-template-columns: 1fr 2fr auto; align-items: end; }
 .check { display: flex; align-items: center; gap: 6px; font-weight: 400; }
 .check input { width: auto; }
 .inline { display: flex; align-items: center; gap: 8px; }
@@ -168,7 +170,7 @@ input, select { font: inherit; color: var(--text); background: var(--surface); b
   .who .muted { display: none; }
   .who .link { margin: 0; }
   .content { padding: 16px; }
-  .row { grid-template-columns: 1fr; }
+  .row, .custom-role .row { grid-template-columns: 1fr; }
   .grid2 { grid-template-columns: 1fr; }
 }
 

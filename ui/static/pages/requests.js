@@ -27,7 +27,7 @@ export function Requests({ params }) {
 
   const body = (r) => {
     if (!r.has_body) return html`<span class="muted">—</span>`;
-    if (!s.canWrite(r.org_id)) return html`<span class="muted small" title="Reading bodies needs the owner or admin role">Logged</span>`;
+    if (!s.can('bodies.read', r.org_id, r.team_id)) return html`<span class="muted small" title="Reading bodies needs the bodies.read permission">Logged</span>`;
     return html`<a href=${`#/requests/${encodeURIComponent(r.request_id)}`}>View</a>`;
   };
 

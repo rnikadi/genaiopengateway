@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -278,3 +279,58 @@ func TestComposeConfigIsValid(t *testing.T) {
 }
 
 const testKey = "XU4XYQMExW1ZlJ4E3eXfwgVLht06HQRhJRewoweY2YI="
+
+func TestCustomRolesConfig(t *testing.T) {
+	c, err := Parse([]byte(`
+store: {driver: sqlite, dsn: x}
+admin: {token: t0k3n-0123456789abcdef0123456789abcdef}
+sso:
+  custom_roles:
+    billing: {permissions: [org.read, usage.read]}
+  roles:
+    - {group: finance, role: billing, org: acme}
+    - {group: search-leads, role: admin, org: acme, team: search}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.SSO.RolePermissions("billing"); len(got) != 2 || c.SSO.RolePermissions("nope") != nil || len(c.SSO.RolePermissions(RoleAdmin)) != len(Permissions) {
+		t.Fatalf("permissions: %v", got)
+	}
+	if slices.Contains(c.SSO.RolePermissions(RoleViewer), PermBodiesRead) {
+		t.Fatal("viewers do not read logged bodies")
+	}
+	for in, want := range map[string]string{
+		`{custom_roles: {admin: {permissions: [usage.read]}}}`:    "the name is a built-in role",
+		`{custom_roles: {Billing: {permissions: [usage.read]}}}`:  "names are lowercase",
+		`{custom_roles: {billing: {permissions: []}}}`:            "permissions are required",
+		`{custom_roles: {billing: {permissions: [usage.write]}}}`: `unknown permission "usage.write"`,
+		`{roles: [{group: g, role: billing, org: acme}]}`:         "one of sso.custom_roles",
+		`{roles: [{group: g, role: viewer, team: search}]}`:       "team needs an org",
+	} {
+		_, err := Parse([]byte("store: {driver: sqlite, dsn: x}\nadmin: {token: t0k3n-0123456789abcdef0123456789abcdef}\nsso: " + in))
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: got %v, want %q", in, err, want)
+		}
+	}
+}
+
+// TestPermissionsDocumented keeps docs/roles.md's table in step with the
+// permissions the code checks.
+func TestPermissionsDocumented(t *testing.T) {
+	raw, err := os.ReadFile("../../docs/roles.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, table, _ := strings.Cut(string(raw), "| Permission | Allows |")
+	table, _, _ = strings.Cut(table, "\n\n")
+	var documented []string
+	for _, line := range strings.Split(table, "\n") {
+		if name, ok := strings.CutPrefix(line, "| `"); ok {
+			documented = append(documented, name[:strings.Index(name, "`")])
+		}
+	}
+	if !slices.Equal(documented, Permissions) {
+		t.Errorf("docs/roles.md lists %v, the code has %v", documented, Permissions)
+	}
+}

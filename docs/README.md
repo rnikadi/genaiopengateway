@@ -16,6 +16,7 @@
 | [Provider adapters](providers.md) | Adapter interface, translation rules, conformance tests |
 | [MCP gateway](mcp.md) | Virtual servers, tool pinning, auth, audit, MCP configuration |
 | [Admin UI and SSO](admin-ui.md) | Pages, roles, OIDC sign-in, sessions, admin API changes |
+| [Roles and permissions](roles.md) | Built-in and custom roles, permissions, team grants |
 | [Admin UI: configuration views](admin-ui-config.md) | Providers, models, guardrails, alerts and settings in the UI |
 | [Playground](playground.md) | Calling a model as a team from the admin UI |
 | [Images, audio, video and realtime](modalities.md) | Media endpoints, how they are metered and priced, and the rollout |
