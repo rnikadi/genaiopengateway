@@ -35,6 +35,38 @@ Native translations come after, each in the adapter that already serves the clou
 - **Speech**: `input` is the text and `voice` is passed through as the Gemini voice name, such as `Kore`; OpenAI voice names are not mapped, since they sound different. Gemini returns 24 kHz PCM, which the gateway answers as WAV, or raw with `response_format: pcm`; other formats get `400`. Characters are counted as for `openai` targets, and the tokens Gemini reports are recorded too, since Google prices TTS by token.
 - Which endpoint a cloud target serves follows from its model id, as chat and embeddings already do.
 
+### Speech providers with their own APIs
+
+Three provider types serve speech and transcription from providers that do not speak the OpenAI API. Each has a default `base_url` and takes `api_key`, which teams can replace with their own ([team-credentials.md](team-credentials.md)).
+
+| Type | `audio.speech` | `audio.transcriptions` | Which model serves what |
+| --- | --- | --- | --- |
+| `elevenlabs` | Text to speech, `POST /v1/text-to-speech/{voice}` | Scribe, `POST /v1/speech-to-text` | `scribe*` models transcribe; the others, such as `eleven_flash_v2_5`, speak |
+| `deepgram` | Aura, `POST /v1/speak` | Pre-recorded, `POST /v1/listen` | `aura*` models speak; the others, such as `nova-3`, transcribe |
+| `assemblyai` | not offered | Upload, start a transcript and wait for it | every model, such as `universal` or `slam-1` |
+
+```yaml
+providers:
+  eleven: {type: elevenlabs, api_key: ${ELEVENLABS_API_KEY}}
+  deepgram: {type: deepgram, api_key: ${DEEPGRAM_API_KEY}}
+  assemblyai: {type: assemblyai, api_key: ${ASSEMBLYAI_API_KEY}, timeout: 10m}
+models:
+  speech:
+    targets:
+      - {provider: eleven, model: eleven_flash_v2_5, price: {per_mchars: 50}}
+      - {provider: deepgram, model: aura-2-thalia-en, price: {per_mchars: 30}}
+  transcribe:
+    targets:
+      - {provider: deepgram, model: nova-3, price: {per_audio_minute: 0.0043}}
+      - {provider: assemblyai, model: universal, price: {per_audio_minute: 0.0025}}
+```
+
+- **Speech.** `input` is the text. ElevenLabs takes an ElevenLabs voice ID as `voice` and `speed` as its voice speed. Deepgram's model names the voice, so `voice` is not used. `response_format` is mp3 (the default), opus, wav or pcm on ElevenLabs, and also aac and flac on Deepgram; pcm and wav are 24 kHz 16-bit mono, as OpenAI's are. Characters are counted as for `openai` targets.
+- **Transcription.** The `file` is sent as the provider expects it, with `language` when given and language detection otherwise; AssemblyAI also takes `prompt`. `response_format` is json, text, verbose_json (with `words` when the provider returns word times), srt or vtt. Translations are not offered.
+- **Audio minutes.** Deepgram and AssemblyAI report the audio's length, which is metered. Scribe does not, so the gateway meters the end time of the last word, which can be a little shorter than the file.
+- **AssemblyAI is asynchronous.** The gateway uploads the file, starts a transcript, checks it every second, and answers when it is ready, within the provider's `timeout` (default 5 minutes; long recordings need more). Then it deletes the transcript and its audio from AssemblyAI, which would otherwise keep them. A transcript that is not ready in time answers `504`.
+- Upstream errors keep their status, so fallback works as for other targets, and their message is passed in OpenAI's error shape.
+
 Native video (Veo, Nova Reel) and cloud rerank stay in issue #35: their jobs and outputs (Google operations, S3 and Cloud Storage outputs) do not map onto the OpenAI shapes without a store of their own.
 
 Realtime APIs other than OpenAI's (Gemini Live, Nova Sonic) and WebRTC are not in this design: WebRTC media goes from the client straight to the provider, so the gateway could neither meter nor guard it.

@@ -128,4 +128,34 @@ check("realtime audio and text cost", abs(rows["realtime"]["cost_usd"] - 0.0536)
 check("rerank cost", abs(rows["rerank"]["cost_usd"] - 0.002) < 1e-9)
 check("batch charged once at the batch discount", rows["batches"]["requests"] == 1 and abs(rows["batches"]["cost_usd"] - 0.001) < 1e-9)
 check("cache hit metered at no cost", rows["chat.completions"]["cache_hits"] == 1 and rows["chat.completions"]["saved_usd"] > 0)
+
+# Providers with their own APIs, through the same OpenAI SDK calls.
+r = client.audio.speech.create(model="eleven-speech", voice="JBFqnCBsd6RMkjVDRZzb", input="hello world")
+check("ElevenLabs speech", r.content == b"ID3eleven")
+r = client.audio.transcriptions.create(model="eleven-scribe", file=("a.wav", WAV, "audio/wav"))
+check("ElevenLabs Scribe transcription", r.text == "hello world")
+r = client.audio.speech.create(model="dg-speech", voice="alloy", input="hello world")
+check("Deepgram Aura speech", r.content == b"ID3deepgram")
+r = client.audio.transcriptions.create(model="dg-transcribe", file=("a.wav", WAV, "audio/wav"), response_format="verbose_json")
+check("Deepgram transcription", r.text == "hello world" and r.duration == 30)
+r = client.audio.transcriptions.create(model="aai-transcribe", file=("a.wav", WAV, "audio/wav"), response_format="text")
+check("AssemblyAI transcription", r.strip() == "hello world")
+
+
+def usage_by_model():
+    req = urllib.request.Request(BASE + "/admin/v1/usage?group_by=model",
+                                 headers={"Authorization": "Bearer conformance-admin-token-0000000000"})
+    return {row["group"]: row for row in json.load(urllib.request.urlopen(req))["data"]}
+
+
+for _ in range(50):
+    rows = usage_by_model()
+    if all(m in rows for m in ("eleven-speech", "eleven-scribe", "dg-speech", "dg-transcribe", "aai-transcribe")):
+        break
+    time.sleep(0.2)
+check("native speech metered", rows["eleven-speech"]["characters"] == 11 and rows["dg-speech"]["characters"] == 11)
+check("native speech cost", abs(rows["eleven-speech"]["cost_usd"] - 11 * 50 / 1e6) < 1e-12)
+check("native audio seconds metered", rows["eleven-scribe"]["audio_seconds"] == 120 and rows["dg-transcribe"]["audio_seconds"] == 30
+      and rows["aai-transcribe"]["audio_seconds"] == 60)
+check("native transcription cost", abs(rows["aai-transcribe"]["cost_usd"] - 0.006) < 1e-9)
 print("conformance: all checks passed")

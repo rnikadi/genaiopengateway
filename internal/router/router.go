@@ -22,7 +22,10 @@ import (
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/provider"
 	"github.com/rnikadi/genaiopengateway/internal/provider/anthropic"
+	"github.com/rnikadi/genaiopengateway/internal/provider/assemblyai"
 	"github.com/rnikadi/genaiopengateway/internal/provider/bedrock"
+	"github.com/rnikadi/genaiopengateway/internal/provider/deepgram"
+	"github.com/rnikadi/genaiopengateway/internal/provider/elevenlabs"
 	"github.com/rnikadi/genaiopengateway/internal/provider/gemini"
 	"github.com/rnikadi/genaiopengateway/internal/provider/openai"
 	"github.com/rnikadi/genaiopengateway/internal/provider/vertex"
@@ -38,11 +41,14 @@ var (
 
 // factories builds an adapter for each provider type.
 var factories = map[string]func(config.Provider, *http.Client) provider.Provider{
-	config.ProviderOpenAI:    func(c config.Provider, h *http.Client) provider.Provider { return openai.New(c, h) },
-	config.ProviderAnthropic: func(c config.Provider, h *http.Client) provider.Provider { return anthropic.New(c, h) },
-	config.ProviderGemini:    func(c config.Provider, h *http.Client) provider.Provider { return gemini.New(c, h) },
-	config.ProviderVertex:    func(c config.Provider, h *http.Client) provider.Provider { return vertex.New(c, h) },
-	config.ProviderBedrock:   func(c config.Provider, h *http.Client) provider.Provider { return bedrock.New(c, h) },
+	config.ProviderOpenAI:     func(c config.Provider, h *http.Client) provider.Provider { return openai.New(c, h) },
+	config.ProviderAnthropic:  func(c config.Provider, h *http.Client) provider.Provider { return anthropic.New(c, h) },
+	config.ProviderGemini:     func(c config.Provider, h *http.Client) provider.Provider { return gemini.New(c, h) },
+	config.ProviderVertex:     func(c config.Provider, h *http.Client) provider.Provider { return vertex.New(c, h) },
+	config.ProviderBedrock:    func(c config.Provider, h *http.Client) provider.Provider { return bedrock.New(c, h) },
+	config.ProviderElevenLabs: func(c config.Provider, h *http.Client) provider.Provider { return elevenlabs.New(c, h) },
+	config.ProviderDeepgram:   func(c config.Provider, h *http.Client) provider.Provider { return deepgram.New(c, h) },
+	config.ProviderAssemblyAI: func(c config.Provider, h *http.Client) provider.Provider { return assemblyai.New(c, h) },
 }
 
 // Router dispatches requests to the targets of a virtual model.
@@ -85,7 +91,7 @@ func (r *Router) adapter(ctx context.Context, name string) provider.Provider {
 }
 
 // credentialTypes are the provider types whose api_key a team may replace.
-var credentialTypes = []string{config.ProviderOpenAI, config.ProviderAnthropic, config.ProviderGemini, config.ProviderBedrock}
+var credentialTypes = []string{config.ProviderOpenAI, config.ProviderAnthropic, config.ProviderGemini, config.ProviderBedrock, config.ProviderElevenLabs, config.ProviderDeepgram, config.ProviderAssemblyAI}
 
 // CheckCredential reports why a provider cannot take a team's API key.
 func (r *Router) CheckCredential(providerName string) error {
