@@ -28,6 +28,8 @@
 | [Team provider credentials](team-credentials.md) | A team's own provider API keys, used for its requests instead of the shared ones |
 | [Per-user MCP credentials](mcp-user-credentials.md) | Connecting each user's upstream account, token storage and refresh |
 | [Body logging](body-logging.md) | Opt-in request and response logging, redaction, retention, access |
+| [Encryption keys and KMS](secrets.md) | The encryption key, rotation, and unwrapping it with AWS KMS, Google Cloud KMS or Vault Transit |
+| [Streams](streams.md) | Usage, audit, MCP call and guardrail records sent to a webhook or a file as they are written |
 | [Alerts](alerts.md) | Budget thresholds and other events, webhooks and Slack |
 | [Guardrails](guardrails.md) | PII, pattern, classifier and webhook checks on model and MCP calls |
 | [Gemini, Vertex AI and Bedrock](cloud-providers.md) | Cloud adapters, credentials and translation rules |

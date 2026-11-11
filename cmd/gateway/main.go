@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/rnikadi/genaiopengateway/internal/config"
+	"github.com/rnikadi/genaiopengateway/internal/kms"
 	"github.com/rnikadi/genaiopengateway/internal/mcpgw"
 	"github.com/rnikadi/genaiopengateway/internal/server"
 	"github.com/rnikadi/genaiopengateway/internal/store"
@@ -28,6 +29,7 @@ var version = "dev"
 const shutdownGrace = 50 * time.Second
 
 func main() {
+	config.RegisterUnwrapper(kms.Unwrap)
 	path := flag.String("config", "config.yaml", "path to the config file; without one the gateway starts with zero config")
 	dataDir := flag.String("data", envOr("GOG_DATA_DIR", config.DefaultDataDir), "data directory for a start without a config file")
 	showVersion := flag.Bool("version", false, "print the version and exit")

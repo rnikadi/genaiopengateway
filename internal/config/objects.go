@@ -19,10 +19,11 @@ const (
 	KindMCPServers        = "mcp_servers"
 	KindMCPVirtualServers = "mcp_virtual_servers"
 	KindAlertWebhooks     = "alert_webhooks"
+	KindStreams           = "streams"
 )
 
 // Kinds lists the storable kinds in the order a merge adds them.
-var Kinds = []string{KindProviders, KindModels, KindGuardrails, KindMCPServers, KindMCPVirtualServers, KindAlertWebhooks}
+var Kinds = []string{KindProviders, KindModels, KindGuardrails, KindMCPServers, KindMCPVirtualServers, KindAlertWebhooks, KindStreams}
 
 // kindPath is where a kind lives in the config file. Alert webhooks are
 // a list keyed by name; the others are maps.
@@ -33,6 +34,7 @@ var kindPath = map[string][]string{
 	KindMCPServers:        {"mcp", "servers"},
 	KindMCPVirtualServers: {"mcp", "virtual_servers"},
 	KindAlertWebhooks:     {"alerts", "webhooks"},
+	KindStreams:           {"streams"},
 }
 
 // SecretFields lists the fields of each kind's spec that hold secrets.
@@ -42,6 +44,7 @@ var SecretFields = map[string][][]string{
 	KindGuardrails:    {{"url"}, {"secret"}},
 	KindMCPServers:    {{"headers", "*"}, {"user_auth", "client_secret"}},
 	KindAlertWebhooks: {{"url"}, {"secret"}},
+	KindStreams:       {{"url"}, {"secret"}, {"headers", "*"}},
 	KindSettings:      {{"sso", "oidc", "client_secret"}},
 }
 
@@ -250,6 +253,7 @@ var specTypes = map[string]func() any{
 	KindMCPServers:        func() any { return new(MCPServer) },
 	KindMCPVirtualServers: func() any { return new(VirtualServer) },
 	KindAlertWebhooks:     func() any { return new(Webhook) },
+	KindStreams:           func() any { return new(Stream) },
 	KindSettings:          func() any { return new(Settings) },
 }
 

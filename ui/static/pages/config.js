@@ -7,6 +7,7 @@ const kindNames = {
   mcp_servers: 'MCP servers',
   mcp_virtual_servers: 'Virtual MCP servers',
   alert_webhooks: 'Alert webhooks',
+  streams: 'Streams',
 };
 
 // A starting spec for each kind, in the config file's shape.
@@ -17,6 +18,7 @@ const templates = {
   mcp_servers: { url: 'https://mcp.example.com/mcp', pin_tools: 'strict' },
   mcp_virtual_servers: { servers: [{ server: '' }] },
   alert_webhooks: { url: '', format: 'slack', events: ['budget.threshold'] },
+  streams: { type: 'webhook', url: '', records: ['usage', 'audit'], batch_size: 500, flush_interval: '5s' },
 };
 
 // namesOf lists the names of each kind, from the file and the store.
@@ -483,6 +485,29 @@ function WebhookForm({ spec, onChange }) {
     <${Field} label="Events" setting="alerts.webhooks.events"><${Checks} ...${p} path="events" options=${alertEvents} /><//>`;
 }
 
+const recordTypes = ['usage', 'audit', 'mcp_calls', 'guardrail_events'];
+
+function StreamForm({ spec, onChange }) {
+  const p = { spec, onChange };
+  const t = spec.type || 'webhook';
+  return html`
+    <p class="muted small">Copies records to another system as the gateway writes them: a SIEM, a data warehouse loader, or a log shipper (docs/streams.md).</p>
+    <${Field} label="Type" setting="streams.type"><${Select} ...${p} path="type" options=${{ webhook: 'Webhook (signed NDJSON batches)', file: 'File (JSON Lines on the gateway host)' }} /><//>
+    ${t === 'webhook'
+      ? html`
+        <${Field} label="URL" setting="streams.url" hint="https, or http to localhost. Encrypted in the database."><${Secret} ...${p} path="url" /><//>
+        <${Field} label="Signing secret" setting="streams.secret" hint="Optional. Signs each batch with X-GOG-Signature."><${Secret} ...${p} path="secret" /><//>
+        <${Field} label="Headers" setting="streams.headers" hint="Sent with every batch, such as an authorization token. Values are encrypted."><${Headers} ...${p} path="headers" secret /><//>`
+      : html`<${Field} label="Path" setting="streams.path" hint="An absolute path on each replica's disk. Each replica appends its own records."><${Text} ...${p} path="path" placeholder="/var/log/genaiopengateway/records.jsonl" /><//>`}
+    <${Field} label="Records" setting="streams.records"><${Checks} ...${p} path="records" options=${recordTypes} /><//>
+    <div class="row">
+      <${Field} label="Records per batch" setting="streams.batch_size" hint="At most 10,000. Default 500.">
+        <input type="number" min="1" max="10000" step="1" value=${spec.batch_size ?? ''} placeholder="500" onInput=${(e) => onChange(put(spec, 'batch_size', e.target.value === '' ? undefined : Number(e.target.value)))} />
+      <//>
+      <${Field} label="Send at least every" setting="streams.flush_interval"><${Text} ...${p} path="flush_interval" placeholder="5s" /><//>
+    </div>`;
+}
+
 const forms = {
   providers: ProviderForm,
   models: ModelForm,
@@ -490,4 +515,5 @@ const forms = {
   mcp_servers: MCPServerForm,
   mcp_virtual_servers: VirtualServerForm,
   alert_webhooks: WebhookForm,
+  streams: StreamForm,
 };

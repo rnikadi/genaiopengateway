@@ -129,21 +129,21 @@ func FromOpenAI(body []byte) (Tokens, bool) {
 
 // Record is the stored account of one request.
 type Record struct {
-	RequestID     string
-	Time          time.Time
-	OrgID         string
-	TeamID        string
-	KeyID         string
-	Endpoint      string
-	Model         string
-	Provider      string
-	UpstreamModel string
-	Status        int
-	LatencyMS     int64
-	Tokens        Tokens
-	CostUSD       float64
+	RequestID     string    `json:"request_id"`
+	Time          time.Time `json:"ts"`
+	OrgID         string    `json:"org_id"`
+	TeamID        string    `json:"team_id"`
+	KeyID         string    `json:"key_id"`
+	Endpoint      string    `json:"endpoint"`
+	Model         string    `json:"model"`
+	Provider      string    `json:"provider"`
+	UpstreamModel string    `json:"upstream_model"`
+	Status        int       `json:"status"`
+	LatencyMS     int64     `json:"latency_ms"`
+	Tokens        Tokens    `json:"tokens"`
+	CostUSD       float64   `json:"cost_usd"`
 	// CacheHit marks an answer served from the response cache; SavedUSD
 	// is what it cost when it was first made.
-	CacheHit bool
-	SavedUSD float64
+	CacheHit bool    `json:"cache_hit"`
+	SavedUSD float64 `json:"saved_usd"`
 }

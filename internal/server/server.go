@@ -28,6 +28,7 @@ import (
 	"github.com/rnikadi/genaiopengateway/internal/provider"
 	"github.com/rnikadi/genaiopengateway/internal/router"
 	"github.com/rnikadi/genaiopengateway/internal/store"
+	"github.com/rnikadi/genaiopengateway/internal/stream"
 	"github.com/rnikadi/genaiopengateway/internal/telemetry"
 	"github.com/rnikadi/genaiopengateway/internal/usage"
 )
@@ -53,6 +54,7 @@ type Server struct {
 	log      *slog.Logger
 	client   *http.Client
 	routing  *router.Health
+	streams  *stream.Manager
 
 	// store and usage are nil when no database is configured.
 	store *store.Store
@@ -127,15 +129,17 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error)
 	}
 	s.cacheIndex = cache.NewIndex(cfg.Cache.Semantic.MaxEntries)
 	if st != nil {
-		s.usage = usage.NewWriter(st.InsertUsage, log, "usage")
-		s.calls = usage.NewWriter(st.InsertMCPCalls, log, "mcp_calls")
+		s.usage = usage.NewWriter(streamed(s, config.RecordUsage, st.InsertUsage), log, "usage")
+		s.calls = usage.NewWriter(streamed(s, config.RecordMCPCalls, st.InsertMCPCalls), log, "mcp_calls")
 		s.bodies = usage.NewWriterSize(s.writeBodies, log, "request_bodies", bodyQueue)
-		s.guardEvents = usage.NewWriter(st.InsertGuardrailEvents, log, "guardrail_events")
+		s.guardEvents = usage.NewWriter(streamed(s, config.RecordGuardrailEvents, st.InsertGuardrailEvents), log, "guardrail_events")
+		st.OnAudit(func(e store.AuditEntry) { stream.Publish(s.streams, config.RecordAudit, []store.AuditEntry{e}) })
 	} else {
 		s.ready.Store(true)
 	}
 	s.metrics = telemetry.NewMetrics(s.usageWriteErrors, s.snapshotAge, s.bodiesDropped)
 	s.metrics.WatchCircuits(s.circuitStates)
+	s.streams = stream.New(ctx, log, s.client.Transport, s.metrics)
 	s.notifier = alerts.New(log, s.client.Transport, mcpgw.Version, s.metrics.ObserveAlertDelivery)
 	mo := mcpgw.Options{Log: log, Transport: s.client.Transport, Limiter: s.limiter, Metrics: s.metrics, Guard: s.guardTool}
 	if st != nil {
@@ -208,6 +212,7 @@ func (s *Server) install(cfg *config.Config) error {
 	}
 	s.cacheIndex.SetMax(cfg.Cache.Semantic.MaxEntries)
 	s.mcp.Reload(cfg.MCP)
+	s.streams.Apply(cfg.Streams)
 	s.rebuildKeys()
 	return nil
 }
@@ -250,6 +255,14 @@ func (s *Server) Close(ctx context.Context) {
 		s.guardEvents.Close(ctx)
 	}
 	s.stop()
+	// Streams flush what they hold once stopped; wait for that as long
+	// as the shutdown allows.
+	flushed := make(chan struct{})
+	go func() { s.streams.Wait(); close(flushed) }()
+	select {
+	case <-flushed:
+	case <-ctx.Done():
+	}
 	s.mcp.Close()
 	if s.valkey != nil {
 		_ = s.valkey.Close()
@@ -573,4 +586,16 @@ func (s *Server) circuitStates() map[string]float64 {
 		}
 	}
 	return out
+}
+
+// streamed wraps a store write so the records also go to streams once
+// they are written.
+func streamed[T any](s *Server, recordType string, write func(context.Context, []T) error) func(context.Context, []T) error {
+	return func(ctx context.Context, recs []T) error {
+		if err := write(ctx, recs); err != nil {
+			return err
+		}
+		stream.Publish(s.streams, recordType, recs)
+		return nil
+	}
 }

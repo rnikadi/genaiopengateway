@@ -3,15 +3,19 @@
 package config
 
 import (
+	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -26,20 +30,23 @@ type Config struct {
 	// Raw is the config file as read, for merging stored objects into.
 	Raw []byte `yaml:"-"`
 
-	Listen      string               `yaml:"listen"`
-	TLS         TLS                  `yaml:"tls"`
-	Admin       Admin                `yaml:"admin"`
-	Metrics     Metrics              `yaml:"metrics"`
-	Store       Store                `yaml:"store"`
-	Limiter     Limiter              `yaml:"limiter"`
-	Limits      Limits               `yaml:"limits"`
-	Providers   map[string]Provider  `yaml:"providers"`
-	Models      map[string]Model     `yaml:"models"`
-	Keys        []StaticKey          `yaml:"keys"`
-	MCP         MCP                  `yaml:"mcp"`
-	SSO         SSO                  `yaml:"sso"`
-	UI          UI                   `yaml:"ui"`
-	Alerts      Alerts               `yaml:"alerts"`
+	Listen    string              `yaml:"listen"`
+	TLS       TLS                 `yaml:"tls"`
+	Admin     Admin               `yaml:"admin"`
+	Metrics   Metrics             `yaml:"metrics"`
+	Store     Store               `yaml:"store"`
+	Limiter   Limiter             `yaml:"limiter"`
+	Limits    Limits              `yaml:"limits"`
+	Providers map[string]Provider `yaml:"providers"`
+	Models    map[string]Model    `yaml:"models"`
+	Keys      []StaticKey         `yaml:"keys"`
+	MCP       MCP                 `yaml:"mcp"`
+	SSO       SSO                 `yaml:"sso"`
+	UI        UI                  `yaml:"ui"`
+	Alerts    Alerts              `yaml:"alerts"`
+	// Streams copy usage, audit and other records to outside systems as
+	// they are written (docs/streams.md).
+	Streams     map[string]Stream    `yaml:"streams"`
 	Secrets     Secrets              `yaml:"secrets"`
 	BodyLogging BodyLogging          `yaml:"body_logging"`
 	Guardrails  map[string]Guardrail `yaml:"guardrails"`
@@ -70,6 +77,95 @@ type SemanticCache struct {
 type Secrets struct {
 	EncryptionKey Secret   `yaml:"encryption_key"`
 	PreviousKeys  []Secret `yaml:"previous_keys"`
+	// KMS supplies the keys instead, wrapped by a key management service
+	// and unwrapped at startup (docs/secrets.md).
+	KMS *KMS `yaml:"kms"`
+}
+
+// KMS providers.
+const (
+	KMSAWS   = "aws"
+	KMSGCP   = "gcp"
+	KMSVault = "vault"
+)
+
+// KMS names the key that wraps the gateway's encryption keys, and the
+// wrapped keys. The plaintext keys exist only in memory.
+type KMS struct {
+	Provider string `yaml:"provider"`
+	// Key is an AWS KMS key ARN, a Google Cloud KMS key resource name
+	// (projects/…/cryptoKeys/…), or a Vault Transit key name.
+	Key        string   `yaml:"key"`
+	WrappedKey string   `yaml:"wrapped_key"`
+	Previous   []string `yaml:"previous_wrapped_keys"`
+	// Endpoint overrides the service's URL, such as a VPC endpoint. For
+	// Vault it is the server address; VAULT_ADDR is the default.
+	Endpoint string `yaml:"endpoint"`
+	// Mount is Vault's Transit mount, default transit. Role logs in to
+	// Vault with the pod's Kubernetes service account through AuthMount
+	// (default kubernetes); without it, VAULT_TOKEN is used.
+	Mount     string `yaml:"mount"`
+	Role      string `yaml:"role"`
+	AuthMount string `yaml:"auth_mount"`
+}
+
+// Unwrapper decrypts a wrapped key with a KMS. The gateway registers one
+// at startup; see RegisterUnwrapper.
+type Unwrapper func(ctx context.Context, k KMS, wrapped string) ([]byte, error)
+
+var (
+	unwrapper   Unwrapper
+	unwrapCache sync.Map // KMS provider, key and wrapped key to plaintext key
+)
+
+// RegisterUnwrapper sets how secrets.kms keys are unwrapped. Each
+// wrapped key is unwrapped once per process: config reloads reuse it.
+func RegisterUnwrapper(u Unwrapper) { unwrapper = u }
+
+// resolveKMS fills EncryptionKey and PreviousKeys from secrets.kms.
+func (c *Config) resolveKMS(add func(string, ...any)) {
+	k := c.Secrets.KMS
+	if k == nil {
+		return
+	}
+	if c.Secrets.EncryptionKey != "" || len(c.Secrets.PreviousKeys) > 0 {
+		add("secrets: use encryption_key or kms, not both")
+		return
+	}
+	switch k.Provider {
+	case KMSAWS, KMSGCP, KMSVault:
+	default:
+		add("secrets.kms.provider must be aws, gcp or vault, got %q", k.Provider)
+		return
+	}
+	if k.Key == "" || k.WrappedKey == "" {
+		add("secrets.kms needs key and wrapped_key")
+		return
+	}
+	if unwrapper == nil {
+		add("secrets.kms is not available in this build")
+		return
+	}
+	for i, w := range append([]string{k.WrappedKey}, k.Previous...) {
+		cacheKey := k.Provider + "\x00" + k.Key + "\x00" + w
+		plain, ok := unwrapCache.Load(cacheKey)
+		if !ok {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			b, err := unwrapper(ctx, *k, w)
+			cancel()
+			if err != nil {
+				add("secrets.kms: unwrapping key %d: %v", i, err)
+				return
+			}
+			plain = Secret(base64.StdEncoding.EncodeToString(b))
+			unwrapCache.Store(cacheKey, plain)
+		}
+		if i == 0 {
+			c.Secrets.EncryptionKey = plain.(Secret)
+		} else {
+			c.Secrets.PreviousKeys = append(c.Secrets.PreviousKeys, plain.(Secret))
+		}
+	}
 }
 
 // BodyLogging configures opt-in logging of request and response bodies
@@ -178,6 +274,39 @@ type Webhook struct {
 	// Org limits the webhook to alerts about one organization, by name or
 	// id; empty receives all.
 	Org string `yaml:"org"`
+}
+
+// Stream types and record types (docs/streams.md).
+const (
+	StreamWebhook = "webhook"
+	StreamFile    = "file"
+
+	RecordUsage           = "usage"
+	RecordAudit           = "audit"
+	RecordMCPCalls        = "mcp_calls"
+	RecordGuardrailEvents = "guardrail_events"
+
+	DefaultStreamBatchSize     = 500
+	DefaultStreamFlushInterval = 5 * time.Second
+	MaxStreamBatchSize         = 10_000
+)
+
+// RecordTypes lists what a stream can carry.
+var RecordTypes = []string{RecordUsage, RecordAudit, RecordMCPCalls, RecordGuardrailEvents}
+
+// Stream sends records to a webhook as signed NDJSON batches, or appends
+// them to a JSON Lines file for a log shipper.
+type Stream struct {
+	Type    string            `yaml:"type"`
+	URL     Secret            `yaml:"url"`
+	Secret  Secret            `yaml:"secret"`
+	Headers map[string]Secret `yaml:"headers"`
+	Path    string            `yaml:"path"`
+	Records []string          `yaml:"records"`
+	// BatchSize and FlushInterval bound how many records a delivery
+	// holds and how long a record waits for one.
+	BatchSize     int      `yaml:"batch_size"`
+	FlushInterval Duration `yaml:"flush_interval"`
 }
 
 // Wants reports whether the webhook receives an event.
@@ -618,6 +747,7 @@ func expandEnv(n *yaml.Node) error {
 func (c *Config) validate() error {
 	var errs []error
 	add := func(format string, args ...any) { errs = append(errs, fmt.Errorf(format, args...)) }
+	c.resolveKMS(add)
 
 	if (c.TLS.CertFile == "") != (c.TLS.KeyFile == "") {
 		add("tls: cert_file and key_file must be set together")
@@ -759,6 +889,7 @@ func (c *Config) validate() error {
 	c.validateMCP(add)
 	c.validateSSO(add)
 	c.validateAlerts(add)
+	c.validateStreams(add)
 	c.validateBodyLogging(add)
 	c.validateGuardrails(add)
 
@@ -1185,4 +1316,42 @@ func ParseDuration(s string) (time.Duration, error) {
 		return 0, fmt.Errorf("invalid duration %q", s)
 	}
 	return v, nil
+}
+
+func (c *Config) validateStreams(add func(string, ...any)) {
+	for name, st := range c.Streams {
+		if !ValidObjectName(name) {
+			add("stream %q: names are lowercase letters, digits, '.', '_' and '-'", name)
+		}
+		switch st.Type {
+		case StreamWebhook:
+			if !webhookURL(st.URL.Value()) {
+				add("stream %q: url must be https, or http to localhost", name)
+			}
+		case StreamFile:
+			if !filepath.IsAbs(st.Path) {
+				add("stream %q: path must be an absolute file path", name)
+			}
+		default:
+			add("stream %q: type must be webhook or file, got %q", name, st.Type)
+		}
+		if len(st.Records) == 0 {
+			add("stream %q: records must list at least one of %s", name, strings.Join(RecordTypes, ", "))
+		}
+		for _, r := range st.Records {
+			if !slices.Contains(RecordTypes, r) {
+				add("stream %q: unknown record type %q; use %s", name, r, strings.Join(RecordTypes, ", "))
+			}
+		}
+		if st.BatchSize < 0 || st.BatchSize > MaxStreamBatchSize || st.FlushInterval < 0 {
+			add("stream %q: batch_size must be between 1 and %d, and flush_interval not negative", name, MaxStreamBatchSize)
+		}
+		if st.BatchSize == 0 {
+			st.BatchSize = DefaultStreamBatchSize
+		}
+		if st.FlushInterval == 0 {
+			st.FlushInterval = Duration(DefaultStreamFlushInterval)
+		}
+		c.Streams[name] = st
+	}
 }
