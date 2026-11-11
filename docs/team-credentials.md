@@ -14,7 +14,7 @@ A team credential names a provider defined in the gateway (in the file or the UI
 
 | Provider type | What the team stores |
 | --- | --- |
-| `openai`, `anthropic`, `gemini`, `elevenlabs`, `deepgram`, `assemblyai` | An API key |
+| `openai`, `anthropic`, `gemini`, `cohere`, `elevenlabs`, `deepgram`, `assemblyai`, `stability`, `fal` | An API key |
 | `bedrock` | A Bedrock API key |
 | `vertex` | Not supported yet: Vertex AI authenticates with a service account, which needs its own design |
 

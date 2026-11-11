@@ -54,17 +54,22 @@ func NewUpstream(cfg config.Provider, client *http.Client, up Upstream) *Provide
 
 // Supports implements provider.Provider.
 func (p *Provider) Supports(e provider.Endpoint) bool {
-	return e == provider.ChatCompletions || e == provider.GenerateContent || e == provider.ImageGenerations || e == provider.Speech
+	return e == provider.ChatCompletions || e == provider.GenerateContent || e == provider.ImageGenerations || e == provider.Speech || e == provider.Videos
 }
 
 // SupportsModel implements provider.ModelSupporter: Imagen models make
-// images, text to speech models speak, and other models chat.
+// images, text to speech models speak, Veo models make videos, and
+// other models chat.
 func (p *Provider) SupportsModel(e provider.Endpoint, model string) bool {
 	switch {
 	case isImagen(model):
 		return e == provider.ImageGenerations
 	case isTTS(model):
 		return e == provider.Speech
+	case isVeo(model):
+		// Veo jobs are served by the Gemini API only, not through
+		// another upstream such as Vertex AI.
+		return e == provider.Videos && p.up.URL == nil
 	}
 	return e == provider.ChatCompletions || e == provider.GenerateContent
 }
@@ -84,6 +89,8 @@ func (p *Provider) Send(ctx context.Context, req *provider.Request) (*provider.R
 		return p.images(ctx, req)
 	case provider.Speech:
 		return p.speech(ctx, req)
+	case provider.Videos:
+		return p.video(ctx, req)
 	}
 	// The gateway adds model and stream to the body; Google's API takes
 	// them from the URL.

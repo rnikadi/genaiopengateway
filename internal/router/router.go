@@ -24,10 +24,13 @@ import (
 	"github.com/rnikadi/genaiopengateway/internal/provider/anthropic"
 	"github.com/rnikadi/genaiopengateway/internal/provider/assemblyai"
 	"github.com/rnikadi/genaiopengateway/internal/provider/bedrock"
+	"github.com/rnikadi/genaiopengateway/internal/provider/cohere"
 	"github.com/rnikadi/genaiopengateway/internal/provider/deepgram"
 	"github.com/rnikadi/genaiopengateway/internal/provider/elevenlabs"
+	"github.com/rnikadi/genaiopengateway/internal/provider/fal"
 	"github.com/rnikadi/genaiopengateway/internal/provider/gemini"
 	"github.com/rnikadi/genaiopengateway/internal/provider/openai"
+	"github.com/rnikadi/genaiopengateway/internal/provider/stability"
 	"github.com/rnikadi/genaiopengateway/internal/provider/vertex"
 	"github.com/rnikadi/genaiopengateway/internal/telemetry"
 )
@@ -49,6 +52,9 @@ var factories = map[string]func(config.Provider, *http.Client) provider.Provider
 	config.ProviderElevenLabs: func(c config.Provider, h *http.Client) provider.Provider { return elevenlabs.New(c, h) },
 	config.ProviderDeepgram:   func(c config.Provider, h *http.Client) provider.Provider { return deepgram.New(c, h) },
 	config.ProviderAssemblyAI: func(c config.Provider, h *http.Client) provider.Provider { return assemblyai.New(c, h) },
+	config.ProviderStability:  func(c config.Provider, h *http.Client) provider.Provider { return stability.New(c, h) },
+	config.ProviderFal:        func(c config.Provider, h *http.Client) provider.Provider { return fal.New(c, h) },
+	config.ProviderCohere:     func(c config.Provider, h *http.Client) provider.Provider { return cohere.New(c, h) },
 }
 
 // Router dispatches requests to the targets of a virtual model.
@@ -91,7 +97,7 @@ func (r *Router) adapter(ctx context.Context, name string) provider.Provider {
 }
 
 // credentialTypes are the provider types whose api_key a team may replace.
-var credentialTypes = []string{config.ProviderOpenAI, config.ProviderAnthropic, config.ProviderGemini, config.ProviderBedrock, config.ProviderElevenLabs, config.ProviderDeepgram, config.ProviderAssemblyAI}
+var credentialTypes = []string{config.ProviderOpenAI, config.ProviderAnthropic, config.ProviderGemini, config.ProviderBedrock, config.ProviderElevenLabs, config.ProviderDeepgram, config.ProviderAssemblyAI, config.ProviderStability, config.ProviderFal, config.ProviderCohere}
 
 // CheckCredential reports why a provider cannot take a team's API key.
 func (r *Router) CheckCredential(providerName string) error {

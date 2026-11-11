@@ -67,7 +67,32 @@ models:
 - **AssemblyAI is asynchronous.** The gateway uploads the file, starts a transcript, checks it every second, and answers when it is ready, within the provider's `timeout` (default 5 minutes; long recordings need more). Then it deletes the transcript and its audio from AssemblyAI, which would otherwise keep them. A transcript that is not ready in time answers `504`.
 - Upstream errors keep their status, so fallback works as for other targets, and their message is passed in OpenAI's error shape.
 
-Native video (Veo, Nova Reel) and cloud rerank stay in issue #35: their jobs and outputs (Google operations, S3 and Cloud Storage outputs) do not map onto the OpenAI shapes without a store of their own.
+### Image providers with their own APIs
+
+| Type | Default `base_url` | Models | What it calls |
+| --- | --- | --- | --- |
+| `stability` | `https://api.stability.ai` | `stable-image-core`, `stable-image-ultra`, and `sd3*` models such as `sd3.5-large` | `POST /v2beta/stable-image/generate/{core,ultra,sd3}`, once per image |
+| `fal` | `https://fal.run` | any fal text to image endpoint id, such as `fal-ai/flux/dev` | `POST /{model}`, the synchronous API |
+
+- `prompt`, `n` (at most 4), `size`, `seed` and `negative_prompt` carry over. Stability takes the nearest of its aspect ratios to `size`; fal takes the exact width and height.
+- Stability answers `data[].b64_json` and fal answers `data[].url` on fal's CDN, which is how each returns images. `output_format` is png, jpeg or webp on Stability, png or jpeg on fal.
+- Images that a provider's safety filter blocks are left out and not counted, as for Imagen.
+- Image edits stay on `openai` targets.
+
+### Cohere
+
+The `cohere` type (default `base_url` `https://api.cohere.com`) serves chat and embeddings through Cohere's OpenAI compatibility API, and `rerank` through Cohere's own `/v2/rerank`, which takes the same `query` and `documents` as the gateway's endpoint. `rerank*` models rerank, `embed*` models embed, and the others chat. Mistral needs no type of its own: its API is OpenAI-compatible, including transcription with Voxtral, so it is an `openai` provider (see the catalog preset).
+
+### Veo on the Gemini API
+
+A `gemini` target whose model starts with `veo-`, such as `veo-3.0-generate-001`, serves `videos` as a job, like OpenAI's:
+
+- **Create** calls `predictLongRunning` with the `prompt`, `seconds` as `durationSeconds` (default 8) and `size` as Veo's `aspectRatio` (16:9 or 9:16) and `resolution` (720p, or 1080p when the short side is 1080 or more). The answer is OpenAI's video object, whose `id` encodes the Veo operation, and the requested seconds are metered. `input_reference` and remix are not offered for Veo.
+- **Retrieve** reads the operation: `in_progress` until it is done, then `completed`, or `failed` with the reason when Veo filtered the video or reported an error.
+- **Content** downloads the video from the Gemini API's file service with the provider's key. The gateway only sends the key to the provider's own host.
+- **Delete** forgets the job in the gateway; Veo keeps generated videos for two days and has no delete.
+
+Veo through Vertex AI, Nova Reel, and cloud rerank stay in issue #35: their outputs go to Cloud Storage and S3, which do not map onto the OpenAI shapes without a store of their own.
 
 Realtime APIs other than OpenAI's (Gemini Live, Nova Sonic) and WebRTC are not in this design: WebRTC media goes from the client straight to the provider, so the gateway could neither meter nor guard it.
 

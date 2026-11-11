@@ -509,6 +509,11 @@ const (
 	ProviderElevenLabs = "elevenlabs"
 	ProviderDeepgram   = "deepgram"
 	ProviderAssemblyAI = "assemblyai"
+	// Image providers with their own APIs.
+	ProviderStability = "stability"
+	ProviderFal       = "fal"
+	// ProviderCohere serves Cohere chat, embeddings and rerank.
+	ProviderCohere = "cohere"
 
 	// DefaultGeminiBaseURL is the Gemini API.
 	DefaultGeminiBaseURL = "https://generativelanguage.googleapis.com"
@@ -521,10 +526,13 @@ var defaultBaseURLs = map[string]string{
 	ProviderElevenLabs: "https://api.elevenlabs.io",
 	ProviderDeepgram:   "https://api.deepgram.com",
 	ProviderAssemblyAI: "https://api.assemblyai.com",
+	ProviderStability:  "https://api.stability.ai",
+	ProviderFal:        "https://fal.run",
+	ProviderCohere:     "https://api.cohere.com",
 }
 
 // ProviderTypes lists the provider types.
-var ProviderTypes = []string{ProviderOpenAI, ProviderAnthropic, ProviderGemini, ProviderVertex, ProviderBedrock, ProviderElevenLabs, ProviderDeepgram, ProviderAssemblyAI}
+var ProviderTypes = []string{ProviderOpenAI, ProviderAnthropic, ProviderGemini, ProviderVertex, ProviderBedrock, ProviderElevenLabs, ProviderDeepgram, ProviderAssemblyAI, ProviderStability, ProviderFal, ProviderCohere}
 
 // Provider is an upstream that serves models.
 type Provider struct {
@@ -908,7 +916,7 @@ func (c *Config) validate() error {
 		case "":
 			p.Type = ProviderOpenAI
 		case ProviderOpenAI, ProviderAnthropic:
-		case ProviderGemini, ProviderElevenLabs, ProviderDeepgram, ProviderAssemblyAI:
+		case ProviderGemini, ProviderElevenLabs, ProviderDeepgram, ProviderAssemblyAI, ProviderStability, ProviderFal, ProviderCohere:
 			if p.BaseURL == "" {
 				p.BaseURL = defaultBaseURLs[p.Type]
 			}
