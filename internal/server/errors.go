@@ -18,6 +18,7 @@ const (
 	codeResidency        = "residency_not_allowed"
 	codeNotFound         = "not_found"
 	codeNoDatabase       = "database_required"
+	codePolicyDenied     = "policy_denied"
 )
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

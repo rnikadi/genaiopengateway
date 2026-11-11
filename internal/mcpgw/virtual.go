@@ -178,6 +178,12 @@ func (g *Gateway) forwardTool(u *upstream, name string) mcp.ToolHandler {
 		c := callFrom(ctx)
 		c.Server, c.Name = u.name, name
 		args := any(req.Params.Arguments)
+		if g.opts.Authorize != nil {
+			if denied := g.opts.Authorize(ctx, c.caller, u.name, name); denied != "" {
+				g.opts.Metrics.ObserveMCPToolCall(u.name, name, telemetry.MCPDenied)
+				return blockedResult("Tool " + name + " is not permitted: " + denied + "."), nil
+			}
+		}
 		if g.opts.Guard != nil {
 			var blocked string
 			if args, blocked = g.guardArguments(ctx, c, req.Params.Arguments); blocked != "" {

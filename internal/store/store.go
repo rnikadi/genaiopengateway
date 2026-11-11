@@ -345,6 +345,9 @@ func (s *Store) DeleteOrg(ctx context.Context, orgID string) error {
 		if n > 0 {
 			return fmt.Errorf("%w: organization has %d teams", ErrConflict, n)
 		}
+		if _, err := tx.ExecContext(ctx, s.q(`DELETE FROM cedar_policies WHERE org_id = ?`), orgID); err != nil {
+			return err
+		}
 		return affected(tx.ExecContext(ctx, s.q(`DELETE FROM orgs WHERE id = ?`), orgID))
 	})
 }

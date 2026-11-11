@@ -78,6 +78,8 @@ type Server struct {
 	mcp         *mcpgw.Gateway
 	lastRefresh atomic.Int64 // unix nanoseconds of the last store load
 	tenants     atomic.Pointer[tenants]
+	// cedar holds each organization's Cedar policies in force.
+	cedar atomic.Pointer[map[string]*orgCedar]
 
 	// mu serializes rebuilding the key directory from its two sources.
 	mu        sync.Mutex
@@ -142,7 +144,7 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error)
 	s.metrics.WatchCircuits(s.circuitStates)
 	s.streams = stream.New(ctx, log, s.client.Transport, s.metrics)
 	s.notifier = alerts.New(log, s.client.Transport, mcpgw.Version, s.metrics.ObserveAlertDelivery)
-	mo := mcpgw.Options{Log: log, Transport: s.client.Transport, Limiter: s.limiter, Metrics: s.metrics, Guard: s.guardTool}
+	mo := mcpgw.Options{Log: log, Transport: s.client.Transport, Limiter: s.limiter, Metrics: s.metrics, Guard: s.guardTool, Authorize: s.authorizeTool}
 	if st != nil {
 		s.conns = newConnections(s)
 		mo.Pins, mo.Record, mo.Audit, mo.OnPending, mo.LogBody = st, s.calls.Add, st.AppendAudit, s.toolPending, s.logMCPBody
@@ -308,6 +310,9 @@ func (s *Server) refresh(ctx context.Context) error {
 		return err
 	}
 	if err := s.loadTeamCredentials(ctx); err != nil {
+		return err
+	}
+	if err := s.loadCedar(ctx); err != nil {
 		return err
 	}
 	keys := make(map[string]*auth.Principal, len(snap.Keys))

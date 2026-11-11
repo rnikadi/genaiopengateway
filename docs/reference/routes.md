@@ -84,6 +84,11 @@ Every route the gateway serves, generated from the handlers in `internal/server`
 | `DELETE` | `/admin/v1/orgs/{org_id}` | `s.deleteOrg` | deleteOrg deletes an organization; only owners may. |
 | `GET` | `/admin/v1/orgs/{org_id}` | `s.getOrg` | getOrg returns one organization and its policy. |
 | `PATCH` | `/admin/v1/orgs/{org_id}` | `s.updateOrg` | updateOrg changes an organization. |
+| `DELETE` | `/admin/v1/orgs/{org_id}/cedar` | `s.deleteCedar` | deleteCedar removes an organization's Cedar policies, as a new empty version; only owners may. |
+| `GET` | `/admin/v1/orgs/{org_id}/cedar` | `s.getCedar` | getCedar returns an organization's Cedar policies in force, or a version given by ?version=. |
+| `PUT` | `/admin/v1/orgs/{org_id}/cedar` | `s.putCedar` | putCedar saves a new version of an organization's Cedar policies; only owners may. |
+| `POST` | `/admin/v1/orgs/{org_id}/cedar/check` | `s.checkCedar` | checkCedar evaluates a request against an organization's Cedar policies, or against draft text, without sending it. |
+| `GET` | `/admin/v1/orgs/{org_id}/cedar/versions` | `s.listCedarVersions` | listCedarVersions lists the versions of an organization's Cedar policies, newest first. |
 | `GET` | `/admin/v1/orgs/{org_id}/teams` | `s.listTeams` | listTeams lists an organization's teams. |
 | `POST` | `/admin/v1/orgs/{org_id}/teams` | `s.createTeam` | createTeam creates a team in an organization with an optional policy. |
 | `POST` | `/admin/v1/playground/audio/speech` | `s.playground(provider.Speech)` | playground lets an operator call a model as a team, with the team's policies, through the same handler that serves API keys (docs/playground.md). |

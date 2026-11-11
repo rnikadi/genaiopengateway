@@ -72,7 +72,7 @@ func (s *Server) mcpCaller(r *http.Request, rt *runtime, name string) (*mcpgw.Ca
 		return nil, &authFailure{http.StatusUnauthorized, "missing credentials", ""}
 	}
 	if p, ok := s.authenticate(r); ok {
-		return &mcpgw.Caller{Principal: p, RequestID: rid}, nil
+		return &mcpgw.Caller{Principal: p, RequestID: rid, RemoteAddr: r.RemoteAddr}, nil
 	}
 	oc := rt.cfg.MCP.OAuth
 	if rt.oauth == nil {
@@ -95,7 +95,7 @@ func (s *Server) mcpCaller(r *http.Request, rt *runtime, name string) (*mcpgw.Ca
 		s.log.Warn("MCP access token maps to no team", "request_id", rid, "subject", tok.Subject, "err", err)
 		return nil, &authFailure{http.StatusForbidden, err.Error(), ""}
 	}
-	return &mcpgw.Caller{Principal: p, Subject: tok.Subject, RequestID: rid}, nil
+	return &mcpgw.Caller{Principal: p, Subject: tok.Subject, RequestID: rid, RemoteAddr: r.RemoteAddr}, nil
 }
 
 // tenants indexes organizations, and teams by organization and by name
