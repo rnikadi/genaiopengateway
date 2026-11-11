@@ -61,6 +61,7 @@ nav:
   - MCP gateway:
       - MCP gateway: mcp.md
       - Per-user MCP credentials: mcp-user-credentials.md
+      - MCP catalog and requests: mcp-catalog.md
   - Governance:
       - Virtual keys: virtual-keys.md
       - Team provider credentials: team-credentials.md

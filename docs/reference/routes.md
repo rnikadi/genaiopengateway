@@ -71,8 +71,13 @@ Every route the gateway serves, generated from the handlers in `internal/server`
 | `POST` | `/admin/v1/keys/{key_id}/revoke` | `s.revokeKey` | revokeKey revokes a key at once. |
 | `POST` | `/admin/v1/keys/{key_id}/rotate` | `s.rotateKey` | rotateKey gives a key a new secret; the old one works for a grace period, so applications can switch over without downtime. |
 | `GET` | `/admin/v1/mcp/calls` | `s.listMCPCalls` | listMCPCalls lists audited MCP tool calls, newest first. |
+| `GET` | `/admin/v1/mcp/catalog` | `s.mcpCatalog` | mcpCatalog lists the virtual MCP servers, with a team's access to each when team_id is given. |
 | `GET` | `/admin/v1/mcp/connections` | `s.listMCPConnections` | listMCPConnections lists users' upstream MCP connections, without their tokens. |
 | `DELETE` | `/admin/v1/mcp/connections/{server}/{subject}` | `s.deleteMCPConnection` | deleteMCPConnection revokes a connection at the upstream when it can, then deletes it. |
+| `GET` | `/admin/v1/mcp/requests` | `s.listMCPRequests` | listMCPRequests lists MCP access requests of the teams the operator can read, newest first. |
+| `POST` | `/admin/v1/mcp/requests` | `s.createMCPRequest` | createMCPRequest asks for a team's access to a virtual MCP server. |
+| `POST` | `/admin/v1/mcp/requests/{request_id}/approve` | `s.approveMCPRequest` | approveMCPRequest approves a request and adds the server to the team's allowed MCP servers. |
+| `POST` | `/admin/v1/mcp/requests/{request_id}/deny` | `s.denyMCPRequest` | denyMCPRequest denies a request with an optional note. |
 | `GET` | `/admin/v1/mcp/servers` | `s.listMCPServers` | listMCPServers lists upstream MCP servers and their status. |
 | `POST` | `/admin/v1/mcp/servers/{server}/tools/{tool}/approve` | `s.approveMCPTool` | approveMCPTool approves a pinned MCP tool's current definition. |
 | `GET` | `/admin/v1/mcp/tools` | `s.listMCPTools` | listMCPTools lists upstream MCP tools with their pin and approval state. |

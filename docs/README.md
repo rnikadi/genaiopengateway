@@ -15,6 +15,7 @@
 | [Security and threat model](security.md) | Assets, trust boundaries, STRIDE, defaults |
 | [Provider adapters](providers.md) | Adapter interface, translation rules, conformance tests |
 | [MCP gateway](mcp.md) | Virtual servers, tool pinning, auth, audit, MCP configuration |
+| [MCP catalog](mcp-catalog.md) | Browsing virtual servers, requesting and approving team access |
 | [Admin UI and SSO](admin-ui.md) | Pages, roles, OIDC sign-in, sessions, admin API changes |
 | [Roles and permissions](roles.md) | Built-in and custom roles, permissions, team grants |
 | [SAML sign-in](saml.md) | Signing operators in with a SAML 2.0 identity provider |

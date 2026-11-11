@@ -143,7 +143,7 @@ With `mcp.oauth` set, MCP endpoints accept access tokens from the company's iden
 - `iss` must equal `issuer`; `exp` is required; one minute of clock skew is allowed. `aud` must name the virtual server (`{public_url}/mcp/{name}`, with or without a trailing slash) or `audience`. Every scope in `scopes` must be in `scope` or `scp`, or the request gets `403` with `error="insufficient_scope"`. `sub` is required and recorded in audit records and logs.
 - The token maps to `organization` and to the first value of `team_claim` (a string or a list) that names a team of that organization, by name or id. A token that names no such team gets `403`. Org and team policies, including `allowed_mcp_servers` and RPM, apply; there is no key level.
 
-Key, team and org policies gain `allowed_mcp_servers`, a list of virtual server names. An empty list allows all, as with `allowed_models`.
+Key, team and org policies gain `allowed_mcp_servers`, a list of virtual server names. An empty list allows all, as with `allowed_models`. Teams can ask for servers they lack in the [catalog](mcp-catalog.md), and [Cedar policies](cedar.md) can restrict individual tools.
 
 ## API additions
 
