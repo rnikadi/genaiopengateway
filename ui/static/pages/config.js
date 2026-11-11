@@ -8,6 +8,7 @@ const kindNames = {
   mcp_virtual_servers: 'Virtual MCP servers',
   alert_webhooks: 'Alert webhooks',
   streams: 'Streams',
+  a2a_agents: 'A2A agents',
 };
 
 // A starting spec for each kind, in the config file's shape.
@@ -19,6 +20,7 @@ const templates = {
   mcp_virtual_servers: { servers: [{ server: '' }] },
   alert_webhooks: { url: '', format: 'slack', events: ['budget.threshold'] },
   streams: { type: 'webhook', url: '', records: ['usage', 'audit'], batch_size: 500, flush_interval: '5s' },
+  a2a_agents: { url: 'https://agent.example.com/a2a' },
 };
 
 // namesOf lists the names of each kind, from the file and the store.
@@ -511,6 +513,18 @@ function StreamForm({ spec, onChange }) {
     </div>`;
 }
 
+function AgentForm({ spec, onChange }) {
+  const { me } = useSession();
+  const p = { spec, onChange };
+  return html`
+    <${Field} label="URL" setting="a2a.agents.url" hint="The agent's JSON-RPC endpoint."><${Text} ...${p} path="url" required /><//>
+    <${Field} label="Card URL" setting="a2a.agents.card_url" hint="Default: /.well-known/agent-card.json at the URL's host."><${Text} ...${p} path="card_url" /><//>
+    <${Field} label="Description" setting="a2a.agents.description"><${Text} ...${p} path="description" /><//>
+    <${Field} label="Timeout" setting="a2a.agents.timeout" hint="For calls that do not stream, and for a stream to start. Default: 5m."><${Text} ...${p} path="timeout" placeholder="5m" /><//>
+    <${Field} label="Headers" setting="a2a.agents.headers" hint="Sent to the agent, such as its API key. Values are encrypted."><${Headers} ...${p} path="headers" secret /><//>
+    <${Field} label="Guardrails" setting="a2a.agents.guardrails" hint="Input guardrails check messages sent to the agent; output guardrails check results that do not stream."><${Checks} ...${p} path="guardrails" options=${me.guardrails || []} /><//>`;
+}
+
 const forms = {
   providers: ProviderForm,
   models: ModelForm,
@@ -519,4 +533,5 @@ const forms = {
   mcp_virtual_servers: VirtualServerForm,
   alert_webhooks: WebhookForm,
   streams: StreamForm,
+  a2a_agents: AgentForm,
 };

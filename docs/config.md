@@ -194,6 +194,12 @@ mcp:                                 # optional; see mcp.md for every field
       servers:
         - server: github
           tools: [search_code, get_file_contents]
+
+a2a:                                 # optional; see a2a.md
+  agents:
+    planner:
+      url: https://planner.internal.example.com/a2a
+      headers: {Authorization: "Bearer ${PLANNER_TOKEN}"}
 ```
 
 Prices in the example are placeholders; set them from your contracts.

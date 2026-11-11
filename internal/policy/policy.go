@@ -57,9 +57,11 @@ func (c Cache) Duration() time.Duration {
 type Policy struct {
 	AllowedModels     []string `yaml:"allowed_models" json:"allowed_models,omitempty"`
 	AllowedMCPServers []string `yaml:"allowed_mcp_servers" json:"allowed_mcp_servers,omitempty"`
-	RPM               int64    `yaml:"rpm" json:"rpm,omitempty"`
-	TPM               int64    `yaml:"tpm" json:"tpm,omitempty"`
-	Budget            *Budget  `yaml:"budget" json:"budget,omitempty"`
+	// AllowedAgents lists the A2A agents it may call (ADR 0033).
+	AllowedAgents []string `yaml:"allowed_agents" json:"allowed_agents,omitempty"`
+	RPM           int64    `yaml:"rpm" json:"rpm,omitempty"`
+	TPM           int64    `yaml:"tpm" json:"tpm,omitempty"`
+	Budget        *Budget  `yaml:"budget" json:"budget,omitempty"`
 	// LogBodies turns body logging on or off at this level; nil inherits
 	// from the level above (docs/body-logging.md).
 	LogBodies *bool `yaml:"log_bodies" json:"log_bodies,omitempty"`
@@ -83,6 +85,11 @@ func (p Policy) AllowsModel(model string) bool {
 // AllowsMCPServer reports whether the policy permits a virtual MCP server.
 func (p Policy) AllowsMCPServer(name string) bool {
 	return len(p.AllowedMCPServers) == 0 || slices.Contains(p.AllowedMCPServers, name)
+}
+
+// AllowsAgent reports whether the policy permits an A2A agent.
+func (p Policy) AllowsAgent(name string) bool {
+	return len(p.AllowedAgents) == 0 || slices.Contains(p.AllowedAgents, name)
 }
 
 // Validate checks that limits are non-negative and the budget is well formed.

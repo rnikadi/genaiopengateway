@@ -60,6 +60,9 @@ type Settings struct {
 		MaxUserSessions int      `yaml:"max_user_sessions"`
 		OAuth           *OAuth   `yaml:"oauth"`
 	} `yaml:"mcp"`
+	A2A struct {
+		PublicURL string `yaml:"public_url"`
+	} `yaml:"a2a"`
 }
 
 // overlay sets every field of the mapping src in dst, recursing into
@@ -120,6 +123,7 @@ func SettingsOf(c *Config) Settings {
 	s.Limits, s.BodyLogging, s.Cache, s.SSO = c.Limits, c.BodyLogging, c.Cache, c.SSO
 	s.Alerts.BudgetThresholds = c.Alerts.BudgetThresholds
 	s.MCP.PublicURL, s.MCP.RefreshInterval, s.MCP.MaxUserSessions, s.MCP.OAuth = c.MCP.PublicURL, c.MCP.RefreshInterval, c.MCP.MaxUserSessions, c.MCP.OAuth
+	s.A2A.PublicURL = c.A2A.PublicURL
 	return s
 }
 

@@ -63,6 +63,7 @@ nav:
       - MCP gateway: mcp.md
       - Per-user MCP credentials: mcp-user-credentials.md
       - MCP catalog and requests: mcp-catalog.md
+      - A2A agents: a2a.md
   - Governance:
       - Virtual keys: virtual-keys.md
       - Team provider credentials: team-credentials.md

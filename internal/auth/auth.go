@@ -135,6 +135,16 @@ func (p *Principal) AllowsMCPServer(name string) bool {
 	return true
 }
 
+// AllowsAgent reports whether every level permits the A2A agent.
+func (p *Principal) AllowsAgent(name string) bool {
+	for _, pol := range p.Policies {
+		if !pol.AllowsAgent(name) {
+			return false
+		}
+	}
+	return true
+}
+
 // Directory is an immutable index of principals by key hash.
 type Directory struct {
 	byHash map[string]*Principal

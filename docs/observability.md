@@ -35,6 +35,8 @@ Prometheus, at `/metrics`. All names start with `gog_`. Go runtime and process m
 | `gog_mcp_requests_total` | counter | `virtual_server`, `method`, `status` (ok, tool_error, error, denied, rate_limited) |
 | `gog_mcp_request_duration_seconds` | histogram | `virtual_server`, `method` |
 | `gog_mcp_tool_calls_total` | counter | `server`, `tool`, `status` |
+| `gog_a2a_requests_total` | counter | `agent`, `method`, `status` (ok, agent_error, upstream_error, invalid, not_found, guardrail_blocked, denied, rate_limited); see [A2A agents](a2a.md) |
+| `gog_a2a_request_duration_seconds` | histogram | `agent`, `method`; to the end of a stream |
 | `gog_mcp_upstream_up` | gauge | `server` |
 | `gog_mcp_tools_pending_approval` | gauge | `server` |
 | `gog_alerts_total` | counter | `event` |
