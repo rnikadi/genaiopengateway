@@ -302,6 +302,10 @@ type Provider struct {
 	// Region configures a bedrock provider. Without APIKey, requests are
 	// signed with credentials from the AWS default chain.
 	Region string `yaml:"region"`
+	// Residency labels where the provider processes data, such as eu or
+	// us. Organizations, teams and keys can be pinned to labels
+	// (docs/routing.md#data-residency).
+	Residency string `yaml:"residency"`
 }
 
 // Routing strategies of a virtual model (docs/routing.md).

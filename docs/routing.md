@@ -32,7 +32,7 @@ Every field here can also be set in the admin UI. Model fields are on the model'
 - **`lowest_cost`** compares a typical request's price: three input tokens for each output token, plus per-request and media prices. Targets without prices count as free, so give every target a price.
 - **Sticky routing** (`sticky: user`, for `weighted` and `round_robin` only) sends every request from one user to the same first target. Same-target traffic keeps a provider's prompt cache warm. The user is the OpenAI `user` field or the Anthropic `metadata.user_id` field. A request without either is routed as if sticky were off.
 
-A request that names a team credential (see [team provider credentials](team-credentials.md)) only goes to that provider's targets, in the order listed.
+A request that continues an upstream job, such as polling a video, goes to the target that created it.
 
 ## When the gateway moves on
 
@@ -56,3 +56,22 @@ Each replica keeps its own breakers, and config reloads don't reset them. You ca
 - **Metric** `gog_target_circuit_state{target="provider/model"}`: 0 closed, 1 open, 2 half open. Alert on `max by (target) (gog_target_circuit_state) == 1` lasting longer than a few cooldowns.
 
 See [ADR 0031](adr/0031-routing-strategies.md) for why routing state stays on each replica.
+
+## Data residency
+
+Label each provider with where it processes data, then pin organizations, teams or keys to labels:
+
+```yaml
+providers:
+  openai-eu: {type: openai, base_url: https://eu.api.openai.com/v1, api_key: ${OPENAI_KEY}, residency: eu}
+  bedrock-eu: {type: bedrock, region: eu-central-1, residency: eu}
+  openai: {type: openai, base_url: https://api.openai.com/v1, api_key: ${OPENAI_KEY}, residency: us}
+```
+
+Set `residency: [eu]` on an organization, team or key: in the admin UI it's the **Data residency** field, and in the admin API it's the `residency` field. Requests from that key then go only to targets whose provider has one of the labels. The strategy, retries and the circuit breaker work as usual among those targets.
+
+- Lists narrow level by level. A key in an organization pinned to `[eu, uk]` with its own `[eu]` uses only `eu` providers.
+- A provider without a label never serves a pinned caller.
+- When none of a model's targets qualify, the request is refused with `403 residency_not_allowed`, and nothing is sent upstream.
+- The pins cover everything a caller's request sends upstream: model requests, batches, realtime sessions, and the guardrail classifier and semantic cache embedding calls made for the request. A guardrail or cache model with no allowed target fails like any other unavailable check, and its `on_error` setting decides what happens.
+- Labels are free text. The gateway does not check that a provider really is where its label says, so match labels to the provider's own data processing terms.

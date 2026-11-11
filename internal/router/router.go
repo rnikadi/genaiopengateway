@@ -193,7 +193,7 @@ func (r *Router) RouteTo(ctx context.Context, ep provider.Endpoint, model, provi
 }
 
 func (r *Router) route(ctx context.Context, ep provider.Endpoint, model string, keep func(config.Target) bool, body map[string]json.RawMessage, req provider.Request) (*Result, error) {
-	all, err := r.Targets(ep, model)
+	all, err := r.Targets(ctx, ep, model)
 	if err != nil {
 		return nil, err
 	}
@@ -374,6 +374,34 @@ func (r *Router) send(ctx context.Context, t config.Target, req *provider.Reques
 	return s
 }
 
+// ErrResidency is a model with targets for the endpoint, none of them in
+// a residency the caller is pinned to.
+var ErrResidency = errors.New("no target of the model is in a data residency this key may use")
+
+type residencyKey struct{}
+
+// WithResidency returns a context whose requests only go to providers
+// whose residency label is in every one of levels. Nil or empty levels
+// do not restrict.
+func WithResidency(ctx context.Context, levels [][]string) context.Context {
+	if len(levels) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, residencyKey{}, levels)
+}
+
+// residencyAllows reports whether ctx's residency pins allow a provider.
+func (r *Router) residencyAllows(ctx context.Context, providerName string) bool {
+	levels, _ := ctx.Value(residencyKey{}).([][]string)
+	label := r.configs[providerName].Residency
+	for _, l := range levels {
+		if !slices.Contains(l, label) {
+			return false
+		}
+	}
+	return true
+}
+
 // errTargetTimeout is a target's timeout to response headers passing.
 var errTargetTimeout = errors.New("no response headers within the target's timeout")
 
@@ -417,21 +445,30 @@ func (c *cancelOnClose) Close() error {
 
 // Targets lists the targets of a model that serve an endpoint, in
 // order, for callers that try them themselves, such as realtime.
-func (r *Router) Targets(ep provider.Endpoint, model string) ([]config.Target, error) {
+func (r *Router) Targets(ctx context.Context, ep provider.Endpoint, model string) ([]config.Target, error) {
 	m, ok := r.models[model]
 	if !ok {
 		return nil, ErrUnknownModel
 	}
 	var out []config.Target
+	pinned := false
 	for _, t := range m.Targets {
-		if provider.SupportsModel(r.providers[t.Provider], ep, t.Model) {
-			out = append(out, t)
+		if !provider.SupportsModel(r.providers[t.Provider], ep, t.Model) {
+			continue
 		}
+		if !r.residencyAllows(ctx, t.Provider) {
+			pinned = true
+			continue
+		}
+		out = append(out, t)
 	}
-	if len(out) == 0 {
-		return nil, ErrUnsupported
+	switch {
+	case len(out) > 0:
+		return out, nil
+	case pinned:
+		return nil, ErrResidency
 	}
-	return out, nil
+	return nil, ErrUnsupported
 }
 
 // Dialer returns a provider's realtime adapter.

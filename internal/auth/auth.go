@@ -113,6 +113,18 @@ func (p *Principal) AllowsModel(model string) bool {
 	return true
 }
 
+// Residency lists each level's residency labels, leaving out levels that
+// allow any provider.
+func (p *Principal) Residency() [][]string {
+	var out [][]string
+	for _, pol := range p.Policies {
+		if len(pol.Residency) > 0 {
+			out = append(out, pol.Residency)
+		}
+	}
+	return out
+}
+
 // AllowsMCPServer reports whether every level permits the virtual MCP server.
 func (p *Principal) AllowsMCPServer(name string) bool {
 	for _, pol := range p.Policies {

@@ -13,6 +13,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - Routing strategies ([docs/routing.md](docs/routing.md), ADR 0031): each model chooses `ordered` (the default), `weighted`, `round_robin`, `least_latency` or `lowest_cost`, with optional sticky routing per user for prompt-cache hits.
 - Retries on the same target with jittered exponential backoff that honors `Retry-After`, and a per-target timeout to the first response byte that never cuts off a stream.
 - A circuit breaker per target (`routing.circuit_breaker`, on by default: 5 failures in a row, 30s cooldown) with a single half-open probe. Its state shows on the Models page, in `GET /admin/v1/models`, and in the `gog_target_circuit_state` metric. Config reloads keep it.
+- Data residency pinning ([docs/routing.md](docs/routing.md#data-residency)): label providers with `residency`, and pin organizations, teams and keys to labels. A pinned request only reaches matching providers, and is refused with `403 residency_not_allowed` when none qualifies.
 - An install script (`scripts/install.sh`) that downloads the latest release for Linux or macOS and checks it against the release checksums.
 
 ### Changed

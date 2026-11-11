@@ -37,7 +37,7 @@ For streaming chat completions the gateway sets `stream_options.include_usage` t
 
 ### Routing and fallback
 
-Targets of a virtual model are tried in order. The gateway moves to the next target when the current one:
+Targets of a virtual model are tried in the order the model's strategy gives, with optional retries, per-target timeouts and a circuit breaker; see [routing and failover](routing.md). The gateway moves to the next target when the current one:
 
 - fails to connect or times out before sending response headers, or
 - returns 429 or any 5xx except 501.
@@ -65,6 +65,7 @@ OpenAI-style endpoints return `{"error": {"message": "...", "type": "<code>", "c
 | 400 | `guardrail_blocked` | A guardrail blocked the request or the model's response; the message names the guardrail |
 | 401 | `invalid_api_key` | Key missing, unknown, revoked or expired |
 | 403 | `model_not_allowed` | Key, team or organization may not use this model |
+| 403 | `residency_not_allowed` | No target of the model is in a data residency the key, team or organization is pinned to ([routing](routing.md#data-residency)) |
 | 404 | `model_not_found` | Virtual model does not exist, or does not support this endpoint |
 | 404 | `not_found` | The video job, file or batch does not exist or belongs to another team |
 | 413 | `request_too_large` | Body exceeds `limits.max_request_bytes`, or a batch file `limits.max_batch_file_bytes` |

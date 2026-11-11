@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/rnikadi/genaiopengateway/internal/auth"
 	"github.com/rnikadi/genaiopengateway/internal/router"
 	"github.com/rnikadi/genaiopengateway/internal/store"
 )
@@ -62,6 +63,12 @@ func (s *Server) openCredential(c *store.TeamCredential) (string, error) {
 	}
 	plain, err := box.Open(c.Secret, credentialAD(c.TeamID, c.Provider))
 	return string(plain), err
+}
+
+// callerContext returns ctx with the caller's team credentials and data
+// residency pins.
+func (s *Server) callerContext(ctx context.Context, p *auth.Principal) context.Context {
+	return router.WithResidency(s.teamContext(ctx, p.TeamID), p.Residency())
 }
 
 // teamContext returns ctx with the adapters of a team's own provider

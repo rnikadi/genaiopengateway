@@ -155,6 +155,7 @@ type configuredProvider struct {
 	Region      string             `json:"region,omitempty"`
 	Project     string             `json:"project,omitempty"`
 	Location    string             `json:"location,omitempty"`
+	Residency   string             `json:"residency,omitempty"`
 	Auth        string             `json:"auth"`
 	Timeout     string             `json:"timeout,omitempty"`
 	HeaderNames []string           `json:"header_names,omitempty"`
@@ -173,7 +174,7 @@ func (s *Server) listProviders(w http.ResponseWriter, r *http.Request) error {
 	for _, name := range slices.Sorted(maps.Keys(cfg.Providers)) {
 		p := cfg.Providers[name]
 		c := configuredProvider{
-			Name: name, Type: p.Type, BaseURL: p.BaseURL, Region: p.Region, Project: p.Project, Location: p.Location,
+			Name: name, Type: p.Type, BaseURL: p.BaseURL, Region: p.Region, Project: p.Project, Location: p.Location, Residency: p.Residency,
 			Auth: providerAuth(p), Timeout: duration(p.Timeout), HeaderNames: slices.Sorted(maps.Keys(p.Headers)), Models: []string{},
 		}
 		for _, model := range slices.Sorted(maps.Keys(cfg.Models)) {

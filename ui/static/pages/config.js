@@ -274,6 +274,9 @@ function ProviderForm({ spec, onChange }) {
     ${t !== 'vertex' && html`<${Field} label="API key" setting="providers.api_key" hint=${t === 'bedrock' ? 'Leave empty to use the AWS default credential chain.' : 'Encrypted in the database and never shown again.'}>
       <${Secret} ...${p} path="api_key" />
     <//>`}
+    <${Field} label="Data residency" setting="providers.residency" hint="Where this provider processes data, such as eu or us. Keys pinned to a residency only use providers with that label.">
+      <${Text} ...${p} path="residency" placeholder="For example eu" />
+    <//>
     <${Field} label="Timeout" setting="providers.timeout" hint="Default: 5m."><${Text} ...${p} path="timeout" placeholder="5m" /><//>
     <${Field} label="Extra headers" setting="providers.headers" hint="Sent with every upstream request, such as an organization id."><${Headers} ...${p} path="headers" /><//>`;
 }

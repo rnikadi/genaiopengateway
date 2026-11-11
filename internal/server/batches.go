@@ -18,6 +18,7 @@ import (
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/policy"
 	"github.com/rnikadi/genaiopengateway/internal/provider"
+	"github.com/rnikadi/genaiopengateway/internal/router"
 	"github.com/rnikadi/genaiopengateway/internal/store"
 	"github.com/rnikadi/genaiopengateway/internal/telemetry"
 	"github.com/rnikadi/genaiopengateway/internal/usage"
@@ -243,7 +244,11 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	targets, err := rt.router.Targets(provider.Batches, in.model)
+	targets, err := rt.router.Targets(r.Context(), provider.Batches, in.model)
+	if errors.Is(err, router.ErrResidency) {
+		fail(http.StatusForbidden, codeResidency, "model "+in.model+": "+err.Error())
+		return
+	}
 	if err != nil {
 		fail(http.StatusNotFound, codeModelNotFound, "model "+in.model+": "+err.Error())
 		return

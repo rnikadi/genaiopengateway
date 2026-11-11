@@ -5,7 +5,9 @@ package policy
 import (
 	"fmt"
 	"slices"
+	"strings"
 	"time"
+	"unicode"
 )
 
 // Budget periods.
@@ -67,6 +69,10 @@ type Policy struct {
 	// Cache sets the response cache at this level; nil inherits from the
 	// level above (docs/cache.md).
 	Cache *Cache `yaml:"cache" json:"cache,omitempty"`
+	// Residency pins requests to providers with one of these residency
+	// labels; empty allows any provider. Lists narrow level by level
+	// (docs/routing.md#data-residency).
+	Residency []string `yaml:"residency" json:"residency,omitempty"`
 }
 
 // AllowsModel reports whether the policy permits a virtual model.
@@ -97,6 +103,11 @@ func (p Policy) Validate() error {
 			if t <= 0 || t > 1 {
 				return fmt.Errorf("budget alert_at values must be above 0 and at most 1, got %v", t)
 			}
+		}
+	}
+	for _, r := range p.Residency {
+		if r == "" || strings.ContainsFunc(r, unicode.IsSpace) {
+			return fmt.Errorf("residency labels must be non-empty and contain no spaces, got %q", r)
 		}
 	}
 	if c := p.Cache; c != nil {

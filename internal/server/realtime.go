@@ -19,6 +19,7 @@ import (
 	"github.com/rnikadi/genaiopengateway/internal/auth"
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/provider"
+	"github.com/rnikadi/genaiopengateway/internal/router"
 	"github.com/rnikadi/genaiopengateway/internal/telemetry"
 	"github.com/rnikadi/genaiopengateway/internal/usage"
 )
@@ -82,7 +83,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rec.OrgID, rec.TeamID, rec.KeyID, rec.KeyPrefix = p.OrgID, p.TeamID, p.KeyID, p.KeyPrefix
-	r = r.WithContext(s.teamContext(r.Context(), p.TeamID))
+	r = r.WithContext(s.callerContext(r.Context(), p))
 	model := r.URL.Query().Get("model")
 	if model == "" {
 		fail(http.StatusBadRequest, codeInvalidRequest, "the model query parameter is required")
@@ -97,7 +98,11 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		fail(http.StatusBadRequest, codeInvalidRequest, "realtime sessions are not available when guardrails apply, since audio cannot be checked")
 		return
 	}
-	targets, err := rt.router.Targets(ep, model)
+	targets, err := rt.router.Targets(r.Context(), ep, model)
+	if errors.Is(err, router.ErrResidency) {
+		fail(http.StatusForbidden, codeResidency, "model "+model+": "+err.Error())
+		return
+	}
 	if err != nil {
 		fail(http.StatusNotFound, codeModelNotFound, "model "+model+": "+err.Error())
 		return
