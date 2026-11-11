@@ -42,6 +42,7 @@ type Config struct {
 	Models    map[string]Model    `yaml:"models"`
 	Keys      []StaticKey         `yaml:"keys"`
 	MCP       MCP                 `yaml:"mcp"`
+	A2A       A2A                 `yaml:"a2a"`
 	SSO       SSO                 `yaml:"sso"`
 	UI        UI                  `yaml:"ui"`
 	Alerts    Alerts              `yaml:"alerts"`
@@ -661,6 +662,33 @@ type MCP struct {
 	MaxUserSessions int `yaml:"max_user_sessions"`
 }
 
+// A2A configures agents served through the gateway with the Agent2Agent
+// protocol (docs/a2a.md, ADR 0033).
+type A2A struct {
+	// PublicURL is the gateway's external URL, which agent cards name.
+	// Default: mcp.public_url, or else the URL of each card request.
+	PublicURL string              `yaml:"public_url"`
+	Agents    map[string]A2AAgent `yaml:"agents"`
+}
+
+// A2AAgent is an upstream A2A agent reached over JSON-RPC.
+type A2AAgent struct {
+	// URL is the agent's JSON-RPC endpoint.
+	URL string `yaml:"url"`
+	// CardURL is where the agent's card is. Default: the URL's origin
+	// with /.well-known/agent-card.json.
+	CardURL     string            `yaml:"card_url"`
+	Description string            `yaml:"description"`
+	Headers     map[string]Secret `yaml:"headers"`
+	// Timeout bounds a call that does not stream, and the wait for a
+	// stream to start. Default: 5m.
+	Timeout    Duration `yaml:"timeout"`
+	Guardrails []string `yaml:"guardrails"`
+}
+
+// DefaultA2ATimeout bounds an agent call without a timeout of its own.
+const DefaultA2ATimeout = 5 * time.Minute
+
 // OAuth accepts access tokens from an external authorization server on
 // MCP endpoints (ADR 0014).
 type OAuth struct {
@@ -1018,6 +1046,7 @@ func (c *Config) validate() error {
 	}
 
 	c.validateMCP(add)
+	c.validateA2A(add)
 	c.validateSSO(add)
 	c.validateAlerts(add)
 	c.validateStreams(add)
@@ -1056,6 +1085,11 @@ func (c *Config) validate() error {
 		for _, v := range k.AllowedMCPServers {
 			if _, ok := c.MCP.VirtualServers[v]; !ok {
 				add("key %q: allowed MCP server %q is not configured", k.Name, v)
+			}
+		}
+		for _, v := range k.AllowedAgents {
+			if _, ok := c.A2A.Agents[v]; !ok {
+				add("key %q: allowed agent %q is not configured", k.Name, v)
 			}
 		}
 		for _, g := range k.Guardrails {
@@ -1550,5 +1584,36 @@ func (c *Config) validateStreams(add func(string, ...any)) {
 			st.FlushInterval = Duration(DefaultStreamFlushInterval)
 		}
 		c.Streams[name] = st
+	}
+}
+
+func (c *Config) validateA2A(add func(string, ...any)) {
+	a := &c.A2A
+	a.PublicURL = strings.TrimRight(a.PublicURL, "/")
+	if a.PublicURL != "" && !httpURL(a.PublicURL) {
+		add("a2a.public_url must be an http or https URL")
+	}
+	for name, ag := range a.Agents {
+		if !mcpName.MatchString(name) {
+			add("a2a agent %q: names use lowercase letters, digits, - and _", name)
+		}
+		if !httpURL(ag.URL) {
+			add("a2a agent %q: url must be an http or https URL", name)
+		}
+		if ag.CardURL != "" && !httpURL(ag.CardURL) {
+			add("a2a agent %q: card_url must be an http or https URL", name)
+		}
+		if ag.Timeout < 0 {
+			add("a2a agent %q: timeout must not be negative", name)
+		}
+		if ag.Timeout == 0 {
+			ag.Timeout = Duration(DefaultA2ATimeout)
+		}
+		for _, g := range ag.Guardrails {
+			if _, ok := c.Guardrails[g]; !ok {
+				add("a2a agent %q: guardrail %q is not configured", name, g)
+			}
+		}
+		a.Agents[name] = ag
 	}
 }

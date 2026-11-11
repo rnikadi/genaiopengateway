@@ -53,7 +53,7 @@ The token is the gateway's admin token, which acts as an owner. Every change is 
 
 The data source `genaiopengateway_organization` finds an organization by name, for example one created in the admin UI.
 
-Organizations, teams and keys take the policy settings of the admin API as attributes: `allowed_models`, `allowed_mcp_servers`, `rpm`, `tpm`, `guardrails`, `residency`, `log_bodies`, `budget = { amount_usd, period }` and `cache = { mode, ttl }`. A setting left out is no restriction, and removing one from the configuration clears it on the gateway. Keys also take `owner` and `expires_at`.
+Organizations, teams and keys take the policy settings of the admin API as attributes: `allowed_models`, `allowed_mcp_servers`, `allowed_agents`, `rpm`, `tpm`, `guardrails`, `residency`, `log_bodies`, `budget = { amount_usd, period }` and `cache = { mode, ttl }`. A setting left out is no restriction, and removing one from the configuration clears it on the gateway. Keys also take `owner` and `expires_at`.
 
 [`terraform/examples/main.tf`](https://github.com/rnikadi/genaiopengateway/blob/main/terraform/examples/main.tf) sets up a provider, a model, an organization with a team, a key and Cedar policies.
 

@@ -54,6 +54,8 @@ type Server struct {
 	log      *slog.Logger
 	client   *http.Client
 	routing  *router.Health
+	// a2aCards caches agent cards by agent name.
+	a2aCards sync.Map
 	streams  *stream.Manager
 
 	// store and usage are nil when no database is configured.
@@ -458,6 +460,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/realtime", s.realtime)
 	mux.HandleFunc("GET /ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent", s.live)
 	mux.HandleFunc("GET /bedrock/model/{model}/invoke-with-bidirectional-stream", s.bidi)
+	mux.HandleFunc("POST /a2a/{name}", s.serveA2A)
+	mux.HandleFunc("GET /a2a/{name}/.well-known/agent-card.json", s.a2aCard)
+	mux.HandleFunc("GET /a2a/{name}/.well-known/agent.json", s.a2aCard)
 	mux.HandleFunc("/mcp/{name}", s.serveMCP)
 	if s.store != nil {
 		mux.HandleFunc("GET /mcp/connect/callback", s.connectCallback)

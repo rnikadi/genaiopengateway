@@ -46,7 +46,7 @@ orgs:
       ads: {}
 ```
 
-An organization or team takes the policy settings of the [admin API](api.md#admin-api): `allowed_models`, `allowed_mcp_servers`, `rpm`, `tpm`, `budget`, `log_bodies`, `guardrails`, `cache` and `residency`. A setting the file leaves out is cleared, so the file is the whole policy. An organization without a `cedar` entry keeps its Cedar policies; an empty `cedar` removes them. Names match organizations without case, and teams within their organization exactly.
+An organization or team takes the policy settings of the [admin API](api.md#admin-api): `allowed_models`, `allowed_mcp_servers`, `allowed_agents`, `rpm`, `tpm`, `budget`, `log_bodies`, `guardrails`, `cache` and `residency`. A setting the file leaves out is cleared, so the file is the whole policy. An organization without a `cedar` entry keeps its Cedar policies; an empty `cedar` removes them. Names match organizations without case, and teams within their organization exactly.
 
 Keys are not part of the file: their secrets are shown once, when created. Create them with `gogctl keys create` or the admin UI.
 

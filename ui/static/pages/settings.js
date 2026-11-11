@@ -105,6 +105,12 @@ const sections = [
       { path: 'mcp.oauth.scopes', label: 'Required scopes', type: 'list', hint: 'One per line.' },
     ],
   },
+  {
+    title: 'A2A agents',
+    fields: [
+      { path: 'a2a.public_url', label: 'Public URL named in agent cards', type: 'text', hint: 'Empty: the MCP public URL, or else the URL each card is requested at.' },
+    ],
+  },
 ];
 
 const sourceBadge = {

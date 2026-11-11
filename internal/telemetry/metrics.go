@@ -35,6 +35,8 @@ type Metrics struct {
 	genaiTokens   *prometheus.HistogramVec
 
 	mcpRequests  *prometheus.CounterVec
+	a2aRequests  *prometheus.CounterVec
+	a2aDuration  *prometheus.HistogramVec
 	mcpDuration  *prometheus.HistogramVec
 	mcpToolCalls *prometheus.CounterVec
 	mcpUp        *prometheus.GaugeVec
@@ -107,6 +109,12 @@ func NewMetrics(usageErrors, snapshotAge, bodiesDropped func() float64) *Metrics
 		mcpDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name: "gog_mcp_request_duration_seconds", Help: "Time to serve an MCP request.", Buckets: latencyBuckets,
 		}, []string{"virtual_server", "method"}),
+		a2aRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "gog_a2a_requests_total", Help: "A2A agent requests served.",
+		}, []string{"agent", "method", "status"}),
+		a2aDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name: "gog_a2a_request_duration_seconds", Help: "Time to serve an A2A agent request, to the end of a stream.", Buckets: latencyBuckets,
+		}, []string{"agent", "method"}),
 		mcpToolCalls: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "gog_mcp_tool_calls_total", Help: "Tool calls forwarded to upstream MCP servers.",
 		}, []string{"server", "tool", "status"}),
@@ -154,7 +162,7 @@ func NewMetrics(usageErrors, snapshotAge, bodiesDropped func() float64) *Metrics
 	m.reg.MustRegister(
 		m.requests, m.duration, m.ttfb, m.tokens, m.cost, m.fallbacks, m.limitRejection, m.unpriced,
 		m.genaiDuration, m.genaiTokens, m.streamRecords,
-		m.mcpRequests, m.mcpDuration, m.mcpToolCalls, m.mcpUp, m.mcpPending,
+		m.mcpRequests, m.mcpDuration, m.mcpToolCalls, m.mcpUp, m.mcpPending, m.a2aRequests, m.a2aDuration,
 		m.alerts, m.alertDeliveries, m.bodiesWritten, m.redactions,
 		m.mcpConnections, m.connectFlows, m.tokenRefreshes, m.guardrailChecks, m.guardrailDuration,
 		m.cacheLookups, m.cacheSaved,
@@ -260,6 +268,13 @@ const (
 func (m *Metrics) ObserveMCPRequest(virtualServer, method, status string, d time.Duration) {
 	m.mcpRequests.WithLabelValues(virtualServer, method, status).Inc()
 	m.mcpDuration.WithLabelValues(virtualServer, method).Observe(d.Seconds())
+}
+
+// ObserveA2ARequest records a finished A2A request. status is ok, or
+// why it failed.
+func (m *Metrics) ObserveA2ARequest(agent, method, status string, d time.Duration) {
+	m.a2aRequests.WithLabelValues(agent, method, status).Inc()
+	m.a2aDuration.WithLabelValues(agent, method).Observe(d.Seconds())
 }
 
 // ObserveMCPToolCall records a tool call forwarded upstream.

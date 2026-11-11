@@ -65,9 +65,11 @@ OpenAI-style endpoints return `{"error": {"message": "...", "type": "<code>", "c
 | 400 | `guardrail_blocked` | A guardrail blocked the request or the model's response; the message names the guardrail |
 | 401 | `invalid_api_key` | Key missing, unknown, revoked or expired |
 | 403 | `model_not_allowed` | Key, team or organization may not use this model |
+| 403 | `agent_not_allowed` | Key, team or organization may not call this [A2A agent](a2a.md) |
 | 403 | `policy_denied` | The organization's [Cedar policies](cedar.md) do not permit the request; the message names the policy that forbade it |
 | 403 | `residency_not_allowed` | No target of the model is in a data residency the key, team or organization is pinned to ([routing](routing.md#data-residency)) |
 | 404 | `model_not_found` | Virtual model does not exist, or does not support this endpoint |
+| 404 | `agent_not_found` | The [A2A agent](a2a.md) is not configured |
 | 404 | `not_found` | The video job, file or batch does not exist or belongs to another team |
 | 413 | `request_too_large` | Body exceeds `limits.max_request_bytes`, or a batch file `limits.max_batch_file_bytes` |
 | 429 | `rate_limit_exceeded` | A requests or tokens per minute limit was hit; `retry-after` is set |
@@ -130,6 +132,7 @@ Organizations, teams and keys share the same policy fields, all optional:
   "name": "search-team",
   "allowed_models": ["chat-default", "embed-default"],
   "allowed_mcp_servers": ["engineering"],
+  "allowed_agents": ["planner"],
   "rpm": 600,
   "tpm": 200000,
   "budget": {"amount_usd": 500, "period": "monthly", "alert_at": [0.8, 1]},
@@ -147,7 +150,7 @@ Organizations, teams and keys share the same policy fields, all optional:
 
 `alert_at` is optional: it overrides the gateway's alert thresholds for this budget, and `[]` turns its alerts off.
 
-`allowed_models` and `allowed_mcp_servers` empty or absent mean all models and all MCP virtual servers. `period` is `daily`, `monthly` (calendar month, UTC) or `total`. Keys also accept `expires_at` (RFC 3339).
+`allowed_models`, `allowed_mcp_servers` and `allowed_agents` empty or absent mean all models, all MCP virtual servers and all [A2A agents](a2a.md). `period` is `daily`, `monthly` (calendar month, UTC) or `total`. Keys also accept `expires_at` (RFC 3339).
 
 Key create response:
 

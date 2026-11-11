@@ -137,6 +137,9 @@ Every route the gateway serves, generated from the handlers in `internal/server`
 | Method | Path | Handler | Summary |
 | --- | --- | --- | --- |
 | `ANY` | `/.well-known/oauth-protected-resource/mcp/{name}` | `s.mcpResourceMetadata` | mcpResourceMetadata serves RFC 9728 protected resource metadata for a virtual server, when OAuth is configured. |
+| `POST` | `/a2a/{name}` | `s.serveA2A` | serveA2A relays a JSON-RPC request to an A2A agent: the caller must be allowed the agent, a task or context it names must be its own, and guardrails check the message (docs/a2a.md). |
+| `GET` | `/a2a/{name}/.well-known/agent-card.json` | `s.a2aCard` | a2aCard serves an agent's card as seen through the gateway: the gateway's URL, JSON-RPC only, and a gateway key as the only way to authenticate (ADR 0033). |
+| `GET` | `/a2a/{name}/.well-known/agent.json` | `s.a2aCard` | a2aCard serves an agent's card as seen through the gateway: the gateway's URL, JSON-RPC only, and a gateway key as the only way to authenticate (ADR 0033). |
 | `GET` | `/bedrock/model/{model}/invoke-with-bidirectional-stream` | `s.bidi` | bidi relays a Bedrock bidirectional stream, as Nova Sonic uses, over a WebSocket: each message either way is one event's JSON, the payload Bedrock carries base64 encoded in its event stream. |
 | `GET` | `/healthz` | `(func(w http.ResponseWriter, _ *http.Request) literal)` | - |
 | `GET` | `/metrics` | `s.MetricsHandler()` | MetricsHandler serves Prometheus metrics. |

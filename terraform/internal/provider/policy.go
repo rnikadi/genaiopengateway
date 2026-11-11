@@ -11,6 +11,7 @@ import (
 type policyModel struct {
 	AllowedModels     types.List   `tfsdk:"allowed_models"`
 	AllowedMCPServers types.List   `tfsdk:"allowed_mcp_servers"`
+	AllowedAgents     types.List   `tfsdk:"allowed_agents"`
 	RPM               types.Int64  `tfsdk:"rpm"`
 	TPM               types.Int64  `tfsdk:"tpm"`
 	Guardrails        types.List   `tfsdk:"guardrails"`
@@ -38,6 +39,7 @@ func policyAttributes() map[string]schema.Attribute {
 	return map[string]schema.Attribute{
 		"allowed_models":      list("Virtual models it may use; unset allows all."),
 		"allowed_mcp_servers": list("Virtual MCP servers it may use; unset allows all."),
+		"allowed_agents":      list("A2A agents it may call; unset allows all."),
 		"rpm":                 schema.Int64Attribute{Optional: true, Description: "Requests per minute; unset is no limit."},
 		"tpm":                 schema.Int64Attribute{Optional: true, Description: "Tokens per minute; unset is no limit."},
 		"guardrails":          list("Guardrails to run, added to those of the levels above."),
@@ -76,6 +78,7 @@ func (p *policyModel) body() map[string]any {
 	b := map[string]any{
 		"allowed_models":      stringList(p.AllowedModels),
 		"allowed_mcp_servers": stringList(p.AllowedMCPServers),
+		"allowed_agents":      stringList(p.AllowedAgents),
 		"guardrails":          stringList(p.Guardrails),
 		"residency":           stringList(p.Residency),
 		"rpm":                 p.RPM.ValueInt64(),
@@ -104,6 +107,7 @@ func (p *policyModel) body() map[string]any {
 type apiPolicy struct {
 	AllowedModels     []string `json:"allowed_models"`
 	AllowedMCPServers []string `json:"allowed_mcp_servers"`
+	AllowedAgents     []string `json:"allowed_agents"`
 	RPM               int64    `json:"rpm"`
 	TPM               int64    `json:"tpm"`
 	Guardrails        []string `json:"guardrails"`
@@ -125,6 +129,7 @@ type apiPolicy struct {
 func (p *policyModel) read(a apiPolicy) {
 	p.AllowedModels = readList(p.AllowedModels, a.AllowedModels)
 	p.AllowedMCPServers = readList(p.AllowedMCPServers, a.AllowedMCPServers)
+	p.AllowedAgents = readList(p.AllowedAgents, a.AllowedAgents)
 	p.Guardrails = readList(p.Guardrails, a.Guardrails)
 	p.Residency = readList(p.Residency, a.Residency)
 	p.RPM = readInt(p.RPM, a.RPM)

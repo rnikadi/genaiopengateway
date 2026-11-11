@@ -199,6 +199,7 @@ type patch struct {
 	Name              *string                 `json:"name"`
 	AllowedModels     *[]string               `json:"allowed_models"`
 	AllowedMCPServers *[]string               `json:"allowed_mcp_servers"`
+	AllowedAgents     *[]string               `json:"allowed_agents"`
 	RPM               *int64                  `json:"rpm"`
 	TPM               *int64                  `json:"tpm"`
 	Budget            optional[policy.Budget] `json:"budget"`
@@ -254,6 +255,9 @@ func (s *Server) apply(p *patch, name *string, pol *policy.Policy, expires **tim
 	if p.AllowedMCPServers != nil {
 		pol.AllowedMCPServers = *p.AllowedMCPServers
 	}
+	if p.AllowedAgents != nil {
+		pol.AllowedAgents = *p.AllowedAgents
+	}
 	if p.RPM != nil {
 		pol.RPM = *p.RPM
 	}
@@ -302,6 +306,11 @@ func (s *Server) apply(p *patch, name *string, pol *policy.Policy, expires **tim
 	for _, v := range pol.AllowedMCPServers {
 		if _, ok := cfg.MCP.VirtualServers[v]; !ok {
 			return badRequest("allowed MCP server %q is not configured", v)
+		}
+	}
+	for _, v := range pol.AllowedAgents {
+		if _, ok := cfg.A2A.Agents[v]; !ok {
+			return badRequest("allowed agent %q is not configured", v)
 		}
 	}
 	for _, g := range pol.Guardrails {
@@ -885,6 +894,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) error {
 		"body_logging":   cfg.BodyLogging.Enabled,
 		"semantic_cache": cfg.Cache.Semantic.Model != "",
 		"guardrails":     slices.Sorted(maps.Keys(cfg.Guardrails)),
+		"agents":         slices.Sorted(maps.Keys(cfg.A2A.Agents)),
 	})
 	return nil
 }

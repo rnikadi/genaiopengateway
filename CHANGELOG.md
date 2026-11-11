@@ -13,6 +13,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - A Gemini Live relay ([docs/modalities.md](docs/modalities.md#gemini-live)) at Google's BidiGenerateContent path, so Google's SDKs work unchanged: the setup's model is a virtual model, the session goes to a `gemini` target's Live model, and each turn's usage is charged with audio prices. The catalog gains the `live` kind.
 - A Nova Sonic relay ([docs/modalities.md](docs/modalities.md#nova-sonic)): Bedrock's bidirectional stream as a WebSocket at `/bedrock/model/{model}/invoke-with-bidirectional-stream`, one event's JSON per message. The gateway signs the stream with SigV4 or a Bedrock API key, and charges each `usageEvent` with audio prices. The catalog gains the `bidi_stream` kind and a Nova Sonic preset.
 - Hosted stdio MCP servers ([docs/mcp.md](docs/mcp.md#hosted-stdio-servers)): an MCP server with `command` instead of `url` runs as a child process with only `PATH`, `HOME` and its own `env`, restarts when it exits, and logs its stderr. It can be set only in the config file; stored objects with `command`, `env` or `dir` are refused.
+- A2A agents ([docs/a2a.md](docs/a2a.md), ADR 0033): agents speaking the Agent2Agent protocol are served at `/a2a/{name}` with gateway keys, `allowed_agents` policies, rate limits, guardrails and metrics, and their cards rewritten to point at the gateway. Task and context ids are recorded with their caller, so no team can read or continue another's task. Agents are configured in the file, the UI, `gogctl` and Terraform policies.
+
 
 ## [0.11.0] - 2026-11-11
 

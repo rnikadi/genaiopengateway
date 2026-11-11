@@ -18,11 +18,11 @@ import (
 // are never part of it, since their secrets are shown only once.
 
 // policyFields are the policy settings an organization or team takes.
-var policyFields = []string{"allowed_models", "allowed_mcp_servers", "rpm", "tpm", "budget", "log_bodies", "guardrails", "cache", "residency"}
+var policyFields = []string{"allowed_models", "allowed_mcp_servers", "allowed_agents", "rpm", "tpm", "budget", "log_bodies", "guardrails", "cache", "residency"}
 
 // listFields are the policy settings that are lists; the others clear
 // to zero or null.
-var listFields = []string{"allowed_models", "allowed_mcp_servers", "guardrails", "residency"}
+var listFields = []string{"allowed_models", "allowed_mcp_servers", "allowed_agents", "guardrails", "residency"}
 
 // policyOf keeps the policy settings of an API object, normalized so a
 // file and the API compare equal: no empty values, JSON numbers.

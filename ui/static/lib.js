@@ -105,6 +105,7 @@ export function policySummary(p) {
   const parts = [];
   parts.push(p.allowed_models?.length ? `${p.allowed_models.length} model${p.allowed_models.length > 1 ? 's' : ''}` : 'All models');
   if (p.allowed_mcp_servers?.length) parts.push(`${p.allowed_mcp_servers.length} MCP server${p.allowed_mcp_servers.length > 1 ? 's' : ''}`);
+  if (p.allowed_agents?.length) parts.push(`${p.allowed_agents.length} agent${p.allowed_agents.length > 1 ? 's' : ''}`);
   if (p.rpm) parts.push(`${num(p.rpm)} RPM`);
   if (p.tpm) parts.push(`${compact(p.tpm)} TPM`);
   if (p.budget) parts.push(`${usd(p.budget.amount_usd)} ${p.budget.period}`);
@@ -210,6 +211,7 @@ export function PolicyForm({ initial = {}, kind, submitLabel, onSubmit, onCancel
     name: initial.name ?? '',
     allowed_models: initial.allowed_models ?? [],
     allowed_mcp_servers: initial.allowed_mcp_servers ?? [],
+    allowed_agents: initial.allowed_agents ?? [],
     guardrails: initial.guardrails ?? [],
     rpm: initial.rpm || '',
     tpm: initial.tpm || '',
@@ -235,6 +237,8 @@ export function PolicyForm({ initial = {}, kind, submitLabel, onSubmit, onCancel
       name: v.name.trim(),
       allowed_models: v.allowed_models,
       allowed_mcp_servers: v.allowed_mcp_servers,
+      // An agent removed from config can no longer be allowed.
+      allowed_agents: v.allowed_agents.filter((a) => (me.agents || []).includes(a)),
       residency: v.residency.split(',').map((s) => s.trim()).filter(Boolean),
       // A guardrail removed from config no longer runs; dropping it keeps the save valid.
       guardrails: v.guardrails.filter((g) => (me.guardrails || []).includes(g)),
@@ -279,6 +283,7 @@ export function PolicyForm({ initial = {}, kind, submitLabel, onSubmit, onCancel
     ${kind === 'key' && html`<${Field} label="Owner" hint="The person or service responsible for the key, such as an email. Shown in expiry alerts."><input maxlength="200" value=${v.owner} onInput=${set('owner')} /><//>`}
     <${Field} label="Allowed models" hint="None checked means every model.">${checks('allowed_models', catalog.models.map((m) => m.name))}<//>
     <${Field} label="Allowed MCP servers" hint="None checked means every MCP server.">${checks('allowed_mcp_servers', catalog.virtualServers.map((s) => s.name))}<//>
+    ${(me.agents || []).length > 0 && html`<${Field} label="Allowed agents" hint="A2A agents. None checked means every agent.">${checks('allowed_agents', me.agents)}<//>`}
     <${Field} label="Data residency" hint="Comma-separated provider residency labels, such as eu. Requests only go to providers with one of them. Empty allows any provider.">
       <input value=${v.residency} placeholder="Any" onInput=${set('residency')} />
     <//>

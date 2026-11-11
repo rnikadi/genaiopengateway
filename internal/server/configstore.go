@@ -205,6 +205,7 @@ func fileNames(file *config.Config) map[string][]string {
 		config.KindMCPServers:        slices.Sorted(maps.Keys(file.MCP.Servers)),
 		config.KindMCPVirtualServers: slices.Sorted(maps.Keys(file.MCP.VirtualServers)),
 		config.KindAlertWebhooks:     hooks,
+		config.KindA2AAgents:         slices.Sorted(maps.Keys(file.A2A.Agents)),
 	}
 }
 
