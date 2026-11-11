@@ -105,6 +105,7 @@ function SignIn({ onSignedIn, expired }) {
       ${expired && html`<p class="notice">Your session ended. Sign in again.</p>`}
       <${ErrorBox} error=${error} />
       ${methods?.oidc && html`<a class="button wide" href=${'auth/login?return=' + returnTo}>Sign in with single sign-on</a>`}
+      ${methods?.saml && html`<a class="button wide" href=${'auth/saml/login?return=' + returnTo}>Sign in with single sign-on</a>`}
       ${methods?.token &&
       html`<form class="form" onSubmit=${submit}>
         <label class="field"><span>Admin token</span>
@@ -113,7 +114,7 @@ function SignIn({ onSignedIn, expired }) {
         <button type="submit" class="wide">Sign in</button>
         <p class="muted small">Configure <code>sso.oidc</code> to sign people in with your identity provider instead.</p>
       </form>`}
-      ${methods && !methods.oidc && !methods.token && html`<p class="muted">No sign-in method is configured. Set <code>admin.token</code> or <code>sso.oidc</code>.</p>`}
+      ${methods && !methods.oidc && !methods.saml && !methods.token && html`<p class="muted">No sign-in method is configured. Set <code>admin.token</code>, <code>sso.oidc</code> or <code>sso.saml</code>.</p>`}
     </div>
   </main>`;
 }

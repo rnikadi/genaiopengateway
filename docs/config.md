@@ -35,6 +35,9 @@ sso:                                 # operator sign-in to the admin UI; see adm
       role: admin                    # one team: its keys, credentials and usage
       org: acme
       team: search
+  # saml:                            # instead of oidc; see saml.md
+  #   idp_metadata_url: https://idp.example.com/metadata
+  #   acs_url: https://gateway.example.com/ui/auth/saml/acs
   scim:                              # provisioning at /scim/v2; see scim.md
     token: ${SCIM_TOKEN}             # at least 32 characters
   custom_roles:                      # more roles from the permissions in roles.md

@@ -13,7 +13,6 @@ v0.3 adds a web UI for operators, sign-in through the company's identity provide
 
 | Feature | Why, and when |
 | --- | --- |
-| SAML | Every identity provider we target speaks OIDC, and SAML-only ones can be bridged with Keycloak or Dex. Added if users ask. |
 | Self-service keys for members | Team grants cover team leads ([roles.md](roles.md)). Finer rules are Cedar policies (ADR 0009). |
 | Editing providers, models and MCP servers from the UI | They live in the config file by design (ADR 0003). The UI shows them read-only ([admin-ui-config.md](admin-ui-config.md)); editing them from the UI as well is planned (issue #34). |
 | Personal API tokens for the admin API | Automation keeps using the admin token. Per-user tokens can follow if needed. |
@@ -93,9 +92,13 @@ sso:
 
 The client is confidential (it has a secret) and only needs the redirect URL registered at the identity provider. It uses only standard OIDC discovery, so any compliant provider works (Keycloak, Dex, Okta, Entra ID, Google, Auth0). The Compose setup tests it against Dex.
 
-### Without OIDC
+### With SAML
 
-When `sso.oidc` is not configured, the sign-in page asks for the admin token. This suits local development and small setups. The session acts as `owner` and the audit actor is `admin-token`, as for API calls.
+`sso.saml` signs people in with a SAML 2.0 identity provider instead; see [saml.md](saml.md).
+
+### Without single sign-on
+
+When neither `sso.oidc` nor `sso.saml` is configured, the sign-in page asks for the admin token. This suits local development and small setups. The session acts as `owner` and the audit actor is `admin-token`, as for API calls.
 
 ## Sessions
 
@@ -120,7 +123,7 @@ When `sso.oidc` is not configured, the sign-in page asks for the admin token. Th
 | `GET /admin/v1/models` | Virtual models with their targets (no credentials) |
 | `GET /admin/v1/mcp/virtual-servers` | Virtual MCP servers and the tools they expose |
 | `GET /ui/auth/login`, `GET /ui/auth/callback`, `POST /ui/auth/logout` | Sign-in and sign-out |
-| `POST /ui/auth/token` | Sign in with the admin token (only without OIDC) |
+| `POST /ui/auth/token` | Sign in with the admin token (only without single sign-on) |
 
 ## Data model
 

@@ -8,6 +8,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 - Custom and per-team roles ([docs/roles.md](docs/roles.md), ADR 0032). Roles are now sets of permissions, such as `keys.write` or `usage.read`. `sso.custom_roles` defines new ones, and a role mapping with a `team` grants a role for one team: its keys, credentials, usage and playground, but not its policy. Both are editable on the Settings page. `GET /admin/v1/me` lists each grant's permissions.
 - SCIM 2.0 provisioning ([docs/scim.md](docs/scim.md)) at `/scim/v2`, for Okta, Entra ID and other identity providers, with a bearer token in `sso.scim.token`. Role mappings match provisioned users' groups from the directory, so group changes apply at once, and deactivating or deleting a user signs them out. A new Directory page shows what was provisioned, and every change is audited. Migration 0017 adds the tables.
+- SAML 2.0 sign-in for the admin UI ([docs/saml.md](docs/saml.md)), as an alternative to OIDC, with setup for Okta, Entra ID and Keycloak. The gateway serves its service provider metadata at `/ui/auth/saml/metadata`. Responses must answer a request the browser started, SHA-1 signatures are refused, and each assertion signs in once across replicas (migration 0018). Roles, team grants and SCIM work as with OIDC.
 
 ## [0.10.0] - 2026-11-11
 

@@ -276,7 +276,7 @@ func (s *Server) sessionOperator(r *http.Request) (*operator, error) {
 	o := &operator{Subject: ss.Subject, Email: ss.Email, Name: ss.Name, Grants: ss.Grants, session: h, customRoles: s.rt.Load().cfg.SSO.CustomRoles}
 	// Roles follow the current sso.roles, so removing a mapping takes
 	// effect at once rather than at the next sign-in.
-	if cfg := s.rt.Load().cfg; ss.Claims != nil && cfg.SSO.OIDC != nil {
+	if cfg := s.rt.Load().cfg; ss.Claims != nil && cfg.SSO.Enabled() {
 		// Provisioned users' groups come from SCIM, so a change in the
 		// directory applies at once (docs/scim.md).
 		groups, active, err := s.directoryGroups(r.Context(), ss.Claims)

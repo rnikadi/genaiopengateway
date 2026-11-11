@@ -17,6 +17,7 @@
 | [MCP gateway](mcp.md) | Virtual servers, tool pinning, auth, audit, MCP configuration |
 | [Admin UI and SSO](admin-ui.md) | Pages, roles, OIDC sign-in, sessions, admin API changes |
 | [Roles and permissions](roles.md) | Built-in and custom roles, permissions, team grants |
+| [SAML sign-in](saml.md) | Signing operators in with a SAML 2.0 identity provider |
 | [SCIM provisioning](scim.md) | Users and groups from Okta, Entra ID and others, deprovisioning |
 | [Admin UI: configuration views](admin-ui-config.md) | Providers, models, guardrails, alerts and settings in the UI |
 | [Playground](playground.md) | Calling a model as a team from the admin UI |

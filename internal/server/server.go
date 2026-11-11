@@ -86,6 +86,7 @@ type Server struct {
 	// ssoMu guards sso, the identity provider operators sign in with.
 	ssoMu sync.Mutex
 	sso   *oidcClient
+	saml  *samlProvider
 
 	uiFiles map[string]*uiFile
 

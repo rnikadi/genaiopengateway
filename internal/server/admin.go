@@ -871,7 +871,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) error {
 		"operator": map[string]any{
 			"subject": op.Subject, "email": op.Email, "name": op.Name, "grants": grants,
 		},
-		"sso":            cfg.SSO.OIDC != nil,
+		"sso":            cfg.SSO.Enabled(),
 		"body_logging":   cfg.BodyLogging.Enabled,
 		"semantic_cache": cfg.Cache.Semantic.Model != "",
 		"guardrails":     slices.Sorted(maps.Keys(cfg.Guardrails)),
