@@ -23,12 +23,12 @@ export function Providers() {
   const state = useLoad(() => api('GET', '/admin/v1/providers'));
   return html`
     <${PageHeader} title="Providers" sub="Upstreams from the gateway's configuration. Health covers the last hour across every replica. Credentials are never shown.">
-      ${s.owner && html`<a class="button secondary" href="#/config?kind=providers">Manage in Configuration</a>`}
+      ${s.owner && html`<a class="button" href="#/setup">Add a provider</a> <a class="button secondary" href="#/config?kind=providers">Manage in Configuration</a>`}
     <//>
     <${Loading} state=${state}>${(d) => html`<${Table}
       rowKey=${(p) => p.name}
       rows=${d.data}
-      empty="No providers are configured."
+      empty=${s.owner ? html`No providers are configured. The <a href="#/setup">setup wizard</a> adds one from a list of presets.` : 'No providers are configured.'}
       columns=${[
         { label: 'Provider', render: (p) => html`<strong>${p.name}</strong><div class="muted small">${providerTypes[p.type] || p.type}</div>` },
         { label: 'Endpoint', render: (p) => html`<code class="small">${where(p)}</code>` },

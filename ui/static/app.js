@@ -17,6 +17,7 @@ import { Settings } from './pages/settings.js';
 import { Playground } from './pages/playground.js';
 import { Config } from './pages/config.js';
 import { Jobs } from './pages/jobs.js';
+import { Setup } from './pages/setup.js';
 
 const routes = [
   [/^\/$/, Overview, 'overview'],
@@ -37,6 +38,7 @@ const routes = [
   [/^\/playground$/, Playground, 'playground'],
   [/^\/config$/, Config, 'config', 'owner'],
   [/^\/audit$/, Audit, 'audit'],
+  [/^\/setup$/, Setup, 'setup', 'owner'],
 ];
 
 const nav = [
@@ -55,6 +57,7 @@ const nav = [
   ['audit', '#/audit', 'Audit log'],
   ['config', '#/config', 'Configuration', 'owner'],
   ['settings', '#/settings', 'Settings', 'owner'],
+  ['setup', '#/setup', 'Setup wizard', 'owner'],
 ];
 
 function parseHash() {

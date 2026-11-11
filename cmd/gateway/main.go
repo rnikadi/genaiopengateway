@@ -3,9 +3,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -25,7 +28,8 @@ var version = "dev"
 const shutdownGrace = 50 * time.Second
 
 func main() {
-	path := flag.String("config", "config.yaml", "path to the config file")
+	path := flag.String("config", "config.yaml", "path to the config file; without one the gateway starts with zero config")
+	dataDir := flag.String("data", envOr("GOG_DATA_DIR", config.DefaultDataDir), "data directory for a start without a config file")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 	if *showVersion {
@@ -34,16 +38,19 @@ func main() {
 	}
 
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	if err := run(*path, log); err != nil {
+	if err := run(*path, *dataDir, log); err != nil {
 		log.Error("exiting", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(path string, log *slog.Logger) error {
-	cfg, err := config.Load(path)
+func run(path, dataDir string, log *slog.Logger) error {
+	cfg, boot, err := loadConfig(path, dataDir)
 	if err != nil {
 		return err
+	}
+	if boot != nil {
+		path = "" // nothing to reload on SIGHUP
 	}
 	mcpgw.Version = version
 	server.Version = version
@@ -98,6 +105,9 @@ func run(path string, log *slog.Logger) error {
 			}
 		}()
 	}
+	if boot != nil {
+		announceZeroConfig(os.Stderr, cfg, boot, log)
+	}
 	go func() {
 		log.Info("listening", "addr", cfg.Listen, "version", version, "tls", cfg.TLS.CertFile != "", "tracing", tracing)
 		if cfg.TLS.CertFile != "" {
@@ -135,8 +145,51 @@ func run(path string, log *slog.Logger) error {
 	}
 }
 
+// loadConfig reads the config file, or, when there is none, builds the
+// zero config with its data directory (docs/quickstart.md).
+func loadConfig(path, dataDir string) (*config.Config, *config.Bootstrap, error) {
+	cfg, err := config.Load(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return config.ZeroConfig(dataDir)
+	}
+	return cfg, nil, err
+}
+
+// announceZeroConfig tells the person who just started the gateway where
+// the UI is and how to sign in. The token is printed only on the start
+// that generated it.
+func announceZeroConfig(w *os.File, cfg *config.Config, b *config.Bootstrap, log *slog.Logger) {
+	log.Warn("no config file; started with zero config", "data_dir", b.DataDir, "bootstrap_file", b.File)
+	host, port, err := net.SplitHostPort(cfg.Listen)
+	if err != nil || host == "" || host == "0.0.0.0" || host == "::" {
+		host = "localhost"
+	}
+	url := fmt.Sprintf("http://%s/ui/", net.JoinHostPort(host, port))
+	token := "saved in " + b.File
+	if b.Created {
+		token = b.AdminToken.Value() + "  (also saved in " + b.File + ")"
+	}
+	fmt.Fprintf(w, "\nGenAIOpenGateway %s is running with no config file.\n\n", version)
+	fmt.Fprintf(w, "  Admin UI:     %s\n", url)
+	fmt.Fprintf(w, "  Admin token:  %s\n", token)
+	fmt.Fprintf(w, "  Data:         %s (SQLite, in-memory limits)\n\n", b.DataDir)
+	fmt.Fprintf(w, "Open the UI, sign in with the token, and the setup wizard adds your first provider.\n")
+	fmt.Fprintf(w, "For production, write a config file instead: see docs/config.md.\n\n")
+}
+
+func envOr(name, def string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return def
+}
+
 // reload applies a changed config file. Listener settings need a restart.
 func reload(path string, current *config.Config, srv *server.Server, log *slog.Logger) {
+	if path == "" {
+		log.Info("started with zero config; nothing to reload")
+		return
+	}
 	next, err := config.Load(path)
 	if err == nil {
 		err = srv.Reload(next)

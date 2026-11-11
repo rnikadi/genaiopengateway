@@ -57,6 +57,7 @@ Every route the gateway serves, generated from the handlers in `internal/server`
 | `GET` | `/admin/v1/batches` | `s.listAdminBatches` | listAdminBatches lists batches for operators, newest first. |
 | `POST` | `/admin/v1/batches/{id}/cancel` | `s.cancelAdminBatch` | cancelAdminBatch cancels a batch at its target, for operators who can write to its organization. |
 | `DELETE` | `/admin/v1/cache` | `s.clearCache` | clearCache removes an organization's or a team's cached answers. |
+| `GET` | `/admin/v1/catalog` | `s.listCatalog` | listCatalog returns the provider presets and model prices the setup wizard and configuration forms fill in from (docs/catalog.md). |
 | `GET` | `/admin/v1/config` | `s.listConfig` | listConfig lists every configuration object with where it comes from: the config file, the store, or both. |
 | `DELETE` | `/admin/v1/config/{kind}/{name}` | `s.deleteConfig` | deleteConfig removes an object from the running config: a stored one is deleted, and one from the file gets a deletion marker (ADR 0028). |
 | `PUT` | `/admin/v1/config/{kind}/{name}` | `s.putConfig` | putConfig creates or replaces a stored configuration object, validated against the merged config. |

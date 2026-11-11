@@ -97,6 +97,25 @@ jobs:
         working-directory: deploy/compose
         run: docker compose -f compose.yaml -f compose.sso.yaml logs
 
+  quickstart:
+    # Zero-config start and the setup wizard, driven by a browser.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          check-latest: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Setup wizard browser test
+        working-directory: test/e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          ./quickstart.sh
+
   conformance:
     # The official OpenAI Python SDK against the gateway, one call per endpoint.
     runs-on: ubuntu-latest

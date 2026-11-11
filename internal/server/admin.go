@@ -63,6 +63,7 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	h("GET /admin/v1/me", s.me)
 	h("GET /admin/v1/models", s.listConfiguredModels)
 	h("GET /admin/v1/providers", s.listProviders)
+	h("GET /admin/v1/catalog", s.listCatalog)
 	h("GET /admin/v1/guardrails", s.listGuardrails)
 	h("GET /admin/v1/alerts/webhooks", s.listWebhooks)
 	h("GET /admin/v1/settings", s.settings)

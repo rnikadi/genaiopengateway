@@ -10,6 +10,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/rnikadi/genaiopengateway/internal/catalog"
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/policy"
 	"github.com/rnikadi/genaiopengateway/internal/provider"
@@ -372,3 +373,14 @@ func host(u config.Secret) string {
 // duration formats a configured duration the way config files write
 // them: 30d, 5m, 1h30m, 2s.
 func duration(d config.Duration) string { return d.Format() }
+
+// listCatalog returns the provider presets and model prices the setup
+// wizard and configuration forms fill in from (docs/catalog.md).
+func (s *Server) listCatalog(w http.ResponseWriter, _ *http.Request) error {
+	c, err := catalog.Get()
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, c)
+	return nil
+}

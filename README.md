@@ -19,26 +19,36 @@
 
 ## Quick start
 
-Download a binary from [releases](https://github.com/rnikadi/genaiopengateway/releases), or build from source with Go 1.26:
+Start it with no config file and finish setup in the browser:
 
 ```
-cp config.example.yaml config.yaml          # edit providers, models and prices
-export OPENAI_API_KEY=sk-... ANTHROPIC_API_KEY=sk-ant-... GATEWAY_DEV_KEY=$(openssl rand -hex 24)
-make run                                    # or: genaiopengateway -config config.yaml
+docker run -p 8080:8080 -v gog-data:/var/lib/genaiopengateway ghcr.io/rnikadi/genaiopengateway:latest
 ```
+
+or install the binary (Linux and macOS) and run it:
+
+```
+curl -fsSL https://raw.githubusercontent.com/rnikadi/genaiopengateway/main/scripts/install.sh | sh
+genaiopengateway
+```
+
+The gateway starts on SQLite, prints the admin UI link and a generated admin token, and the setup wizard adds a provider from a list of presets, creates a key and sends a test request. See the [quick start](docs/quickstart.md).
 
 Point any OpenAI SDK at `http://localhost:8080/v1`, or the Anthropic SDK at `http://localhost:8080`, with the gateway key:
 
 ```
 curl http://localhost:8080/v1/chat/completions \
-  -H "Authorization: Bearer $GATEWAY_DEV_KEY" \
+  -H "Authorization: Bearer $GATEWAY_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"model":"chat-default","messages":[{"role":"user","content":"Hello"}]}'
+  -d '{"model":"gpt-5-mini","messages":[{"role":"user","content":"Hello"}]}'
 ```
 
-With Docker:
+For production, write a config file instead, starting from [`config.example.yaml`](config.example.yaml):
 
 ```
+cp config.example.yaml config.yaml          # edit providers, models and prices
+export OPENAI_API_KEY=sk-... ANTHROPIC_API_KEY=sk-ant-... GATEWAY_DEV_KEY=$(openssl rand -hex 24)
+genaiopengateway -config config.yaml
 docker run -p 8080:8080 -v $PWD/config.yaml:/etc/genaiopengateway/config.yaml:ro \
   -e OPENAI_API_KEY -e ANTHROPIC_API_KEY -e GATEWAY_DEV_KEY ghcr.io/rnikadi/genaiopengateway:0.8
 ```
