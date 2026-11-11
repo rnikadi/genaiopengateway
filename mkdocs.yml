@@ -78,6 +78,7 @@ nav:
       - Deploying to Kubernetes: deploy-kubernetes.md
       - Helm chart: helm.md
       - Observability: observability.md
+      - Runbook: runbook.md
       - Releases: releasing.md
       - Roadmap: roadmap.md
   - Decisions: adr/README.md

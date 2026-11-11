@@ -53,6 +53,8 @@ serviceAccount:
 ingress: {enabled: false}
 autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 10, targetCPUUtilizationPercentage: 70}
 serviceMonitor: {enabled: false}
+prometheusRule: {enabled: false}     # alerting rules, see runbook.md
+grafanaDashboard: {enabled: false}   # dashboard ConfigMap for the Grafana sidecar
 metricsPort: 9090              # matches metrics.listen in config; null when it has none
 networkPolicy: {enabled: false}
 podAnnotations: {}

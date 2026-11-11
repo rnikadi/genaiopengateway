@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 
 	"go.opentelemetry.io/otel"
@@ -66,4 +67,70 @@ func Operation(ep provider.Endpoint) string {
 	// Media endpoints have no semantic convention yet; their own name is
 	// the most useful.
 	return string(ep)
+}
+
+// SpanName is a GenAI client span's name under the semantic
+// conventions: the operation, then the model.
+func SpanName(op, model string) string {
+	if model == "" {
+		return op
+	}
+	return op + " " + model
+}
+
+// RequestAttributes are the gen_ai.request.* attributes found in a JSON
+// request body: sampling parameters and the output limit.
+func RequestAttributes(raw []byte) []attribute.KeyValue {
+	var b struct {
+		MaxTokens           *int64   `json:"max_tokens"`
+		MaxCompletionTokens *int64   `json:"max_completion_tokens"`
+		MaxOutputTokens     *int64   `json:"max_output_tokens"`
+		Temperature         *float64 `json:"temperature"`
+		TopP                *float64 `json:"top_p"`
+		TopK                *float64 `json:"top_k"`
+		Seed                *int64   `json:"seed"`
+		Stop                any      `json:"stop"`
+		StopSequences       []string `json:"stop_sequences"`
+		N                   *int64   `json:"n"`
+	}
+	if json.Unmarshal(raw, &b) != nil {
+		return nil
+	}
+	var out []attribute.KeyValue
+	for _, n := range []*int64{b.MaxTokens, b.MaxCompletionTokens, b.MaxOutputTokens} {
+		if n != nil {
+			out = append(out, attribute.Int64("gen_ai.request.max_tokens", *n))
+			break
+		}
+	}
+	if b.Temperature != nil {
+		out = append(out, attribute.Float64("gen_ai.request.temperature", *b.Temperature))
+	}
+	if b.TopP != nil {
+		out = append(out, attribute.Float64("gen_ai.request.top_p", *b.TopP))
+	}
+	if b.TopK != nil {
+		out = append(out, attribute.Float64("gen_ai.request.top_k", *b.TopK))
+	}
+	if b.Seed != nil {
+		out = append(out, attribute.Int64("gen_ai.request.seed", *b.Seed))
+	}
+	if b.N != nil && *b.N != 1 {
+		out = append(out, attribute.Int64("gen_ai.request.choice.count", *b.N))
+	}
+	stops := b.StopSequences
+	switch v := b.Stop.(type) {
+	case string:
+		stops = append(stops, v)
+	case []any:
+		for _, x := range v {
+			if s, ok := x.(string); ok {
+				stops = append(stops, s)
+			}
+		}
+	}
+	if len(stops) > 0 {
+		out = append(out, attribute.StringSlice("gen_ai.request.stop_sequences", stops))
+	}
+	return out
 }

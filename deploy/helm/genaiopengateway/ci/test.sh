@@ -26,4 +26,7 @@ fails "limiter.driver: valkey" -f ci/memory-values.yaml --set replicaCount=1 --s
 single=$(render -f ci/single-values.yaml)
 grep -q 'kind: PodDisruptionBudget' <<<"$single" && { echo "PDB with one replica"; exit 1; }
 grep -q 'image: "\?ghcr.io/rnikadi/genaiopengateway@sha256:0' <(render -f ci/all-values.yaml) || { echo "digest not used"; exit 1; }
+all=$(render -f ci/all-values.yaml)
+grep -q 'alert: GatewayHighErrorRate' <<<"$all" || { echo "PrometheusRule has no alerts"; exit 1; }
+grep -q '"uid": "genaiopengateway"' <<<"$all" || { echo "dashboard ConfigMap is empty"; exit 1; }
 echo "chart checks passed"

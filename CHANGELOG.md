@@ -14,10 +14,14 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - Retries on the same target with jittered exponential backoff that honors `Retry-After`, and a per-target timeout to the first response byte that never cuts off a stream.
 - A circuit breaker per target (`routing.circuit_breaker`, on by default: 5 failures in a row, 30s cooldown) with a single half-open probe. Its state shows on the Models page, in `GET /admin/v1/models`, and in the `gog_target_circuit_state` metric. Config reloads keep it.
 - Data residency pinning ([docs/routing.md](docs/routing.md#data-residency)): label providers with `residency`, and pin organizations, teams and keys to labels. A pinned request only reaches matching providers, and is refused with `403 residency_not_allowed` when none qualifies.
+- OpenTelemetry GenAI semantic conventions ([docs/observability.md](docs/observability.md#traces)): request parameters (`gen_ai.request.max_tokens`, `temperature`, `top_p` and others), cached input tokens and `error.type` on spans, and the `gen_ai_client_operation_duration_seconds` and `gen_ai_client_token_usage` histograms.
+- A Grafana dashboard and Prometheus alerting rules, with a [runbook](docs/runbook.md) section for each alert. The Helm chart installs them with `grafanaDashboard.enabled` and `prometheusRule.enabled`, and the Compose `observability` profile now starts Grafana with the dashboard.
+- A chaos test (`test/chaos`) that runs failover against upstreams that refuse connections, fail, rate limit, stall and recover.
 - An install script (`scripts/install.sh`) that downloads the latest release for Linux or macOS and checks it against the release checksums.
 
 ### Changed
 
+- Upstream spans are named for the operation and model, such as `chat gpt-4.1-mini`, as the OpenTelemetry GenAI conventions say, where they were all `gateway.upstream`.
 - The circuit breaker is on by default, so a target that fails 5 times in a row is skipped for 30 seconds where it used to be tried first on every request. Set `routing.circuit_breaker.failures: 0` to keep the old behavior.
 
 ### Fixed

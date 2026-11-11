@@ -20,6 +20,7 @@
 | [Playground](playground.md) | Calling a model as a team from the admin UI |
 | [Images, audio, video and realtime](modalities.md) | Media endpoints, how they are metered and priced, and the rollout |
 | [Batch and files](batch.md) | The Batch API through the gateway: checked uploads, ownership, charging once, the Jobs page |
+| [Routing and failover](routing.md) | Strategies, retries, timeouts, circuit breakers and data residency |
 | [Response cache](cache.md) | Exact and semantic caching per team: keys, guardrails, metering, the admin UI |
 | [Admin UI: editing configuration](admin-ui-config-editing.md) | Providers, models, guardrails, MCP servers and webhooks stored through the admin API |
 | [Admin UI: every setting in the UI](admin-ui-settings.md) | Gateway settings edited on the Settings page, forms for every object, and the check that keeps the UI complete |
@@ -33,5 +34,6 @@
 | [Deploying to Kubernetes](deploy-kubernetes.md) | Installing and running the Helm chart |
 | [Helm chart](helm.md) | Kubernetes deployment design |
 | [Observability](observability.md) | Logs, metrics, traces, usage records |
+| [Runbook](runbook.md) | Dashboard, alert rules, and what to do for each alert |
 | [Releases](releasing.md) | Versioning, artifacts, support |
 | [Roadmap](roadmap.md) | Phases and gates |

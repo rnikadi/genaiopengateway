@@ -28,6 +28,10 @@ type Metrics struct {
 	limitRejection *prometheus.CounterVec
 	unpriced       *prometheus.CounterVec
 
+	// OpenTelemetry GenAI client metrics, in Prometheus naming.
+	genaiDuration *prometheus.HistogramVec
+	genaiTokens   *prometheus.HistogramVec
+
 	mcpRequests  *prometheus.CounterVec
 	mcpDuration  *prometheus.HistogramVec
 	mcpToolCalls *prometheus.CounterVec
@@ -84,6 +88,14 @@ func NewMetrics(usageErrors, snapshotAge, bodiesDropped func() float64) *Metrics
 		unpriced: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "gog_unpriced_requests_total", Help: "Successful requests to targets with no price configured.",
 		}, []string{"target"}),
+		genaiDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name: "gen_ai_client_operation_duration_seconds", Help: "GenAI operation duration (OpenTelemetry gen_ai.client.operation.duration), per upstream target that answered.",
+			Buckets: []float64{.01, .02, .04, .08, .16, .32, .64, 1.28, 2.56, 5.12, 10.24, 20.48, 40.96, 81.92},
+		}, []string{"gen_ai_operation_name", "gen_ai_provider_name", "gen_ai_request_model", "error_type"}),
+		genaiTokens: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name: "gen_ai_client_token_usage", Help: "Tokens used per request (OpenTelemetry gen_ai.client.token.usage).",
+			Buckets: []float64{1, 4, 16, 64, 256, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864},
+		}, []string{"gen_ai_operation_name", "gen_ai_provider_name", "gen_ai_request_model", "gen_ai_token_type"}),
 		mcpRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "gog_mcp_requests_total", Help: "MCP requests served.",
 		}, []string{"virtual_server", "method", "status"}),
@@ -136,6 +148,7 @@ func NewMetrics(usageErrors, snapshotAge, bodiesDropped func() float64) *Metrics
 	}
 	m.reg.MustRegister(
 		m.requests, m.duration, m.ttfb, m.tokens, m.cost, m.fallbacks, m.limitRejection, m.unpriced,
+		m.genaiDuration, m.genaiTokens,
 		m.mcpRequests, m.mcpDuration, m.mcpToolCalls, m.mcpUp, m.mcpPending,
 		m.alerts, m.alertDeliveries, m.bodiesWritten, m.redactions,
 		m.mcpConnections, m.connectFlows, m.tokenRefreshes, m.guardrailChecks, m.guardrailDuration,
@@ -171,6 +184,9 @@ type Request struct {
 	// Unpriced is set when the target has no price and the request
 	// used tokens.
 	Unpriced bool
+	// Operation, ProviderType and UpstreamModel label the GenAI client
+	// metrics; they are set when a target answered.
+	Operation, ProviderType, UpstreamModel string
 }
 
 // ObserveRequest records a finished model request.
@@ -186,6 +202,14 @@ func (m *Metrics) ObserveRequest(r Request) {
 	} {
 		if n > 0 {
 			m.tokens.WithLabelValues(r.Model, r.Target, kind).Add(float64(n))
+		}
+	}
+	if r.Operation != "" && r.ProviderType != "" {
+		m.genaiDuration.WithLabelValues(r.Operation, r.ProviderType, r.UpstreamModel, r.ErrorCode).Observe(r.Duration.Seconds())
+		for kind, n := range map[string]int64{"input": r.Tokens.InputTokens, "output": r.Tokens.OutputTokens} {
+			if n > 0 {
+				m.genaiTokens.WithLabelValues(r.Operation, r.ProviderType, r.UpstreamModel, kind).Observe(float64(n))
+			}
 		}
 	}
 	if r.CostUSD > 0 {

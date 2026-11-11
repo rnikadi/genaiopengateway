@@ -347,16 +347,18 @@ type sent struct {
 	resp *provider.Response
 }
 
-// send tries one target inside a gateway.upstream span. The span ends at
-// response headers; streaming time belongs to the request span.
+// send tries one target inside a GenAI client span, named for the
+// operation and upstream model as the semantic conventions say. The span
+// ends at response headers; streaming time belongs to the request span.
 func (r *Router) send(ctx context.Context, t config.Target, req *provider.Request) sent {
-	ctx, span := telemetry.Tracer().Start(ctx, "gateway.upstream", trace.WithSpanKind(trace.SpanKindClient),
-		trace.WithAttributes(
-			attribute.String("gen_ai.operation.name", telemetry.Operation(req.Endpoint)),
+	op := telemetry.Operation(req.Endpoint)
+	ctx, span := telemetry.Tracer().Start(ctx, telemetry.SpanName(op, t.Model), trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(append(telemetry.RequestAttributes(req.Body),
+			attribute.String("gen_ai.operation.name", op),
 			attribute.String("gen_ai.provider.name", r.types[t.Provider]),
 			attribute.String("gen_ai.request.model", t.Model),
 			attribute.String("gog.target", t.String()),
-		))
+		)...))
 	defer span.End()
 	start := time.Now()
 	resp, err := r.sendWithin(ctx, t, req)
@@ -364,12 +366,18 @@ func (r *Router) send(ctx context.Context, t config.Target, req *provider.Reques
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "no response")
+		errType := "connection_error"
+		if errors.Is(err, errTargetTimeout) || errors.Is(err, context.DeadlineExceeded) {
+			errType = "timeout"
+		}
+		span.SetAttributes(attribute.String("error.type", errType))
 		return s
 	}
 	s.Status = resp.StatusCode
 	span.SetAttributes(attribute.Int("http.response.status_code", resp.StatusCode))
 	if resp.StatusCode >= 400 {
 		span.SetStatus(codes.Error, http.StatusText(resp.StatusCode))
+		span.SetAttributes(attribute.String("error.type", strconv.Itoa(resp.StatusCode)))
 	}
 	return s
 }

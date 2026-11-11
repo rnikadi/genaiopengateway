@@ -70,6 +70,7 @@ cosign verify ghcr.io/rnikadi/charts/genaiopengateway:0.5.0 \
 | Expose it | `ingress.enabled: true` with `className`, `hosts` and `tls`, or `service.type: LoadBalancer`. Long streams need the ingress's read timeout raised, such as `nginx.ingress.kubernetes.io/proxy-read-timeout: "600"`. |
 | Scale on load | `autoscaling.enabled: true`; `minReplicas` and `maxReplicas`. |
 | Prometheus operator | `serviceMonitor.enabled: true`. Metrics are on `metricsPort` (9090), which must match `metrics.listen` in config; set `metricsPort: null` when config has no `metrics.listen`. |
+| Alerts and dashboard | `prometheusRule.enabled: true` installs the alerting rules as a PrometheusRule, and `grafanaDashboard.enabled: true` installs the dashboard as a ConfigMap labelled for the Grafana sidecar. See the [runbook](runbook.md). |
 | Restrict who can call it | `networkPolicy.enabled: true` and `ingressNamespaceSelectors` for your ingress controller's namespace. |
 | Cloud credentials without keys | `serviceAccount.annotations`, such as `iam.gke.io/gcp-service-account` or `eks.amazonaws.com/role-arn`, for the Vertex AI and Bedrock adapters ([cloud-providers.md](cloud-providers.md)). |
 | Pin the exact image | `image.digest: sha256:...` |

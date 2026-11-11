@@ -119,6 +119,7 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 			return
 		}
 		rec.Model = envelope.Model
+		span.SetAttributes(telemetry.RequestAttributes(raw)...)
 		if !p.AllowsModel(envelope.Model) {
 			fail(http.StatusForbidden, codeModelNotAllowed, "this key may not use model "+envelope.Model)
 			return
@@ -422,10 +423,15 @@ func (s *Server) finish(rt *runtime, rec *requestLog, span trace.Span, start tim
 	if !rt.router.Has(model) {
 		model = ""
 	}
-	s.metrics.ObserveRequest(telemetry.Request{
+	mr := telemetry.Request{
 		Endpoint: rec.Endpoint, Model: model, Target: rec.Target, Status: rec.Status, ErrorCode: rec.ErrorCode,
 		Duration: latency, Tokens: rec.Tokens, CostUSD: rec.CostUSD, Unpriced: rec.Unpriced,
-	})
+	}
+	if rec.Target != "" && rec.Cache != "hit" && rec.Cache != "semantic" {
+		mr.Operation = telemetry.Operation(provider.Endpoint(rec.Endpoint))
+		mr.ProviderType, mr.UpstreamModel = rt.cfg.Providers[rec.Provider].Type, rec.UpstreamModel
+	}
+	s.metrics.ObserveRequest(mr)
 
 	span.SetAttributes(
 		attribute.String("gog.virtual_model", rec.Model),
@@ -440,6 +446,7 @@ func (s *Server) finish(rt *runtime, rec *requestLog, span trace.Span, start tim
 			attribute.String("gen_ai.response.model", rec.UpstreamModel),
 			attribute.Int64("gen_ai.usage.input_tokens", rec.Tokens.InputTokens),
 			attribute.Int64("gen_ai.usage.output_tokens", rec.Tokens.OutputTokens),
+			attribute.Int64("gen_ai.usage.cache_read.input_tokens", rec.Tokens.CachedInputTokens),
 			attribute.Int("gog.fallbacks", rec.Fallbacks),
 		)
 	}
