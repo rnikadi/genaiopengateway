@@ -45,7 +45,7 @@ func (s *Server) merge(file *config.Config, objects []config.Object) (*config.Co
 // refreshConfig applies stored objects when their revision has moved. A
 // set that does not apply is reported and the running config is kept.
 func (s *Server) refreshConfig(ctx context.Context) error {
-	rev, err := s.store.ConfigRevision(ctx)
+	rev, err := s.source.ConfigRevision(ctx)
 	if err != nil {
 		return err
 	}
@@ -54,7 +54,7 @@ func (s *Server) refreshConfig(ctx context.Context) error {
 	if rev == s.cfgRev {
 		return nil
 	}
-	rows, rev, err := s.store.ListConfigObjects(ctx)
+	rows, rev, err := s.source.ListConfigObjects(ctx)
 	if err != nil {
 		return err
 	}
