@@ -4,7 +4,8 @@
 | --- | --- |
 | [Quick start](quickstart.md) | Zero-config start, the setup wizard, moving to production |
 | [Provider presets and prices](catalog.md) | The catalog the setup wizard fills in from |
-| [gogctl](gogctl.md) | The command line tool: tenants, keys, usage, configuration export and import |
+| [gogctl](gogctl.md) | The command line tool: tenants, keys, usage, declarative configuration export and import |
+| [Terraform provider](terraform.md) | Organizations, teams, keys, Cedar policies and configuration objects from Terraform |
 | [Product scope](product-scope.md) | Users, v0.1 use cases, non-goals, quality bar |
 | [Architecture](architecture.md) | Components, packages, request lifecycle |
 | [Decisions](adr/README.md) | Architecture decision records |

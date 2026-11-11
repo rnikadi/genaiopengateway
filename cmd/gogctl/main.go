@@ -15,9 +15,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"text/tabwriter"
@@ -48,8 +50,10 @@ Commands:
   models list
   providers list
   catalog list
-  config export [-all]              stored objects as YAML; -all adds the config file's
-  config import FILE [-dry-run]     creates or replaces each object in FILE
+  config export [-all]              stored objects and organizations as YAML; -all adds the config file's objects
+  config import FILE [-dry-run] [-prune]
+                                    makes the gateway match FILE: creates or updates what
+                                    differs; -prune deletes what FILE's sections leave out
   version
 
 The URL and token come from -url and -token, or GOG_URL and
@@ -155,13 +159,14 @@ func run(args []string, stdout io.Writer) error {
 	case "config import":
 		imf := flag.NewFlagSet("config import", flag.ContinueOnError)
 		dry := imf.Bool("dry-run", false, "print what would change without changing it")
+		prune := imf.Bool("prune", false, "delete stored objects, organizations and teams the file leaves out")
 		if err := imf.Parse(reorder(a)); err != nil {
 			return err
 		}
 		if imf.NArg() != 1 {
-			return errors.New("usage: config import FILE [-dry-run]")
+			return errors.New("usage: config import FILE [-dry-run] [-prune]")
 		}
-		return c.importFile(imf.Arg(0), *dry)
+		return c.importFile(imf.Arg(0), *dry, *prune)
 	}
 	if rest[0] == "usage" {
 		return c.usage(rest[1:])
@@ -352,7 +357,9 @@ func (c *client) catalog() error {
 // exportDoc is the file config export writes and config import reads:
 // objects by kind and name, each spec in the config file's shape.
 type exportDoc struct {
-	Objects map[string]map[string]any `yaml:"objects"`
+	Objects map[string]map[string]any `yaml:"objects,omitempty"`
+	// Orgs holds organizations by name (tenants.go).
+	Orgs map[string]map[string]any `yaml:"orgs,omitempty"`
 }
 
 func (c *client) export(all bool) error {
@@ -375,6 +382,9 @@ func (c *client) export(all bool) error {
 		}
 		doc.Objects[kind][name] = m["spec"]
 	}
+	if doc.Orgs, err = c.exportTenants(); err != nil {
+		return err
+	}
 	fmt.Fprintf(c.stdout, "# Exported by gogctl from %s at %s.\n", c.base, time.Now().UTC().Format(time.RFC3339))
 	fmt.Fprintln(c.stdout, "# Secrets read \"set\": importing into the same gateway keeps them; elsewhere, replace them.")
 	enc := yaml.NewEncoder(c.stdout)
@@ -385,7 +395,7 @@ func (c *client) export(all bool) error {
 // kindOrder applies providers before the models that name them, and so on.
 var kindOrder = []string{"providers", "models", "guardrails", "mcp_servers", "mcp_virtual_servers", "alert_webhooks", "streams"}
 
-func (c *client) importFile(path string, dry bool) error {
+func (c *client) importFile(path string, dry, prune bool) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -399,30 +409,93 @@ func (c *client) importFile(path string, dry bool) error {
 			return fmt.Errorf("%s: unknown kind %q", path, kind)
 		}
 	}
-	n := 0
-	for _, kind := range kindOrder {
-		names := make([]string, 0, len(doc.Objects[kind]))
-		for name := range doc.Objects[kind] {
-			names = append(names, name)
-		}
-		slices.Sort(names)
-		for _, name := range names {
-			spec := jsonable(doc.Objects[kind][name])
-			if dry {
-				fmt.Fprintf(c.stdout, "would put %s/%s\n", kind, name)
-				continue
-			}
-			if _, err := c.do(http.MethodPut, "/admin/v1/config/"+kind+"/"+url.PathEscape(name), spec); err != nil {
-				return err
-			}
-			fmt.Fprintf(c.stdout, "put %s/%s\n", kind, name)
-			n++
+	orgs, err := parseOrgs(doc.Orgs)
+	if err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	a := &applier{c: c, dry: dry}
+	if doc.Objects != nil {
+		if err := a.importObjects(doc.Objects, prune); err != nil {
+			return err
 		}
 	}
-	if !dry {
-		fmt.Fprintf(c.stdout, "%d objects imported\n", n)
+	// Organizations come after the objects their policies name.
+	if doc.Orgs != nil {
+		if err := a.importTenants(orgs, prune); err != nil {
+			return err
+		}
+	}
+	switch {
+	case dry:
+		fmt.Fprintf(c.stdout, "%d changes\n", a.changes)
+	case a.changes == 0:
+		fmt.Fprintln(c.stdout, "nothing to change")
+	default:
+		fmt.Fprintf(c.stdout, "%d changes applied\n", a.changes)
 	}
 	return nil
+}
+
+// importObjects puts each object of the file, providers first, and with
+// prune deletes stored objects the file leaves out.
+func (a *applier) importObjects(objects map[string]map[string]any, prune bool) error {
+	out, err := a.c.do(http.MethodGet, "/admin/v1/config", nil)
+	if err != nil {
+		return err
+	}
+	stored := map[string]map[string]any{}
+	entries, _ := out["data"].([]any)
+	for _, e := range entries {
+		m, _ := e.(map[string]any)
+		kind, _ := m["kind"].(string)
+		name, _ := m["name"].(string)
+		stored[kind+"/"+name] = m
+	}
+	for _, kind := range kindOrder {
+		for _, name := range slices.Sorted(maps.Keys(objects[kind])) {
+			spec := jsonable(objects[kind][name])
+			if cur := stored[kind+"/"+name]; cur != nil && cur["source"] != "deleted" && sameJSON(cur["spec"], spec) {
+				continue
+			}
+			if _, err := a.do("put", kind+"/"+name, http.MethodPut, "/admin/v1/config/"+kind+"/"+url.PathEscape(name), spec); err != nil {
+				return err
+			}
+		}
+	}
+	if !prune {
+		return nil
+	}
+	// Delete in reverse order, so models go before their providers.
+	for i := len(kindOrder) - 1; i >= 0; i-- {
+		kind := kindOrder[i]
+		for _, key := range slices.Sorted(maps.Keys(stored)) {
+			m := stored[key]
+			name, _ := m["name"].(string)
+			if m["kind"] != kind || m["source"] != "store" {
+				continue
+			}
+			if _, ok := objects[kind][name]; ok {
+				continue
+			}
+			if _, err := a.do("delete", kind+"/"+name, http.MethodDelete, "/admin/v1/config/"+kind+"/"+url.PathEscape(name), nil); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// sameJSON compares two values by their JSON encoding.
+func sameJSON(a, b any) bool {
+	ra, err1 := json.Marshal(a)
+	rb, err2 := json.Marshal(b)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	var na, nb any
+	_ = json.Unmarshal(ra, &na)
+	_ = json.Unmarshal(rb, &nb)
+	return reflect.DeepEqual(na, nb)
 }
 
 // jsonable turns YAML's map[string]any trees into values encoding/json
