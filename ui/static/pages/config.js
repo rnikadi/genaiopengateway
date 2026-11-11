@@ -359,7 +359,7 @@ function ModelForm({ spec, names, onChange }) {
         ${strategy === 'weighted' && html`<${Field} label="Weight" setting="models.targets.weight" hint="Share of traffic. Default 1.">
           <input type="number" min="0" step="1" value=${t.weight ?? ''} placeholder="1" onInput=${(e) => setTarget(i, { weight: num(e.target.value) })} />
         <//>`}
-        <${Field} label="Timeout to first byte" setting="models.targets.timeout" hint="Moves on when the target has not started answering. Empty: the provider's timeout.">
+        <${Field} label="Timeout to first byte" setting="models.targets.timeout" hint="Moves on when the target has not started answering. Empty: no separate limit.">
           <input value=${t.timeout ?? ''} placeholder="For example 10s" onInput=${(e) => setTarget(i, { timeout: e.target.value || undefined })} />
         <//>
       </div>

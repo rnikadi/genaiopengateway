@@ -28,7 +28,7 @@ export function Models() {
       rows=${d.data}
       empty=${html`No models are configured. Owners add them with the <a href="#/setup">setup wizard</a> or on the <a href="#/config?kind=models">Configuration page</a>.`}
       columns=${[
-        { label: 'Model', render: (m) => html`<strong>${m.name}</strong> <span class="muted small">${strategyNames[m.strategy] || m.strategy}${m.sticky ? ', sticky per user' : ''}${m.retries?.attempts ? ` · ${m.retries.attempts} ${m.retries.attempts === 1 ? 'retry' : 'retries'}` : ''}</span><div class="chips">${m.endpoints.map((e) => html`<span class="badge" key=${e}>${endpointNames[e] || e}</span>`)}</div>` },
+        { label: 'Model', render: (m) => html`<strong>${m.name}</strong><div class="chips">${m.endpoints.map((e) => html`<span class="badge" key=${e}>${endpointNames[e] || e}</span>`)}</div><div class="muted small">${strategyNames[m.strategy] || m.strategy}${m.sticky ? ', sticky per user' : ''}${m.retries?.attempts ? ` · ${m.retries.attempts} ${m.retries.attempts === 1 ? 'retry' : 'retries'}` : ''}</div>` },
         {
           label: 'Targets',
           render: (m) => html`<ol class="targets">${m.targets.map(
