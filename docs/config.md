@@ -119,7 +119,7 @@ cache:                               # response cache (cache.md); policies turn 
 
 providers:
   openai:
-    type: openai                     # openai | anthropic | gemini | vertex | bedrock
+    type: openai                     # openai | anthropic | gemini | vertex | bedrock | elevenlabs | deepgram | assemblyai
     base_url: https://api.openai.com/v1
     api_key: ${OPENAI_API_KEY}
     timeout: 300s                    # whole request, including streaming; default 5m

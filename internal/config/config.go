@@ -505,10 +505,26 @@ const (
 	ProviderGemini    = "gemini"
 	ProviderVertex    = "vertex"
 	ProviderBedrock   = "bedrock"
+	// Speech providers with their own APIs (docs/providers.md).
+	ProviderElevenLabs = "elevenlabs"
+	ProviderDeepgram   = "deepgram"
+	ProviderAssemblyAI = "assemblyai"
 
 	// DefaultGeminiBaseURL is the Gemini API.
 	DefaultGeminiBaseURL = "https://generativelanguage.googleapis.com"
 )
+
+// defaultBaseURLs are the endpoints of provider types that have one
+// public API, used when base_url is empty.
+var defaultBaseURLs = map[string]string{
+	ProviderGemini:     DefaultGeminiBaseURL,
+	ProviderElevenLabs: "https://api.elevenlabs.io",
+	ProviderDeepgram:   "https://api.deepgram.com",
+	ProviderAssemblyAI: "https://api.assemblyai.com",
+}
+
+// ProviderTypes lists the provider types.
+var ProviderTypes = []string{ProviderOpenAI, ProviderAnthropic, ProviderGemini, ProviderVertex, ProviderBedrock, ProviderElevenLabs, ProviderDeepgram, ProviderAssemblyAI}
 
 // Provider is an upstream that serves models.
 type Provider struct {
@@ -892,9 +908,9 @@ func (c *Config) validate() error {
 		case "":
 			p.Type = ProviderOpenAI
 		case ProviderOpenAI, ProviderAnthropic:
-		case ProviderGemini:
+		case ProviderGemini, ProviderElevenLabs, ProviderDeepgram, ProviderAssemblyAI:
 			if p.BaseURL == "" {
-				p.BaseURL = DefaultGeminiBaseURL
+				p.BaseURL = defaultBaseURLs[p.Type]
 			}
 		case ProviderVertex:
 			if p.Project == "" || p.Location == "" {
@@ -907,7 +923,7 @@ func (c *Config) validate() error {
 				add("provider %q: bedrock needs a region such as us-east-1", name)
 			}
 		default:
-			add("provider %q: type must be openai, anthropic, gemini, vertex or bedrock, got %q", name, p.Type)
+			add("provider %q: type must be one of %s, got %q", name, strings.Join(ProviderTypes, ", "), p.Type)
 		}
 		if p.BaseURL == "" {
 			if p.Type != ProviderVertex && p.Type != ProviderBedrock {

@@ -132,6 +132,40 @@ providers:
     models:
       - {id: gemini-2.5-pro, kind: chat, price: {input_per_mtok: 1.25, output_per_mtok: 10}}
       - {id: gemini-2.5-flash, kind: chat, price: {input_per_mtok: 0.3, output_per_mtok: 2.5}}
+  - id: elevenlabs
+    name: ElevenLabs
+    type: elevenlabs
+    base_url: https://api.elevenlabs.io
+    key_env: ELEVENLABS_API_KEY
+    key_url: https://elevenlabs.io/app/settings/api-keys
+    pricing_url: https://elevenlabs.io/pricing/api
+    note: Speech requests name an ElevenLabs voice ID as the voice.
+    models:
+      - {id: eleven_multilingual_v2, kind: speech, price: {per_mchars: 100}}
+      - {id: eleven_flash_v2_5, kind: speech, price: {per_mchars: 50}}
+      - {id: scribe_v1, kind: transcription, price: {per_audio_minute: 0.0067}}
+  - id: deepgram
+    name: Deepgram
+    type: deepgram
+    base_url: https://api.deepgram.com
+    key_env: DEEPGRAM_API_KEY
+    key_url: https://console.deepgram.com/
+    pricing_url: https://deepgram.com/pricing
+    note: Aura models name their voice, such as aura-2-thalia-en.
+    models:
+      - {id: nova-3, kind: transcription, price: {per_audio_minute: 0.0043}}
+      - {id: aura-2-thalia-en, kind: speech, price: {per_mchars: 30}}
+  - id: assemblyai
+    name: AssemblyAI
+    type: assemblyai
+    base_url: https://api.assemblyai.com
+    key_env: ASSEMBLYAI_API_KEY
+    key_url: https://www.assemblyai.com/app/api-keys
+    pricing_url: https://www.assemblyai.com/pricing
+    note: Transcripts are deleted from AssemblyAI once the gateway has read them.
+    models:
+      - {id: universal, kind: transcription, price: {per_audio_minute: 0.0025}}
+      - {id: slam-1, kind: transcription, price: {per_audio_minute: 0.0045}}
   - id: ollama
     name: Ollama (local)
     type: openai

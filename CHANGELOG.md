@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Added
+
+- Provider types `elevenlabs`, `deepgram` and `assemblyai` ([docs/modalities.md](docs/modalities.md#speech-providers-with-their-own-apis)): ElevenLabs text to speech and Scribe, Deepgram Aura and pre-recorded transcription, and AssemblyAI transcription, served as OpenAI's `audio.speech` and `audio.transcriptions` with the usual metering, fallback and team credentials. AssemblyAI transcripts are deleted upstream once read. Presets and prices for all three are in the catalog, and the conformance run covers them.
+
 ## [0.11.0] - 2026-11-11
 
 Enterprise identity: the v0.11 scope of the [roadmap](docs/roadmap.md). Operators sign in with SAML or OIDC and are provisioned by SCIM, roles are sets of permissions down to one team, Cedar policies add attribute-based rules, teams request MCP servers from a catalog, and tenants are managed as code with `gogctl` or Terraform.

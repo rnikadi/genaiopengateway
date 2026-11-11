@@ -7,6 +7,10 @@ providers:
   up: {base_url: "http://127.0.0.1:18191/v1", api_key: upstream-key}
   # The fake upstream's realtime WebSocket listens on the next port.
   live: {base_url: "http://127.0.0.1:18192/v1", api_key: upstream-key}
+  # Providers with their own APIs, served by fake_native.py.
+  eleven: {type: elevenlabs, base_url: "http://127.0.0.1:18193", api_key: native-key}
+  dg: {type: deepgram, base_url: "http://127.0.0.1:18193", api_key: native-key}
+  aai: {type: assemblyai, base_url: "http://127.0.0.1:18193", api_key: native-key}
 models:
   chat: {targets: [{provider: up, model: up-chat, price: {input_per_mtok: 1, output_per_mtok: 2, batch_discount: 0.5}}]}
   embed: {targets: [{provider: up, model: up-embed}]}
@@ -17,6 +21,11 @@ models:
   rerank: {targets: [{provider: up, model: rerank-v3.5, price: {per_request: 0.002}}]}
   voice: {targets: [{provider: live, model: gpt-realtime, price: {input_per_mtok: 4, output_per_mtok: 16, audio_input_per_mtok: 32, audio_output_per_mtok: 64}}]}
   video: {targets: [{provider: up, model: sora-2, price: {per_video_second: 0.1}}]}
+  eleven-speech: {targets: [{provider: eleven, model: eleven_flash_v2_5, price: {per_mchars: 50}}]}
+  eleven-scribe: {targets: [{provider: eleven, model: scribe_v1, price: {per_audio_minute: 0.006}}]}
+  dg-speech: {targets: [{provider: dg, model: aura-2-thalia-en, price: {per_mchars: 30}}]}
+  dg-transcribe: {targets: [{provider: dg, model: nova-3, price: {per_audio_minute: 0.006}}]}
+  aai-transcribe: {targets: [{provider: aai, model: universal, price: {per_audio_minute: 0.006}}]}
 keys:
   - {name: conformance, key: conformance-key-0000000000}
   - {name: cached, key: conformance-cached-key-000000, cache: {mode: exact, ttl: 1h}}
