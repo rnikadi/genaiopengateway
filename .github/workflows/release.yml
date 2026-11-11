@@ -136,6 +136,12 @@ jobs:
       - uses: azure/setup-helm@v5
         with:
           version: v3.19.0
+      # cosign pushes the signature with Docker's credentials, not Helm's.
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
       - uses: sigstore/cosign-installer@v3
       - name: Package, push and sign
         run: |

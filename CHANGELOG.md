@@ -12,6 +12,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - `gogctl`, a command line tool over the admin API ([docs/gogctl.md](docs/gogctl.md)): organizations, teams, keys with rotation, usage, the catalog, and `config export` and `config import` of stored configuration objects as YAML for configuration as code. It ships in the release archives.
 - An install script (`scripts/install.sh`) that downloads the latest release for Linux or macOS and checks it against the release checksums.
 
+### Fixed
+
+- The release workflow signs the Helm chart: cosign now has registry credentials. The 0.8.0 chart was published without a signature.
+
 ## [0.8.0] - 2026-11-11
 
 Every model type and enterprise control built since 0.3: guardrails, Gemini, Vertex AI and Bedrock, a Helm chart, images, speech, transcription, video, realtime, batch, a response cache, and the whole configuration in the admin UI. The version follows the [roadmap](docs/roadmap.md), whose v0.5 and v0.8 scope this release covers.
