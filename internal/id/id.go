@@ -4,18 +4,40 @@ package id
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"sync"
 	"time"
 )
 
 // Crockford base32, as used by ULIDs: sortable and unambiguous.
 const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
+var (
+	mu   sync.Mutex
+	last [16]byte
+)
+
 // New returns prefix + "_" + a 26 character ULID-style string: 48 bits
-// of millisecond time followed by 80 random bits.
+// of millisecond time followed by 80 random bits. Ids made in the same
+// millisecond by one process increase, as monotonic ULIDs do, so lists
+// ordered by id keep the order things happened in.
 func New(prefix string) string {
-	var b [16]byte
-	binary.BigEndian.PutUint64(b[:8], uint64(time.Now().UnixMilli())<<16)
-	_, _ = rand.Read(b[6:])
+	ms := uint64(time.Now().UnixMilli())
+	mu.Lock()
+	b := last
+	if lastMS := binary.BigEndian.Uint64(last[:8]) >> 16; ms > lastMS {
+		binary.BigEndian.PutUint64(b[:8], ms<<16)
+		_, _ = rand.Read(b[6:])
+	} else {
+		// Same millisecond, or the clock went back: the last id plus one.
+		for i := 15; i >= 6; i-- {
+			b[i]++
+			if b[i] != 0 {
+				break
+			}
+		}
+	}
+	last = b
+	mu.Unlock()
 	return prefix + "_" + encode(b)
 }
 
