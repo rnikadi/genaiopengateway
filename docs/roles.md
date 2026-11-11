@@ -1,6 +1,6 @@
 # Roles and permissions
 
-Operators of the admin UI and API get their access from role mappings in `sso.roles`, matched at sign-in against the identity provider's groups or the user's verified email ([admin-ui.md](admin-ui.md#roles)). A role is a set of permissions, granted for:
+Operators of the admin UI and API get their access from role mappings in `sso.roles`, matched at sign-in against the identity provider's groups or the user's verified email ([admin-ui.md](admin-ui.md#roles)), or against their provisioned groups with [SCIM](scim.md). A role is a set of permissions, granted for:
 
 - every organization (no `org`);
 - one organization (`org`, by name or id);

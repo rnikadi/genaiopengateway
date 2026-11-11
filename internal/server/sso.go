@@ -228,7 +228,16 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		o.Name, _ = claims["preferred_username"].(string)
 	}
 	o.claims = &store.SessionClaims{Email: verifiedEmail(claims), Groups: oauth.Strings(claims[oc.GroupsClaim])}
-	o.Grants = s.resolveGrants(cfg.SSO.Roles, o.claims.Email, o.claims.Groups)
+	groups, active, err := s.directoryGroups(r.Context(), o.claims)
+	if err != nil {
+		fail(http.StatusServiceUnavailable, "The directory of provisioned users cannot be read. Try again shortly.", err)
+		return
+	}
+	if !active {
+		fail(http.StatusForbidden, fmt.Sprintf("%s was deactivated in the directory.", o.actor()), nil)
+		return
+	}
+	o.Grants = s.resolveGrants(cfg.SSO.Roles, o.claims.Email, groups)
 	if len(o.Grants) == 0 {
 		fail(http.StatusForbidden, fmt.Sprintf("%s has no role on this gateway. Ask an owner to map one of your groups to a role.", o.actor()), nil)
 		return

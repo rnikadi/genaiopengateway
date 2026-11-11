@@ -73,6 +73,7 @@ const sections = [
       { path: 'sso.oidc.groups_claim', label: 'Groups claim', type: 'text' },
       { path: 'sso.oidc.scopes', label: 'Scopes', type: 'list', hint: 'One per line.' },
       { path: 'sso.session_ttl', label: 'Session length', type: 'duration' },
+      { path: 'sso.scim.token', label: 'SCIM token', type: 'secret', hint: 'Turns on provisioning at /scim/v2 for the identity provider; at least 32 characters (docs/scim.md).' },
       { path: 'sso.custom_roles', label: 'Custom roles', type: 'customRoles', hint: 'Named sets of permissions that role mappings can grant besides owner, admin and viewer (docs/roles.md).' },
       { path: 'sso.roles', label: 'Role mappings', type: 'roles', hint: 'A role for every organization, one organization, or one team of it.' },
     ],
