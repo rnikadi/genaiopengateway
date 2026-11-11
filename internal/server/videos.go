@@ -98,7 +98,7 @@ func (s *Server) videoCaller(w http.ResponseWriter, r *http.Request) (*auth.Prin
 		writeJobError(w, errNoDatabase)
 		return nil, r, false
 	}
-	return p, r.WithContext(s.teamContext(r.Context(), p.TeamID)), true
+	return p, r.WithContext(s.callerContext(r.Context(), p)), true
 }
 
 // videoJob serves retrieve, delete and content on a job, at the target

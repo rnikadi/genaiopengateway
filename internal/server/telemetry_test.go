@@ -61,6 +61,8 @@ keys:
 		`gog_request_duration_seconds_count{endpoint="chat.completions",model="chat",target="good/backup"} 1`,
 		`gog_usage_write_errors_total 0`,
 		`gog_snapshot_age_seconds 0`,
+		`gog_target_circuit_state{target="bad/primary"} 0`,
+		`gog_target_circuit_state{target="good/backup"} 0`,
 		`go_goroutines`,
 	} {
 		if !strings.Contains(body, want) {

@@ -194,6 +194,7 @@ type patch struct {
 	LogBodies         optional[bool]          `json:"log_bodies"`
 	Guardrails        *[]string               `json:"guardrails"`
 	Cache             optional[policy.Cache]  `json:"cache"`
+	Residency         *[]string               `json:"residency"`
 	ExpiresAt         optional[time.Time]     `json:"expires_at"`
 	Owner             *string                 `json:"owner"`
 	isKey             bool
@@ -259,6 +260,9 @@ func (s *Server) apply(p *patch, name *string, pol *policy.Policy, expires **tim
 	}
 	if p.Cache.Set {
 		pol.Cache = p.Cache.Value
+	}
+	if p.Residency != nil {
+		pol.Residency = slices.Compact(slices.Sorted(slices.Values(*p.Residency)))
 	}
 	if p.Owner != nil && !p.isKey {
 		return badRequest("owner applies only to keys")

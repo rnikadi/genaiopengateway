@@ -313,3 +313,26 @@ func statusClass(status int) string {
 	}
 	return strconv.Itoa(status/100) + "xx"
 }
+
+// circuits reports each target's circuit breaker state when scraped.
+type circuits struct {
+	desc   *prometheus.Desc
+	states func() map[string]float64
+}
+
+func (c circuits) Describe(ch chan<- *prometheus.Desc) { ch <- c.desc }
+
+func (c circuits) Collect(ch chan<- prometheus.Metric) {
+	for target, v := range c.states() {
+		ch <- prometheus.MustNewConstMetric(c.desc, prometheus.GaugeValue, v, target)
+	}
+}
+
+// WatchCircuits exports gog_target_circuit_state: 0 closed, 1 open, 2
+// half open (docs/routing.md). states is read on every scrape.
+func (m *Metrics) WatchCircuits(states func() map[string]float64) {
+	m.reg.MustRegister(circuits{
+		desc:   prometheus.NewDesc("gog_target_circuit_state", "Circuit breaker state of a model target: 0 closed, 1 open, 2 half open.", []string{"target"}, nil),
+		states: states,
+	})
+}

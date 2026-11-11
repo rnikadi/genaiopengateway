@@ -32,5 +32,6 @@
 | [0028](0028-ui-wins-over-the-file.md) | A change made in the UI wins over the config file for named objects |
 | [0029](0029-sign-in-roles-resolve-safely.md) | Sign-in roles resolve to one organization and a verified email |
 | [0030](0030-owners-set-organization-limits.md) | Only owners change an organization |
+| [0031](0031-routing-strategies.md) | Routing strategies, retries and circuit breakers live in the router, per replica |
 
 New ADRs copy [0000-template.md](0000-template.md).

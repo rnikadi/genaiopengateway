@@ -183,6 +183,7 @@ function Access({ k, team, onClose }) {
   const rows = [
     ['Models', (p) => list(p.allowed_models), 'All'],
     ['MCP servers', (p) => list(p.allowed_mcp_servers), 'All'],
+    ['Data residency', (p) => list(p.residency), 'Any'],
     ['Requests per minute', (p) => (p.rpm ? num(p.rpm) : null), 'No limit'],
     ['Tokens per minute', (p) => (p.tpm ? compact(p.tpm) : null), 'No limit'],
     ['Budget', (p) => (p.budget ? `${usd(p.budget.amount_usd)} ${p.budget.period}` : null), 'None'],

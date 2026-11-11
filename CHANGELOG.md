@@ -10,7 +10,15 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - A setup wizard in the admin UI: pick a provider preset, paste a key and choose models, create an organization, team and key, send a test request, and copy snippets for curl, Python, Node and MCP clients. The Overview points owners to it while no provider is configured. A browser test runs the whole flow in CI and fails if it takes 5 minutes or more.
 - Provider presets and a model price catalog ([docs/catalog.md](docs/catalog.md)) for OpenAI, Anthropic, Gemini, Mistral, Groq, DeepSeek, OpenRouter, Azure OpenAI, Bedrock, Vertex AI, Ollama and vLLM, served at `GET /admin/v1/catalog`.
 - `gogctl`, a command line tool over the admin API ([docs/gogctl.md](docs/gogctl.md)): organizations, teams, keys with rotation, usage, the catalog, and `config export` and `config import` of stored configuration objects as YAML for configuration as code. It ships in the release archives.
+- Routing strategies ([docs/routing.md](docs/routing.md), ADR 0031): each model chooses `ordered` (the default), `weighted`, `round_robin`, `least_latency` or `lowest_cost`, with optional sticky routing per user for prompt-cache hits.
+- Retries on the same target with jittered exponential backoff that honors `Retry-After`, and a per-target timeout to the first response byte that never cuts off a stream.
+- A circuit breaker per target (`routing.circuit_breaker`, on by default: 5 failures in a row, 30s cooldown) with a single half-open probe. Its state shows on the Models page, in `GET /admin/v1/models`, and in the `gog_target_circuit_state` metric. Config reloads keep it.
+- Data residency pinning ([docs/routing.md](docs/routing.md#data-residency)): label providers with `residency`, and pin organizations, teams and keys to labels. A pinned request only reaches matching providers, and is refused with `403 residency_not_allowed` when none qualifies.
 - An install script (`scripts/install.sh`) that downloads the latest release for Linux or macOS and checks it against the release checksums.
+
+### Changed
+
+- The circuit breaker is on by default, so a target that fails 5 times in a row is skipped for 30 seconds where it used to be tried first on every request. Set `routing.circuit_breaker.failures: 0` to keep the old behavior.
 
 ### Fixed
 
