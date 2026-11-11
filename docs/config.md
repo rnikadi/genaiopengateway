@@ -51,6 +51,7 @@ alerts:                              # see alerts.md; needs a store
 secrets:
   encryption_key: ${GOG_ENCRYPTION_KEY}  # 32 random bytes, base64 (openssl rand -base64 32)
   previous_keys: []                      # old keys, still used to decrypt after rotation
+  # kms: {provider: aws, key: arn:aws:kms:…, wrapped_key: …}   instead of the keys above; see secrets.md
 
 body_logging:                        # see body-logging.md; needs a store and secrets.encryption_key
   enabled: false                     # master switch; policies (log_bodies) choose what is logged
@@ -151,6 +152,9 @@ models:
         price: {per_image: 0.04}     # also per_mchars, per_audio_minute, per_video_second, per_request,
                                      # audio_input_per_mtok, audio_output_per_mtok (realtime),
                                      # batch_discount (0.5 for half price in batches)
+
+streams:                             # copies of records for a SIEM or log shipper; see streams.md
+  siem: {type: webhook, url: "${SIEM_URL}", records: [audit, usage]}
 
 routing:
   circuit_breaker: {failures: 5, cooldown: 30s}   # 0 failures turns it off; see routing.md

@@ -17,6 +17,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - OpenTelemetry GenAI semantic conventions ([docs/observability.md](docs/observability.md#traces)): request parameters (`gen_ai.request.max_tokens`, `temperature`, `top_p` and others), cached input tokens and `error.type` on spans, and the `gen_ai_client_operation_duration_seconds` and `gen_ai_client_token_usage` histograms.
 - A Grafana dashboard and Prometheus alerting rules, with a [runbook](docs/runbook.md) section for each alert. The Helm chart installs them with `grafanaDashboard.enabled` and `prometheusRule.enabled`, and the Compose `observability` profile now starts Grafana with the dashboard.
 - A chaos test (`test/chaos`) that runs failover against upstreams that refuse connections, fail, rate limit, stall and recover.
+- Streams ([docs/streams.md](docs/streams.md)) copy usage, audit, MCP call and guardrail records to a webhook, as signed NDJSON batches, or to a JSON Lines file for a log shipper, once they are written to the database. They are configured in the file, the admin API or the new Streams tab of the Configuration page, and counted in `gog_stream_records_total`.
+- The encryption key can be kept wrapped by AWS KMS, Google Cloud KMS or Vault Transit (`secrets.kms`, [docs/secrets.md](docs/secrets.md)). It is unwrapped at startup with the platform's usual credentials, including Vault's Kubernetes login, and exists only in memory.
 - An install script (`scripts/install.sh`) that downloads the latest release for Linux or macOS and checks it against the release checksums.
 
 ### Changed

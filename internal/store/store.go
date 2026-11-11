@@ -83,7 +83,12 @@ type Page struct {
 type Store struct {
 	db       *sql.DB
 	postgres bool
+	onAudit  func(AuditEntry)
 }
+
+// OnAudit sets a function called with every audit entry once it is
+// written, such as to stream it. Set it before the store is shared.
+func (s *Store) OnAudit(f func(AuditEntry)) { s.onAudit = f }
 
 // Open connects to the database and applies pending migrations.
 func Open(ctx context.Context, driver, dsn string) (*Store, error) {
@@ -811,6 +816,9 @@ func (s *Store) AppendAudit(ctx context.Context, e *AuditEntry) error {
 	}
 	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO audit_log (id, ts, actor, action, resource_type, resource_id, org_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
 		e.ID, e.Time.UnixMilli(), e.Actor, e.Action, e.ResourceType, e.ResourceID, e.OrgID, string(e.Details))
+	if err == nil && s.onAudit != nil {
+		s.onAudit(*e)
+	}
 	return err
 }
 

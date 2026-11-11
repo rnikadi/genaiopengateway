@@ -383,7 +383,7 @@ func (c *client) export(all bool) error {
 }
 
 // kindOrder applies providers before the models that name them, and so on.
-var kindOrder = []string{"providers", "models", "guardrails", "mcp_servers", "mcp_virtual_servers", "alert_webhooks"}
+var kindOrder = []string{"providers", "models", "guardrails", "mcp_servers", "mcp_virtual_servers", "alert_webhooks", "streams"}
 
 func (c *client) importFile(path string, dry bool) error {
 	raw, err := os.ReadFile(path)

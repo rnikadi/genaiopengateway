@@ -28,6 +28,8 @@ type Metrics struct {
 	limitRejection *prometheus.CounterVec
 	unpriced       *prometheus.CounterVec
 
+	streamRecords *prometheus.CounterVec
+
 	// OpenTelemetry GenAI client metrics, in Prometheus naming.
 	genaiDuration *prometheus.HistogramVec
 	genaiTokens   *prometheus.HistogramVec
@@ -88,6 +90,9 @@ func NewMetrics(usageErrors, snapshotAge, bodiesDropped func() float64) *Metrics
 		unpriced: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "gog_unpriced_requests_total", Help: "Successful requests to targets with no price configured.",
 		}, []string{"target"}),
+		streamRecords: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "gog_stream_records_total", Help: "Records sent to streams, by result: delivered or dropped.",
+		}, []string{"stream", "result"}),
 		genaiDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name: "gen_ai_client_operation_duration_seconds", Help: "GenAI operation duration (OpenTelemetry gen_ai.client.operation.duration), per upstream target that answered.",
 			Buckets: []float64{.01, .02, .04, .08, .16, .32, .64, 1.28, 2.56, 5.12, 10.24, 20.48, 40.96, 81.92},
@@ -148,7 +153,7 @@ func NewMetrics(usageErrors, snapshotAge, bodiesDropped func() float64) *Metrics
 	}
 	m.reg.MustRegister(
 		m.requests, m.duration, m.ttfb, m.tokens, m.cost, m.fallbacks, m.limitRejection, m.unpriced,
-		m.genaiDuration, m.genaiTokens,
+		m.genaiDuration, m.genaiTokens, m.streamRecords,
 		m.mcpRequests, m.mcpDuration, m.mcpToolCalls, m.mcpUp, m.mcpPending,
 		m.alerts, m.alertDeliveries, m.bodiesWritten, m.redactions,
 		m.mcpConnections, m.connectFlows, m.tokenRefreshes, m.guardrailChecks, m.guardrailDuration,
@@ -359,4 +364,9 @@ func (m *Metrics) WatchCircuits(states func() map[string]float64) {
 		desc:   prometheus.NewDesc("gog_target_circuit_state", "Circuit breaker state of a model target: 0 closed, 1 open, 2 half open.", []string{"target"}, nil),
 		states: states,
 	})
+}
+
+// ObserveStream counts records a stream delivered or dropped.
+func (m *Metrics) ObserveStream(stream, result string, n int) {
+	m.streamRecords.WithLabelValues(stream, result).Add(float64(n))
 }

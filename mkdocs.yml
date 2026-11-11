@@ -67,7 +67,9 @@ nav:
       - Guardrails: guardrails.md
       - Body logging: body-logging.md
       - Alerts: alerts.md
+      - Streams: streams.md
       - Security and threat model: security.md
+      - Encryption keys and KMS: secrets.md
   - Admin UI:
       - Admin UI and SSO: admin-ui.md
       - Configuration views: admin-ui-config.md

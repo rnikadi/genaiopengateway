@@ -28,7 +28,7 @@ var StartupPaths = []string{
 	"listen", "tls.cert_file", "tls.key_file", "metrics.listen", "admin.token",
 	"store.driver", "store.dsn",
 	"limiter.driver", "limiter.address", "limiter.password",
-	"secrets.encryption_key", "secrets.previous_keys",
+	"secrets.encryption_key", "secrets.previous_keys", "secrets.kms",
 	"ui.enabled",
 	"keys",
 }

@@ -30,6 +30,7 @@ Prometheus, at `/metrics`. All names start with `gog_`. Go runtime and process m
 | `gog_snapshot_age_seconds` | gauge | none |
 | `gen_ai_client_operation_duration_seconds` | histogram | `gen_ai_operation_name`, `gen_ai_provider_name`, `gen_ai_request_model`, `error_type` (OpenTelemetry `gen_ai.client.operation.duration`) |
 | `gen_ai_client_token_usage` | histogram | `gen_ai_operation_name`, `gen_ai_provider_name`, `gen_ai_request_model`, `gen_ai_token_type` (input, output; OpenTelemetry `gen_ai.client.token.usage`) |
+| `gog_stream_records_total` | counter | `stream`, `result` (delivered, dropped); see [streams](streams.md) |
 | `gog_target_circuit_state` | gauge | `target`; 0 closed, 1 open, 2 half open ([routing](routing.md#circuit-breaker)) |
 | `gog_mcp_requests_total` | counter | `virtual_server`, `method`, `status` (ok, tool_error, error, denied, rate_limited) |
 | `gog_mcp_request_duration_seconds` | histogram | `virtual_server`, `method` |
