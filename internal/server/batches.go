@@ -218,6 +218,10 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		fail(http.StatusForbidden, codeModelNotAllowed, "this key may not use model "+in.model)
 		return
 	}
+	if denied := s.modelDenied(r, p, string(provider.Batches), in.model, "", false); denied != "" {
+		fail(http.StatusForbidden, codePolicyDenied, denied)
+		return
+	}
 	names := p.Guardrails()
 	if rt.guards.Applies(config.StageOutput, names) {
 		fail(http.StatusBadRequest, codeInvalidRequest, "batches are not available when output guardrails apply: their results are not checked")

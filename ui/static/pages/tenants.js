@@ -80,6 +80,7 @@ export function Org({ args: [id] }) {
           ]}
         />
       </section>
+      <${CedarPanel} org=${org} canWrite=${s.owner} teams=${teams} />
       ${modal === 'edit' && html`<${Modal} title="Edit organization" onClose=${close}>
         <${PolicyForm} kind="org" initial=${org} submitLabel="Save" onCancel=${close}
           onSubmit=${async (body) => { await api('PATCH', `/admin/v1/orgs/${encodeURIComponent(id)}`, body); close(); s.refresh(); state.reload(); }} />
@@ -95,6 +96,129 @@ export function Org({ args: [id] }) {
         message=${`Delete ${org.name}? This cannot be undone. Usage and audit history stay.`}
         onConfirm=${async () => { await api('DELETE', `/admin/v1/orgs/${encodeURIComponent(id)}`); s.refresh(); location.hash = '#/orgs'; }} />`}`;
   }}<//>`;
+}
+
+// cedarStarter is the text an empty editor starts from: Cedar denies
+// what no policy permits, so it permits everything and forbids exceptions.
+const cedarStarter = `// Cedar denies what no policy permits, so start by permitting everything
+// and add forbid policies for the exceptions (docs/cedar.md).
+@id("allow-by-default")
+permit (principal, action, resource);
+
+// @id("no-large-models-for-interns")
+// forbid (principal in Team::"team_id", action in Action::"model", resource)
+// when { resource.name like "*-large*" };
+`;
+
+// CedarPanel shows an organization's Cedar policies, lets owners edit
+// them, and checks a request against them or a draft.
+function CedarPanel({ org, canWrite, teams }) {
+  const base = `/admin/v1/orgs/${encodeURIComponent(org.id)}/cedar`;
+  const state = useLoad(() => Promise.all([api('GET', base), api('GET', `${base}/versions`)]), [org.id]);
+  const [editing, setEditing] = useState(null);
+  const [removing, setRemoving] = useState(false);
+  const [checking, setChecking] = useState(false);
+  return html`<section class="panel">
+    <div class="panel-header"><h2>Cedar policies</h2>
+      <div class="row-actions">
+        <button class="secondary" onClick=${() => setChecking(true)}>Check a request</button>
+        ${canWrite && html`<button onClick=${() => setEditing(state.data?.[0]?.text || cedarStarter)}>${state.data?.[0]?.text ? 'Edit' : 'Add policies'}</button>`}
+        ${canWrite && state.data?.[0]?.text && html`<button class="danger" onClick=${() => setRemoving(true)}>Remove</button>`}
+      </div>
+    </div>
+    <p class="muted">Attribute-based rules on top of the policies above: who may use which model or MCP tool, when and from where. Without policies, everything the policies above allow is allowed; with them, a request must be permitted and not forbidden.</p>
+    <${Loading} state=${state}>${([cur, versions]) => html`
+      ${cur.text
+        ? html`<p><span class="badge good">${num(cur.policies)} polic${cur.policies === 1 ? 'y' : 'ies'} in force</span> <span class="muted small">Version ${cur.version} · ${when(cur.created_at)} · ${cur.created_by}</span></p>
+          <pre class="json">${cur.text}</pre>`
+        : html`<p class="muted">No Cedar policies.${versions.data.length ? ` Removed in version ${cur.version}.` : ''}</p>`}
+      ${versions.data.length > 1 && html`<details><summary>History (${versions.data.length} versions)</summary>
+        <${Table} rowKey=${(v) => v.version} rows=${versions.data} columns=${[
+          { label: 'Version', render: (v) => v.version },
+          { label: 'Saved', render: (v) => when(v.created_at) },
+          { label: 'By', render: (v) => v.created_by },
+        ]} />
+      </details>`}`}<//>
+    ${editing !== null && html`<${Modal} title=${`Cedar policies of ${org.name}`} onClose=${() => setEditing(null)}>
+      <${CedarForm} initial=${editing} onCancel=${() => setEditing(null)}
+        onSubmit=${async (text) => { await api('PUT', base, { text }); setEditing(null); state.reload(); }} />
+    <//>`}
+    ${removing && html`<${Confirm} title="Remove Cedar policies" action="Remove" onClose=${() => setRemoving(false)}
+      message=${`Requests of ${org.name} are then decided by its policies above alone. The removed text stays in the history.`}
+      onConfirm=${async () => { await api('DELETE', base); state.reload(); }} />`}
+    ${checking && html`<${Modal} title="Check a request" onClose=${() => setChecking(false)}>
+      <${CedarCheck} base=${base} teams=${teams} onClose=${() => setChecking(false)} />
+    <//>`}
+  </section>`;
+}
+
+const cedarHint = 'Cedar language. The principal is Key::"key id" in Team::"team id" in Org::"org id"; the resource is Model::"name" or Tool::"server/tool" in MCPServer::"server". Name policies with @id("...") so denials say which.';
+
+function CedarForm({ initial, onSubmit, onCancel }) {
+  const [text, setText] = useState(initial);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await onSubmit(text);
+    } catch (err) {
+      setError(err);
+      setBusy(false);
+    }
+  };
+  return html`<form class="form" onSubmit=${submit}>
+    <${ErrorBox} error=${error} />
+    <${Field} label="Policies" hint=${cedarHint}>
+      <textarea class="mono" rows="16" spellcheck="false" value=${text} onInput=${(e) => setText(e.target.value)}></textarea>
+    <//>
+    <footer>
+      <button type="button" class="secondary" onClick=${onCancel}>Cancel</button>
+      <button type="submit" disabled=${busy}>Save as a new version</button>
+    </footer>
+  </form>`;
+}
+
+function CedarCheck({ base, teams, onClose }) {
+  const [form, setForm] = useState({ kind: 'model', team_id: teams[0]?.id || '', action: 'chat.completions', model: '', server: '', tool: '', user: '', ip: '' });
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  const submit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    const { kind, ...rest } = form;
+    const body = kind === 'model' ? { ...rest, server: undefined, tool: undefined } : { ...rest, action: undefined, model: undefined };
+    try {
+      setResult(await api('POST', `${base}/check`, body));
+    } catch (err) {
+      setError(err);
+    }
+  };
+  return html`<form class="form" onSubmit=${submit}>
+    <${ErrorBox} error=${error} />
+    <${Field} label="Team"><select value=${form.team_id} onChange=${set('team_id')}>
+      ${teams.map((t) => html`<option value=${t.id}>${t.name}</option>`)}
+    </select><//>
+    <${Field} label="Request"><select value=${form.kind} onChange=${set('kind')}>
+      <option value="model">Model request</option><option value="tool">MCP tool call</option>
+    </select><//>
+    ${form.kind === 'model'
+      ? html`<${Field} label="Endpoint"><input value=${form.action} onInput=${set('action')} /><//>
+        <${Field} label="Model"><input required value=${form.model} onInput=${set('model')} /><//>`
+      : html`<${Field} label="MCP server"><input required value=${form.server} onInput=${set('server')} /><//>
+        <${Field} label="Tool"><input required value=${form.tool} onInput=${set('tool')} /><//>`}
+    <${Field} label="End user" hint="Optional: the user the application names."><input value=${form.user} onInput=${set('user')} /><//>
+    <${Field} label="Client IP" hint="Optional."><input value=${form.ip} onInput=${set('ip')} /><//>
+    ${result && html`<p role="status">${result.allowed
+      ? html`<span class="badge good">Allowed</span> <span class="muted">${result.policies.length ? `by ${result.policies.join(', ')}` : result.reason || ''}</span>`
+      : html`<span class="badge bad">Denied</span> <span class="muted">${result.reason}</span>`}</p>`}
+    <footer>
+      <button type="button" class="secondary" onClick=${onClose}>Close</button>
+      <button type="submit">Check</button>
+    </footer>
+  </form>`;
 }
 
 // cacheCleared reports how many answers a cache clear removed. Semantic

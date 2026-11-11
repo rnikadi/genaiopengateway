@@ -111,8 +111,9 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 			raw, _ = json.Marshal(body)
 		}
 		var envelope struct {
-			Model  string `json:"model"`
-			Stream bool   `json:"stream"`
+			Model  string          `json:"model"`
+			Stream bool            `json:"stream"`
+			User   json.RawMessage `json:"user"`
 		}
 		if json.Unmarshal(raw, &envelope) != nil || envelope.Model == "" {
 			fail(http.StatusBadRequest, codeInvalidRequest, "model is required and must be a string")
@@ -122,6 +123,12 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 		span.SetAttributes(telemetry.RequestAttributes(raw)...)
 		if !p.AllowsModel(envelope.Model) {
 			fail(http.StatusForbidden, codeModelNotAllowed, "this key may not use model "+envelope.Model)
+			return
+		}
+		var user string
+		_ = json.Unmarshal(envelope.User, &user)
+		if denied := s.modelDenied(r, p, string(ep), envelope.Model, user, envelope.Stream); denied != "" {
+			fail(http.StatusForbidden, codePolicyDenied, denied)
 			return
 		}
 

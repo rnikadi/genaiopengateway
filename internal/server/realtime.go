@@ -94,6 +94,10 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		fail(http.StatusForbidden, codeModelNotAllowed, "this key may not use model "+model)
 		return
 	}
+	if denied := s.modelDenied(r, p, string(ep), model, "", true); denied != "" {
+		fail(http.StatusForbidden, codePolicyDenied, denied)
+		return
+	}
 	if names := p.Guardrails(); rt.guards.Applies(config.StageInput, names) || rt.guards.Applies(config.StageOutput, names) {
 		fail(http.StatusBadRequest, codeInvalidRequest, "realtime sessions are not available when guardrails apply, since audio cannot be checked")
 		return

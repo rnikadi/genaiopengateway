@@ -52,6 +52,10 @@ type Options struct {
 	// call at a stage (docs/guardrails.md). It returns the texts, changed
 	// when redacted, or a message when the call is blocked.
 	Guard func(ctx context.Context, caller *Caller, virtualServer, stage string, texts []string) (out []string, changed bool, blocked string)
+	// Authorize, which may be nil, decides a tool call by the caller's
+	// organization's Cedar policies (docs/cedar.md). It returns why the
+	// call is denied, or "".
+	Authorize func(ctx context.Context, caller *Caller, server, tool string) (denied string)
 }
 
 // Gateway serves every virtual server in the config.
@@ -109,6 +113,8 @@ type Caller struct {
 	// Subject is the OAuth subject, when the caller used a token.
 	Subject   string
 	RequestID string
+	// RemoteAddr is the client's address, for policies.
+	RemoteAddr string
 }
 
 type callerKey struct{}

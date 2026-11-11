@@ -19,6 +19,7 @@
 | [Roles and permissions](roles.md) | Built-in and custom roles, permissions, team grants |
 | [SAML sign-in](saml.md) | Signing operators in with a SAML 2.0 identity provider |
 | [SCIM provisioning](scim.md) | Users and groups from Okta, Entra ID and others, deprovisioning |
+| [Cedar policies](cedar.md) | Attribute-based rules per organization for models and MCP tools |
 | [Admin UI: configuration views](admin-ui-config.md) | Providers, models, guardrails, alerts and settings in the UI |
 | [Playground](playground.md) | Calling a model as a team from the admin UI |
 | [Images, audio, video and realtime](modalities.md) | Media endpoints, how they are metered and priced, and the rollout |

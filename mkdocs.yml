@@ -75,6 +75,7 @@ nav:
       - Roles and permissions: roles.md
       - SCIM provisioning: scim.md
       - SAML sign-in: saml.md
+      - Cedar policies: cedar.md
       - Configuration views: admin-ui-config.md
       - Editing configuration: admin-ui-config-editing.md
       - Every setting in the UI: admin-ui-settings.md

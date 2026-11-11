@@ -13,7 +13,7 @@ v0.3 adds a web UI for operators, sign-in through the company's identity provide
 
 | Feature | Why, and when |
 | --- | --- |
-| Self-service keys for members | Team grants cover team leads ([roles.md](roles.md)). Finer rules are Cedar policies (ADR 0009). |
+| Self-service keys for members | Team grants cover team leads ([roles.md](roles.md)). Finer rules on models and tools are [Cedar policies](cedar.md). |
 | Editing providers, models and MCP servers from the UI | They live in the config file by design (ADR 0003). The UI shows them read-only ([admin-ui-config.md](admin-ui-config.md)); editing them from the UI as well is planned (issue #34). |
 | Personal API tokens for the admin API | Automation keeps using the admin token. Per-user tokens can follow if needed. |
 
@@ -24,7 +24,7 @@ v0.3 adds a web UI for operators, sign-in through the company's identity provide
 | Overview | Spend and requests this month, top teams and models, MCP calls, tools awaiting approval, providers with errors in the last hour | `usage`, `mcp/servers`, `mcp/tools`, `providers` |
 | Organizations | List, create, edit policy (allowed models and MCP servers, RPM, TPM, budget, response cache), delete | `orgs` |
 | Virtual keys | Every key across organizations and teams: search, filter by status, create with an owner, edit, rotate with a grace period, revoke, and each key's access by level | `keys` |
-| Organization | Its teams, usage by team, edit, clear the response cache | `orgs/{id}`, `orgs/{id}/teams`, `usage`, `cache` |
+| Organization | Its teams, usage by team, edit, clear the response cache, Cedar policies with their history and a request check | `orgs/{id}`, `orgs/{id}/teams`, `usage`, `cache`, `orgs/{id}/cedar` |
 | Team | Its keys (edit, rotate, revoke), usage by key and model, edit policy, its own provider credentials, clear the response cache | `teams/{id}`, `teams/{id}/keys`, `teams/{id}/credentials`, `usage`, `cache` |
 | Key | Limits, expiry, revoke; the secret is shown once, on create | `keys/{id}`, `keys/{id}/revoke` |
 | Usage | Filter by organization, team, key and dates; group by model, team, key, day, provider or endpoint; chart, table and CSV download; cache hits and money saved when the cache answered | `usage` |

@@ -65,6 +65,7 @@ OpenAI-style endpoints return `{"error": {"message": "...", "type": "<code>", "c
 | 400 | `guardrail_blocked` | A guardrail blocked the request or the model's response; the message names the guardrail |
 | 401 | `invalid_api_key` | Key missing, unknown, revoked or expired |
 | 403 | `model_not_allowed` | Key, team or organization may not use this model |
+| 403 | `policy_denied` | The organization's [Cedar policies](cedar.md) do not permit the request; the message names the policy that forbade it |
 | 403 | `residency_not_allowed` | No target of the model is in a data residency the key, team or organization is pinned to ([routing](routing.md#data-residency)) |
 | 404 | `model_not_found` | Virtual model does not exist, or does not support this endpoint |
 | 404 | `not_found` | The video job, file or batch does not exist or belongs to another team |
