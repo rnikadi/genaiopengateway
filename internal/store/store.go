@@ -425,6 +425,9 @@ func (s *Store) DeleteTeam(ctx context.Context, teamID string) error {
 		if _, err := tx.ExecContext(ctx, s.q(`DELETE FROM team_credentials WHERE team_id = ?`), teamID); err != nil {
 			return err
 		}
+		if _, err := tx.ExecContext(ctx, s.q(`DELETE FROM mcp_access_requests WHERE team_id = ?`), teamID); err != nil {
+			return err
+		}
 		return affected(tx.ExecContext(ctx, s.q(`DELETE FROM teams WHERE id = ?`), teamID))
 	})
 }

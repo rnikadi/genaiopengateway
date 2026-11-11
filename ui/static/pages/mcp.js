@@ -1,5 +1,5 @@
 import {
-  html, useState, useEffect, api, qs, useLoad, useSession, Loading, Table, Modal, Confirm, PageHeader, ErrorBox, JSONView, OrgPicker, defaultOrg, when, num,
+  html, useState, useEffect, api, qs, useLoad, useSession, Loading, Table, Modal, Confirm, PageHeader, ErrorBox, JSONView, OrgPicker, defaultOrg, when, num, Field, none,
 } from '../lib.js';
 
 const statusBadge = {
@@ -12,6 +12,9 @@ export function MCP() {
   const s = useSession();
   const [review, setReview] = useState(null);
   const [filter, setFilter] = useState('');
+  // tick reloads the catalog and the requests when either changes.
+  const [tick, setTick] = useState(0);
+  const bump = () => setTick((n) => n + 1);
   const state = useLoad(async () => {
     const [servers, tools, virtual] = await Promise.all([
       api('GET', '/admin/v1/mcp/servers'),
@@ -23,6 +26,8 @@ export function MCP() {
 
   return html`
     <${PageHeader} title="MCP" sub="Upstream MCP servers, the tools they offer, and the virtual servers clients connect to." />
+    <${Catalog} tick=${tick} onChange=${bump} />
+    <${AccessRequests} tick=${tick} onChange=${bump} />
     <${Loading} state=${state}>${(d) => {
       const toReview = d.tools.filter((t) => t.status !== 'approved');
       const shown = filter ? d.tools.filter((t) => t.status === filter) : d.tools;
@@ -97,6 +102,146 @@ export function MCP() {
         <${Calls} />
         ${review && html`<${Review} tool=${review} canApprove=${s.owner} onClose=${() => setReview(null)} onApproved=${() => { setReview(null); state.reload(); }} />`}`;
     }}<//>`;
+}
+
+const accessBadge = {
+  allowed: html`<span class="badge good">Allowed</span>`,
+  pending: html`<span class="badge warn">Requested</span>`,
+  available: html`<span class="badge">Not allowed</span>`,
+  blocked_by_org: html`<span class="badge">Not allowed for the organization</span>`,
+};
+
+// Catalog lists the virtual servers with a team's access to each, and
+// lets the operator ask for access (docs/mcp-catalog.md).
+function Catalog({ tick, onChange }) {
+  const s = useSession();
+  const [org, setOrg] = useState(s.orgIDs[0] || Object.keys(s.orgNames)[0] || '');
+  const [team, setTeam] = useState('');
+  const [asking, setAsking] = useState(null);
+  const teams = useLoad(() => (org ? api('GET', `/admin/v1/orgs/${encodeURIComponent(org)}/teams?limit=500`) : none), [org]);
+  useEffect(() => { setTeam(teams.data?.data?.[0]?.id || ''); }, [teams.data]);
+  const state = useLoad(() => api('GET', '/admin/v1/mcp/catalog' + qs({ team_id: team })), [team, tick]);
+  const ids = s.readsAll ? Object.keys(s.orgNames) : s.orgIDs;
+  return html`<section class="panel">
+    <div class="panel-header"><h2>Catalog</h2>
+      <div class="row-actions">
+        ${ids.length > 1 && html`<label class="inline"><span>Organization</span><select value=${org} onChange=${(e) => setOrg(e.target.value)}>
+          ${ids.map((id) => html`<option value=${id} key=${id}>${s.orgNames[id] || id}</option>`)}
+        </select></label>`}
+        <label class="inline"><span>Team</span><select value=${team} onChange=${(e) => setTeam(e.target.value)}>
+          ${(teams.data?.data || []).map((t) => html`<option value=${t.id} key=${t.id}>${t.name}</option>`)}
+        </select></label>
+      </div>
+    </div>
+    <p class="muted">The virtual MCP servers clients can connect to. A team that may not use one can ask for it; an operator who manages the organization's teams approves.</p>
+    <${Loading} state=${state}>${(d) => html`<${Table}
+      rowKey=${(v) => v.name}
+      rows=${d.data}
+      empty="No virtual servers are configured."
+      columns=${[
+        { label: 'Server', render: (v) => html`<strong>${v.name}</strong>${v.description && html`<br /><span class="muted small">${v.description}</span>`}` },
+        { label: 'Endpoint', render: (v) => html`<code class="small">${v.endpoint}</code>` },
+        { label: 'Upstreams', render: (v) => html`<span class="muted small">${v.servers.map((u) => u.server).join(', ')}</span>` },
+        { label: 'Guardrails', render: (v) => html`<span class="muted small">${v.guardrails.join(', ') || 'None'}</span>` },
+        { label: 'Access', render: (v) => accessBadge[v.access] || '' },
+        { label: '', render: (v) => team && (v.access === 'available' || v.access === 'blocked_by_org') && html`<button class="link" onClick=${() => setAsking(v)}>Request access</button>` },
+      ]}
+    />`}<//>
+    ${asking && html`<${Modal} title=${`Request ${asking.name}`} onClose=${() => setAsking(null)}>
+      <${RequestForm} server=${asking} onCancel=${() => setAsking(null)}
+        onSubmit=${async (reason) => { await api('POST', '/admin/v1/mcp/requests', { team_id: team, server: asking.name, reason }); setAsking(null); onChange(); }} />
+    <//>`}
+  </section>`;
+}
+
+function RequestForm({ server, onSubmit, onCancel }) {
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await onSubmit(reason.trim());
+    } catch (err) {
+      setError(err);
+      setBusy(false);
+    }
+  };
+  return html`<form class="form" onSubmit=${submit}>
+    <${ErrorBox} error=${error} />
+    ${server.access === 'blocked_by_org' && html`<p class="muted">The organization's policy leaves ${server.name} out, so an owner has to allow it for the organization before the request can be approved.</p>`}
+    <${Field} label="Why the team needs it"><textarea rows="4" maxlength="2000" value=${reason} onInput=${(e) => setReason(e.target.value)}></textarea><//>
+    <footer>
+      <button type="button" class="secondary" onClick=${onCancel}>Cancel</button>
+      <button type="submit" disabled=${busy}>Request access</button>
+    </footer>
+  </form>`;
+}
+
+const requestBadge = {
+  pending: html`<span class="badge warn">Pending</span>`,
+  approved: html`<span class="badge good">Approved</span>`,
+  denied: html`<span class="badge bad">Denied</span>`,
+};
+
+// AccessRequests lists requests for MCP access, with approve and deny
+// for operators who may decide.
+function AccessRequests({ tick, onChange }) {
+  const [status, setStatus] = useState('pending');
+  const [deciding, setDeciding] = useState(null);
+  const state = useLoad(() => api('GET', '/admin/v1/mcp/requests' + qs({ status })), [status, tick]);
+  return html`<section class=${`panel${state.data?.data?.some((q) => q.can_decide) ? ' attention' : ''}`}>
+    <div class="panel-header"><h2>Access requests</h2>
+      <label class="inline"><span>Status</span><select value=${status} onChange=${(e) => setStatus(e.target.value)}>
+        <option value="pending">Pending</option><option value="approved">Approved</option><option value="denied">Denied</option><option value="">All</option>
+      </select></label>
+    </div>
+    <${Loading} state=${state}>${(d) => html`<${Table}
+      rows=${d.data}
+      empty=${status === 'pending' ? 'No requests are waiting.' : 'No requests.'}
+      columns=${[
+        { label: 'Team', render: (q) => html`<a href=${`#/teams/${encodeURIComponent(q.team_id)}`}>${q.team_name || q.team_id}</a>` },
+        { label: 'Server', render: (q) => html`<code>${q.server}</code>` },
+        { label: 'Reason', render: (q) => html`<span class="small">${q.reason}</span>` },
+        { label: 'Requested', render: (q) => html`${when(q.created_at)}<div class="muted small">${q.requested_by}</div>` },
+        { label: 'Status', render: (q) => html`${requestBadge[q.status]}${q.decided_by && html`<div class="muted small">${q.decided_by}${q.note && html` · ${q.note}`}</div>`}` },
+        { label: '', render: (q) => q.can_decide && html`<div class="row-actions">
+          <button class="link" onClick=${() => setDeciding({ q, action: 'approve' })}>Approve</button>
+          <button class="link danger" onClick=${() => setDeciding({ q, action: 'deny' })}>Deny</button>
+        </div>` },
+      ]}
+    />`}<//>
+    ${deciding && html`<${Modal} title=${`${deciding.action === 'approve' ? 'Approve' : 'Deny'} ${deciding.q.server} for ${deciding.q.team_name}`} onClose=${() => setDeciding(null)}>
+      <${DecideForm} action=${deciding.action} request=${deciding.q} onCancel=${() => setDeciding(null)}
+        onSubmit=${async (note) => { await api('POST', `/admin/v1/mcp/requests/${encodeURIComponent(deciding.q.id)}/${deciding.action}`, { note }); setDeciding(null); onChange(); }} />
+    <//>`}
+  </section>`;
+}
+
+function DecideForm({ action, request, onSubmit, onCancel }) {
+  const [note, setNote] = useState('');
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await onSubmit(note.trim());
+    } catch (err) {
+      setError(err);
+      setBusy(false);
+    }
+  };
+  return html`<form class="form" onSubmit=${submit}>
+    <${ErrorBox} error=${error} />
+    <p>${action === 'approve' ? `${request.server} is added to ${request.team_name}'s allowed MCP servers.` : `${request.team_name} keeps its current MCP servers.`}</p>
+    <${Field} label="Note" hint="Optional; the requester sees it."><input value=${note} onInput=${(e) => setNote(e.target.value)} /><//>
+    <footer>
+      <button type="button" class="secondary" onClick=${onCancel}>Cancel</button>
+      <button type="submit" class=${action === 'deny' ? 'danger' : ''} disabled=${busy}>${action === 'approve' ? 'Approve' : 'Deny'}</button>
+    </footer>
+  </form>`;
 }
 
 function Review({ tool, canApprove, onClose, onApproved }) {
