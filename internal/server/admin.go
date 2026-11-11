@@ -313,6 +313,7 @@ func (s *Server) audit(ctx context.Context, action, resourceType, resourceID, or
 
 // --- organizations ---
 
+// createOrg creates an organization with an optional policy.
 func (s *Server) createOrg(w http.ResponseWriter, r *http.Request) error {
 	if err := requireOwner(r); err != nil {
 		return err
@@ -335,6 +336,7 @@ func (s *Server) createOrg(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// listOrgs lists the organizations the operator may see.
 func (s *Server) listOrgs(w http.ResponseWriter, r *http.Request) error {
 	pg, err := page(r)
 	if err != nil {
@@ -363,6 +365,7 @@ func (s *Server) listOrgs(w http.ResponseWriter, r *http.Request) error {
 	return writeList(w, items, more)
 }
 
+// getOrg returns one organization and its policy.
 func (s *Server) getOrg(w http.ResponseWriter, r *http.Request) error {
 	if err := read(r, r.PathValue("org_id")); err != nil {
 		return err
@@ -404,6 +407,7 @@ func (s *Server) updateOrg(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// deleteOrg deletes an organization; only owners may.
 func (s *Server) deleteOrg(w http.ResponseWriter, r *http.Request) error {
 	if err := requireOwner(r); err != nil {
 		return err
@@ -421,6 +425,7 @@ func (s *Server) deleteOrg(w http.ResponseWriter, r *http.Request) error {
 
 // --- teams ---
 
+// createTeam creates a team in an organization with an optional policy.
 func (s *Server) createTeam(w http.ResponseWriter, r *http.Request) error {
 	if err := write(r, r.PathValue("org_id")); err != nil {
 		return err
@@ -443,6 +448,7 @@ func (s *Server) createTeam(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// listTeams lists an organization's teams.
 func (s *Server) listTeams(w http.ResponseWriter, r *http.Request) error {
 	pg, err := page(r)
 	if err != nil {
@@ -461,6 +467,7 @@ func (s *Server) listTeams(w http.ResponseWriter, r *http.Request) error {
 	return writeList(w, items, more)
 }
 
+// getTeam returns one team and its policy.
 func (s *Server) getTeam(w http.ResponseWriter, r *http.Request) error {
 	t, err := s.store.GetTeam(r.Context(), r.PathValue("team_id"))
 	if err != nil {
@@ -473,6 +480,7 @@ func (s *Server) getTeam(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// updateTeam changes a team's name or policy.
 func (s *Server) updateTeam(w http.ResponseWriter, r *http.Request) error {
 	var p patch
 	if err := decode(r, &p); err != nil {
@@ -499,6 +507,7 @@ func (s *Server) updateTeam(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// deleteTeam deletes a team.
 func (s *Server) deleteTeam(w http.ResponseWriter, r *http.Request) error {
 	t, err := s.store.GetTeam(r.Context(), r.PathValue("team_id"))
 	if err != nil {
@@ -519,6 +528,7 @@ func (s *Server) deleteTeam(w http.ResponseWriter, r *http.Request) error {
 
 // --- keys ---
 
+// createKey creates a key in a team and returns its secret once.
 func (s *Server) createKey(w http.ResponseWriter, r *http.Request) error {
 	p := patch{isKey: true}
 	if err := decode(r, &p); err != nil {
@@ -556,6 +566,7 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// listKeys lists a team's keys without their secrets.
 func (s *Server) listKeys(w http.ResponseWriter, r *http.Request) error {
 	pg, err := page(r)
 	if err != nil {
@@ -655,6 +666,7 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// getKey returns one key's metadata and policy; the secret is never returned.
 func (s *Server) getKey(w http.ResponseWriter, r *http.Request) error {
 	k, err := s.store.GetKey(r.Context(), r.PathValue("key_id"))
 	if err != nil {
@@ -667,6 +679,7 @@ func (s *Server) getKey(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// updateKey changes a key's name, owner, expiry or policy.
 func (s *Server) updateKey(w http.ResponseWriter, r *http.Request) error {
 	p := patch{isKey: true}
 	if err := decode(r, &p); err != nil {
@@ -699,6 +712,7 @@ func (s *Server) updateKey(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// revokeKey revokes a key at once.
 func (s *Server) revokeKey(w http.ResponseWriter, r *http.Request) error {
 	k, err := s.store.GetKey(r.Context(), r.PathValue("key_id"))
 	if err != nil {
@@ -723,6 +737,7 @@ func (s *Server) revokeKey(w http.ResponseWriter, r *http.Request) error {
 
 // --- usage and audit ---
 
+// queryUsage sums usage and cost over a time range, grouped by model, team, key, provider, endpoint or day.
 func (s *Server) queryUsage(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
 	if err := s.readScope(r, q.Get("org_id"), q.Get("team_id"), q.Get("key_id")); err != nil {
@@ -762,6 +777,7 @@ func (s *Server) queryUsage(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// listAudit lists audit log entries, newest first, optionally for one organization.
 func (s *Server) listAudit(w http.ResponseWriter, r *http.Request) error {
 	pg, err := page(r)
 	if err != nil {
@@ -808,6 +824,7 @@ func (s *Server) readScope(r *http.Request, orgID, teamID, keyID string) error {
 
 // --- operator and configuration ---
 
+// me describes the signed-in operator: subject, roles and organizations.
 func (s *Server) me(w http.ResponseWriter, r *http.Request) error {
 	cfg := s.rt.Load().cfg
 	writeJSON(w, http.StatusOK, map[string]any{

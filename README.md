@@ -1,12 +1,21 @@
 # GenAIOpenGateway
 
-One open-source gateway for every GenAI model type and every MCP server, with enterprise features included and nothing behind a paid tier.
+**The GenAI gateway with no enterprise edition.** One open-source gateway for every model type and every MCP server, with SSO, budgets, guardrails and audit included, under Apache-2.0, with no paid tier and no license keys ([charter](CHARTER.md)).
 
-- **Models:** LLMs, embeddings, text-to-speech, speech-to-text, realtime audio, image and video generation and batches, behind one OpenAI-compatible API plus native passthrough.
-- **MCP and agents:** registry, virtual servers, OAuth 2.1, tool-level RBAC, audit.
-- **Enterprise:** SSO, SCIM, RBAC, multi-tenancy, budgets, rate limits, guardrails, observability.
+[Documentation](https://rnikadi.github.io/genaiopengateway/) · [Releases](https://github.com/rnikadi/genaiopengateway/releases) · [Benchmarks](docs/benchmarks.md) · [Roadmap](docs/roadmap.md)
 
-> **Status:** v0.3. Working today: the OpenAI-compatible API (chat completions, embeddings, responses) for OpenAI-compatible providers and for Claude by translation, plus native Anthropic `/v1/messages`; virtual models with fallback and streaming; organizations, teams and keys with model allow lists, rate limits and budgets; usage and cost in SQLite or Postgres; an audit log; Prometheus metrics and OpenTelemetry traces; an MCP gateway with virtual servers, tool pinning, call audit, OAuth 2.1 and per-user upstream credentials; an admin UI with single sign-on and per-organization roles; budget alerts and webhooks; and opt-in request body logging with redaction and encryption. Guardrails, more providers and a Helm chart follow on the [roadmap](docs/roadmap.md). Design docs are in [docs/](docs/README.md).
+| | What you get |
+| --- | --- |
+| **Every model type** | Chat, Responses and embeddings in OpenAI's shape, Anthropic `/v1/messages` and Gemini `generateContent` natively; images, text to speech, speech to text, moderation, rerank, video jobs, batches and realtime audio over WebSocket |
+| **Every provider** | OpenAI and anything OpenAI-compatible (Azure OpenAI, vLLM, Ollama, LocalAI and more), Anthropic, Gemini, Vertex AI and Amazon Bedrock, with virtual models and fallback |
+| **MCP gateway** | Virtual MCP servers with curated tools, tool pinning against silent changes, OAuth 2.1, per-user upstream credentials and a record of every call |
+| **Governance** | Organizations, teams and virtual keys with rotation; model allow lists, RPM, TPM and budgets at every level; guardrails for PII, patterns, classifiers and webhooks; redacted, encrypted body logging; an audit log; alerts |
+| **Cost** | Usage and cost per key, team, model and provider for tokens, images, audio and video; exact and semantic response caching |
+| **Admin UI** | Every setting and object editable in the browser, a playground, OIDC single sign-on with owner, admin and viewer roles |
+| **Operations** | One Go binary, SQLite or Postgres, Valkey for shared limits; Prometheus, OpenTelemetry, a hardened Helm chart, signed releases with SBOMs and SLSA provenance |
+| **Fast** | About 2 ms added at p50 and 12,800 requests a second on 4 vCPUs ([benchmarks](docs/benchmarks.md)) |
+
+> **Status:** v0.8. Everything above works today and is covered by tests, an OpenAI SDK conformance run, a browser test of the admin UI and a Kubernetes install in CI. Next on the [roadmap](docs/roadmap.md): a zero-config start with a setup wizard, load balancing and circuit breakers, SAML, SCIM and Cedar policies, and more native media providers on the way to 1.0.
 
 ## Quick start
 
@@ -31,7 +40,7 @@ With Docker:
 
 ```
 docker run -p 8080:8080 -v $PWD/config.yaml:/etc/genaiopengateway/config.yaml:ro \
-  -e OPENAI_API_KEY -e ANTHROPIC_API_KEY -e GATEWAY_DEV_KEY ghcr.io/rnikadi/genaiopengateway:0.3
+  -e OPENAI_API_KEY -e ANTHROPIC_API_KEY -e GATEWAY_DEV_KEY ghcr.io/rnikadi/genaiopengateway:0.8
 ```
 
 For local development, Docker Compose builds the gateway from your checkout and runs it with Postgres, Valkey, an MCP server and optionally a local model, Jaeger and Prometheus:

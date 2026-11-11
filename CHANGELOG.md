@@ -4,6 +4,24 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-11
+
+Every model type and enterprise control built since 0.3: guardrails, Gemini, Vertex AI and Bedrock, a Helm chart, images, speech, transcription, video, realtime, batch, a response cache, and the whole configuration in the admin UI. The version follows the [roadmap](docs/roadmap.md), whose v0.5 and v0.8 scope this release covers.
+
+### Upgrade notes
+
+- Migrations 0007 to 0016 run on start; take a database backup first. Migration 0015 appends the id to organization names that clash without case. On Postgres they run under an advisory lock, so replicas can start together.
+- Organization admins can no longer change their own organization's policy (ADR 0030); give owners that job.
+- Compose now publishes its ports on 127.0.0.1 only.
+- Configuration objects changed in the admin UI win over the config file (ADR 0028). Use Reset on the Configuration page to go back to the file's version.
+
+### Docs and tooling
+
+- A documentation site built from `docs/` with MkDocs Material and published to GitHub Pages ([mkdocs.yml](mkdocs.yml)); CI builds it in strict mode so broken links fail the build.
+- A route reference generated from the handlers ([docs/reference/routes.md](docs/reference/routes.md)); a test fails when a route is added without regenerating it or without a doc comment on its handler.
+- A reproducible benchmark ([docs/benchmarks.md](docs/benchmarks.md)): `scripts/bench.sh` measures the latency the gateway adds and its throughput against a fake upstream, optionally beside LiteLLM. The gateway adds about 2 ms at p50 at 12,800 requests a second on 4 vCPUs. CI fails when it adds more than 10 ms at p50.
+- A security response policy with response times and a 90-day disclosure window ([SECURITY.md](SECURITY.md)), a monthly release cadence and the post-1.0 support policy ([docs/releasing.md](docs/releasing.md)), CODEOWNERS and issue templates.
+
 ### Security
 
 - Only owners change an organization (ADR 0030), from the October 2026 pentest. Organization admins could raise the budget and limits an owner set, widen allowed models, or remove a required guardrail; they now see the organization's policy read-only and still manage its teams and keys.
@@ -100,7 +118,8 @@ The first release: an OpenAI-compatible gateway with tenants, keys, limits, budg
 - Config reload on `SIGHUP` and graceful shutdown.
 - Signed binaries and images with SBOMs.
 
-[Unreleased]: https://github.com/rnikadi/genaiopengateway/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/rnikadi/genaiopengateway/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/rnikadi/genaiopengateway/compare/v0.3.0...v0.8.0
 [0.3.0]: https://github.com/rnikadi/genaiopengateway/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/rnikadi/genaiopengateway/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/rnikadi/genaiopengateway/releases/tag/v0.1.0

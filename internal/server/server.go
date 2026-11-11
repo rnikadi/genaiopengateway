@@ -449,6 +449,7 @@ func (s *Server) Handler() http.Handler {
 // Drain makes /readyz fail, before a graceful shutdown.
 func (s *Server) Drain() { s.draining.Store(true) }
 
+// readyz answers 200 once keys are loaded, and 503 before that and while the gateway drains.
 func (s *Server) readyz(w http.ResponseWriter, _ *http.Request) {
 	if s.draining.Load() {
 		http.Error(w, "shutting down", http.StatusServiceUnavailable)
@@ -470,6 +471,7 @@ func (s *Server) authenticate(r *http.Request) (*auth.Principal, bool) {
 	return p, true
 }
 
+// listModels lists the virtual models the caller's key may use, in OpenAI's shape.
 func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 	p, ok := s.authenticate(r)
 	if !ok {

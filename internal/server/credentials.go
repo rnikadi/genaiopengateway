@@ -139,6 +139,7 @@ func (s *Server) listTeamCredentials(w http.ResponseWriter, r *http.Request) err
 	return nil
 }
 
+// putTeamCredential stores a team's own key for a provider, encrypted.
 func (s *Server) putTeamCredential(w http.ResponseWriter, r *http.Request) error {
 	var body struct {
 		APIKey string `json:"api_key"`
@@ -183,6 +184,7 @@ func (s *Server) putTeamCredential(w http.ResponseWriter, r *http.Request) error
 	return nil
 }
 
+// deleteTeamCredential removes a team's own key for a provider.
 func (s *Server) deleteTeamCredential(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 	t, err := s.store.GetTeam(ctx, r.PathValue("team_id"))

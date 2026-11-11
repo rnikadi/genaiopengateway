@@ -195,6 +195,7 @@ func (s *Server) logMCPBody(caller *mcpgw.Caller, vs, method string, params any,
 
 // --- admin API ---
 
+// listRequests lists logged request bodies' metadata, newest first.
 func (s *Server) listRequests(w http.ResponseWriter, r *http.Request) error {
 	pg, err := page(r)
 	if err != nil {
