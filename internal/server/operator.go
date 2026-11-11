@@ -277,7 +277,16 @@ func (s *Server) sessionOperator(r *http.Request) (*operator, error) {
 	// Roles follow the current sso.roles, so removing a mapping takes
 	// effect at once rather than at the next sign-in.
 	if cfg := s.rt.Load().cfg; ss.Claims != nil && cfg.SSO.OIDC != nil {
-		o.Grants = s.resolveGrants(cfg.SSO.Roles, ss.Claims.Email, ss.Claims.Groups)
+		// Provisioned users' groups come from SCIM, so a change in the
+		// directory applies at once (docs/scim.md).
+		groups, active, err := s.directoryGroups(r.Context(), ss.Claims)
+		if err != nil {
+			return nil, err
+		}
+		if !active {
+			return nil, store.ErrNotFound
+		}
+		o.Grants = s.resolveGrants(cfg.SSO.Roles, ss.Claims.Email, groups)
 		if len(o.Grants) == 0 {
 			return nil, store.ErrNotFound
 		}

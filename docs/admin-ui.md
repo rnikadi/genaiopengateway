@@ -14,7 +14,6 @@ v0.3 adds a web UI for operators, sign-in through the company's identity provide
 | Feature | Why, and when |
 | --- | --- |
 | SAML | Every identity provider we target speaks OIDC, and SAML-only ones can be bridged with Keycloak or Dex. Added if users ask. |
-| SCIM provisioning | Roles come from the identity provider's groups at each sign-in, so users and access stay in sync without SCIM. Revisited with self-service keys. |
 | Self-service keys for members | Team grants cover team leads ([roles.md](roles.md)). Finer rules are Cedar policies (ADR 0009). |
 | Editing providers, models and MCP servers from the UI | They live in the config file by design (ADR 0003). The UI shows them read-only ([admin-ui-config.md](admin-ui-config.md)); editing them from the UI as well is planned (issue #34). |
 | Personal API tokens for the admin API | Automation keeps using the admin token. Per-user tokens can follow if needed. |
@@ -68,7 +67,7 @@ sso:
     - {group: search-leads, role: admin, org: acme, team: search}   # one team
 ```
 
-A user gets every role whose `group` is in the groups claim or whose `email` matches. An `email` mapping is skipped when the ID token says `email_verified: false`, so prefer groups with identity providers that let users register any address. Organization names are unique without case and only owners rename an organization, so a mapping's `org` always means one organization (ADR 0029). A user with no role cannot sign in. Changing `sso.roles` applies to signed-in users at once. Changing a group in the identity provider takes effect at the user's next sign-in, at most `session_ttl` later, or at once after an owner signs everyone out.
+A user gets every role whose `group` is in the groups claim or whose `email` matches. An `email` mapping is skipped when the ID token says `email_verified: false`, so prefer groups with identity providers that let users register any address. Organization names are unique without case and only owners rename an organization, so a mapping's `org` always means one organization (ADR 0029). A user with no role cannot sign in. Changing `sso.roles` applies to signed-in users at once. With SCIM provisioning, provisioned users' groups come from the directory and changes apply at once too ([scim.md](scim.md)). Changing a group in the identity provider takes effect at the user's next sign-in, at most `session_ttl` later, or at once after an owner signs everyone out.
 
 ## Sign-in
 

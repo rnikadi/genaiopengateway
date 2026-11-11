@@ -62,6 +62,7 @@ Every route the gateway serves, generated from the handlers in `internal/server`
 | `DELETE` | `/admin/v1/config/{kind}/{name}` | `s.deleteConfig` | deleteConfig removes an object from the running config: a stored one is deleted, and one from the file gets a deletion marker (ADR 0028). |
 | `PUT` | `/admin/v1/config/{kind}/{name}` | `s.putConfig` | putConfig creates or replaces a stored configuration object, validated against the merged config. |
 | `POST` | `/admin/v1/config/{kind}/{name}/reset` | `s.resetConfig` | resetConfig removes the stored copy or deletion marker of a file object, so the file's version applies again. |
+| `GET` | `/admin/v1/directory` | `s.listDirectory` | listDirectory lists provisioned users with their groups, and the groups, for owners. |
 | `GET` | `/admin/v1/guardrail-events` | `s.listGuardrailEvents` | listGuardrailEvents serves GET /admin/v1/guardrail-events. |
 | `GET` | `/admin/v1/guardrails` | `s.listGuardrails` | listGuardrails lists the configured guardrails without their secrets. |
 | `GET` | `/admin/v1/keys` | `s.listAllKeys` | listAllKeys lists keys across teams, limited to the organizations the operator can read (docs/virtual-keys.md). |
@@ -126,3 +127,18 @@ Every route the gateway serves, generated from the handlers in `internal/server`
 | `GET` | `/healthz` | `(func(w http.ResponseWriter, _ *http.Request) literal)` | - |
 | `GET` | `/metrics` | `s.MetricsHandler()` | MetricsHandler serves Prometheus metrics. |
 | `GET` | `/readyz` | `s.readyz` | readyz answers 200 once keys are loaded, and 503 before that and while the gateway drains. |
+| `GET` | `/scim/v2/Groups` | `s.scimHandler(s.scimListGroups)` | scimHandler authenticates the identity provider's bearer token and answers errors in SCIM's shape. |
+| `POST` | `/scim/v2/Groups` | `s.scimHandler(s.scimCreateGroup)` | scimHandler authenticates the identity provider's bearer token and answers errors in SCIM's shape. |
+| `DELETE` | `/scim/v2/Groups/{id}` | `s.scimHandler(s.scimDeleteGroup)` | scimHandler authenticates the identity provider's bearer token and answers errors in SCIM's shape. |
+| `GET` | `/scim/v2/Groups/{id}` | `s.scimHandler(s.scimGetGroup)` | scimHandler authenticates the identity provider's bearer token and answers errors in SCIM's shape. |
+| `PATCH` | `/scim/v2/Groups/{id}` | `s.scimHandler(s.scimPatchGroup)` | scimHandler authenticates the identity provider's bearer token and answers errors in SCIM's shape. |
+| `PUT` | `/scim/v2/Groups/{id}` | `s.scimHandler(s.scimReplaceGroup)` | scimHandler authenticates the identity provider's bearer token and answers errors in SCIM's shape. |
+| `GET` | `/scim/v2/ResourceTypes` | `s.scimHandler(s.scimResourceTypes)` | scimHandler authenticates the identity provider's bearer token and answers errors in SCIM's shape. |
+| `GET` | `/scim/v2/Schemas` | `s.scimHandler(s.scimSchemas)` | scimHandler authenticates the identity provider's bearer token and answers errors in SCIM's shape. |
+| `GET` | `/scim/v2/ServiceProviderConfig` | `s.scimHandler(s.scimServiceProviderConfig)` | scimHandler authenticates the identity provider's bearer token and answers errors in SCIM's shape. |
+| `GET` | `/scim/v2/Users` | `s.scimHandler(s.scimListUsers)` | scimHandler authenticates the identity provider's bearer token and answers errors in SCIM's shape. |
+| `POST` | `/scim/v2/Users` | `s.scimHandler(s.scimCreateUser)` | scimHandler authenticates the identity provider's bearer token and answers errors in SCIM's shape. |
+| `DELETE` | `/scim/v2/Users/{id}` | `s.scimHandler(s.scimDeleteUser)` | scimHandler authenticates the identity provider's bearer token and answers errors in SCIM's shape. |
+| `GET` | `/scim/v2/Users/{id}` | `s.scimHandler(s.scimGetUser)` | scimHandler authenticates the identity provider's bearer token and answers errors in SCIM's shape. |
+| `PATCH` | `/scim/v2/Users/{id}` | `s.scimHandler(s.scimPatchUser)` | scimHandler authenticates the identity provider's bearer token and answers errors in SCIM's shape. |
+| `PUT` | `/scim/v2/Users/{id}` | `s.scimHandler(s.scimReplaceUser)` | scimHandler authenticates the identity provider's bearer token and answers errors in SCIM's shape. |

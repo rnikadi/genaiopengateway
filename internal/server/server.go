@@ -454,6 +454,7 @@ func (s *Server) Handler() http.Handler {
 	if s.store != nil {
 		mux.HandleFunc("GET /mcp/connect/callback", s.connectCallback)
 		mux.HandleFunc("GET /mcp/connect/{id}", s.connectStart)
+		s.scimRoutes(mux)
 	}
 	mux.HandleFunc("/.well-known/oauth-protected-resource/mcp/{name}", s.mcpResourceMetadata)
 	s.adminRoutes(mux)

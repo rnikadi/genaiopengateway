@@ -35,6 +35,8 @@ sso:                                 # operator sign-in to the admin UI; see adm
       role: admin                    # one team: its keys, credentials and usage
       org: acme
       team: search
+  scim:                              # provisioning at /scim/v2; see scim.md
+    token: ${SCIM_TOKEN}             # at least 32 characters
   custom_roles:                      # more roles from the permissions in roles.md
     billing:
       description: Finance reads spend

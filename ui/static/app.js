@@ -18,6 +18,7 @@ import { Playground } from './pages/playground.js';
 import { Config } from './pages/config.js';
 import { Jobs } from './pages/jobs.js';
 import { Setup } from './pages/setup.js';
+import { Directory } from './pages/directory.js';
 
 const routes = [
   [/^\/$/, Overview, 'overview'],
@@ -39,6 +40,7 @@ const routes = [
   [/^\/config$/, Config, 'config', 'owner'],
   [/^\/audit$/, Audit, 'audit'],
   [/^\/setup$/, Setup, 'setup', 'owner'],
+  [/^\/directory$/, Directory, 'directory', 'owner'],
 ];
 
 const nav = [
@@ -56,6 +58,7 @@ const nav = [
   ['alerts', '#/alerts', 'Alerts'],
   ['audit', '#/audit', 'Audit log'],
   ['config', '#/config', 'Configuration', 'owner'],
+  ['directory', '#/directory', 'Directory', 'owner'],
   ['settings', '#/settings', 'Settings', 'owner'],
   ['setup', '#/setup', 'Setup wizard', 'owner'],
 ];

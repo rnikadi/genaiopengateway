@@ -86,6 +86,7 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	h("POST /admin/v1/batches/{id}/cancel", s.cancelAdminBatch)
 	h("GET /admin/v1/videos", s.listAdminVideos)
 	h("DELETE /admin/v1/sessions", s.deleteSessions)
+	h("GET /admin/v1/directory", s.listDirectory)
 	h("DELETE /admin/v1/cache", s.clearCache)
 }
 

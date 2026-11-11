@@ -332,7 +332,18 @@ type SSO struct {
 	// CustomRoles are named sets of permissions that role mappings can
 	// grant besides the built-in roles (docs/roles.md).
 	CustomRoles map[string]CustomRole `yaml:"custom_roles"`
+	// SCIM lets the identity provider provision users and groups
+	// (docs/scim.md).
+	SCIM SCIM `yaml:"scim"`
 }
+
+// SCIM turns on the SCIM 2.0 endpoints under /scim/v2 when Token is set.
+type SCIM struct {
+	Token Secret `yaml:"token"`
+}
+
+// Enabled reports whether the SCIM endpoints are served.
+func (s SCIM) Enabled() bool { return s.Token.Value() != "" }
 
 // CustomRole is a named set of permissions.
 type CustomRole struct {
@@ -1196,6 +1207,14 @@ func (c *Config) validateSSO(add func(string, ...any)) {
 	}
 	if s.SessionTTL < Duration(time.Minute) {
 		add("sso.session_ttl must be at least 1m")
+	}
+	if s.SCIM.Enabled() {
+		if len(s.SCIM.Token.Value()) < 32 {
+			add("sso.scim.token must be at least 32 characters")
+		}
+		if c.Store.Driver == "" {
+			add("sso.scim needs a store, where provisioned users are kept")
+		}
 	}
 	for i, r := range s.Roles {
 		if (r.Group == "") == (r.Email == "") {
