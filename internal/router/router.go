@@ -504,6 +504,13 @@ func (r *Router) LiveDialer(ctx context.Context, providerName string) (provider.
 	return d, ok
 }
 
+// BidiOpener returns a provider's adapter for Bedrock bidirectional
+// streams, or false when the provider is gone or does not serve them.
+func (r *Router) BidiOpener(ctx context.Context, providerName string) (provider.BidiOpener, bool) {
+	o, ok := r.adapter(ctx, providerName).(provider.BidiOpener)
+	return o, ok
+}
+
 // Forwarder returns a provider's adapter for calls on upstream objects,
 // or false when the provider is gone or does not serve them.
 func (r *Router) Forwarder(ctx context.Context, providerName string) (provider.Forwarder, bool) {
@@ -515,7 +522,7 @@ func (r *Router) Forwarder(ctx context.Context, providerName string) (provider.F
 var AllEndpoints = []provider.Endpoint{
 	provider.ChatCompletions, provider.Responses, provider.Messages, provider.GenerateContent, provider.Embeddings,
 	provider.ImageGenerations, provider.ImageEdits, provider.Speech, provider.Transcriptions, provider.Translations,
-	provider.Moderations, provider.Rerank, provider.Videos, provider.Realtime, provider.Live, provider.Batches,
+	provider.Moderations, provider.Rerank, provider.Videos, provider.Realtime, provider.Live, provider.BidiStream, provider.Batches,
 }
 
 // Endpoints lists what a provider serves for an upstream model.

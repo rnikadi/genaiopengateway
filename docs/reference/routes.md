@@ -137,6 +137,7 @@ Every route the gateway serves, generated from the handlers in `internal/server`
 | Method | Path | Handler | Summary |
 | --- | --- | --- | --- |
 | `ANY` | `/.well-known/oauth-protected-resource/mcp/{name}` | `s.mcpResourceMetadata` | mcpResourceMetadata serves RFC 9728 protected resource metadata for a virtual server, when OAuth is configured. |
+| `GET` | `/bedrock/model/{model}/invoke-with-bidirectional-stream` | `s.bidi` | bidi relays a Bedrock bidirectional stream, as Nova Sonic uses, over a WebSocket: each message either way is one event's JSON, the payload Bedrock carries base64 encoded in its event stream. |
 | `GET` | `/healthz` | `(func(w http.ResponseWriter, _ *http.Request) literal)` | - |
 | `GET` | `/metrics` | `s.MetricsHandler()` | MetricsHandler serves Prometheus metrics. |
 | `GET` | `/readyz` | `s.readyz` | readyz answers 200 once keys are loaded, and 503 before that and while the gateway drains. |

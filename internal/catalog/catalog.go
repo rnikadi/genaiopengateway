@@ -19,7 +19,7 @@ import (
 var raw []byte
 
 // Kinds of model, by the endpoint they serve.
-var Kinds = []string{"chat", "embeddings", "image", "speech", "transcription", "moderation", "rerank", "video", "realtime", "live"}
+var Kinds = []string{"chat", "embeddings", "image", "speech", "transcription", "moderation", "rerank", "video", "realtime", "live", "bidi_stream"}
 
 // Catalog is a versioned list of provider presets.
 type Catalog struct {
