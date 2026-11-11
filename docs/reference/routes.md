@@ -117,6 +117,9 @@ Every route the gateway serves, generated from the handlers in `internal/server`
 | `GET` | `/ui/auth/config` | `auth(s.authConfig)` | authConfig tells the sign-in page which methods are available. |
 | `GET` | `/ui/auth/login` | `auth(s.login)` | login starts the authorization code flow with PKCE. |
 | `POST` | `/ui/auth/logout` | `auth(s.logout)` | logout ends the session. |
+| `POST` | `/ui/auth/saml/acs` | `auth(s.samlACS)` | samlACS takes the identity provider's signed response, resolves roles and starts a session. |
+| `GET` | `/ui/auth/saml/login` | `auth(s.samlLogin)` | samlLogin sends the browser to the SAML identity provider with an AuthnRequest. |
+| `GET` | `/ui/auth/saml/metadata` | `auth(s.samlMetadata)` | samlMetadata serves the gateway's SAML service provider metadata for the identity provider. |
 | `POST` | `/ui/auth/token` | `auth(s.tokenLogin)` | tokenLogin signs in with the admin token when OIDC is not configured. |
 
 ## Discovery and operations

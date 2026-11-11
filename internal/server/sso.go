@@ -129,7 +129,7 @@ func returnPath(p string) string {
 // authConfig tells the sign-in page which methods are available.
 func (s *Server) authConfig(w http.ResponseWriter, _ *http.Request) {
 	cfg := s.rt.Load().cfg
-	writeJSON(w, http.StatusOK, map[string]bool{"oidc": cfg.SSO.OIDC != nil, "token": cfg.SSO.OIDC == nil && cfg.Admin.Token.Value() != ""})
+	writeJSON(w, http.StatusOK, map[string]bool{"oidc": cfg.SSO.OIDC != nil, "saml": cfg.SSO.SAML != nil, "token": !cfg.SSO.Enabled() && cfg.Admin.Token.Value() != ""})
 }
 
 // login starts the authorization code flow with PKCE.
@@ -271,7 +271,7 @@ func verifiedEmail(claims map[string]any) string {
 func (s *Server) tokenLogin(w http.ResponseWriter, r *http.Request) {
 	cfg := s.rt.Load().cfg
 	token := cfg.Admin.Token.Value()
-	if cfg.SSO.OIDC != nil || token == "" {
+	if cfg.SSO.Enabled() || token == "" {
 		writeAdminError(w, http.StatusNotFound, "not_found", "sign in with the identity provider")
 		return
 	}

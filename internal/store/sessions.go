@@ -112,3 +112,20 @@ func (s *Store) PruneSessions(ctx context.Context, before time.Time) (int64, err
 	}
 	return res.RowsAffected()
 }
+
+// ErrReplayed is returned for a SAML assertion that was already used.
+var ErrReplayed = errors.New("already used")
+
+// ConsumeAssertion records a SAML assertion's id until it expires, and
+// returns ErrReplayed when it was already recorded. Expired records are
+// pruned on the way.
+func (s *Store) ConsumeAssertion(ctx context.Context, assertionID string, expiresAt time.Time) error {
+	if _, err := s.db.ExecContext(ctx, s.q(`DELETE FROM saml_assertions WHERE expires_at < ?`), now()); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO saml_assertions (id, expires_at) VALUES (?, ?)`), assertionID, expiresAt.UnixMilli())
+	if isUnique(err) {
+		return ErrReplayed
+	}
+	return err
+}

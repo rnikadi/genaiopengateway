@@ -79,6 +79,19 @@ const sections = [
     ],
   },
   {
+    title: 'SAML sign-in',
+    note: 'Instead of OIDC, for identity providers that only speak SAML 2.0. Give the identity provider the metadata at /ui/auth/saml/metadata (docs/saml.md).',
+    fields: [
+      { path: 'sso.saml.idp_metadata_url', label: 'Identity provider metadata URL', type: 'text' },
+      { path: 'sso.saml.idp_metadata', label: 'or its metadata XML', type: 'textarea', hint: 'Paste the XML when the identity provider has no metadata URL.' },
+      { path: 'sso.saml.acs_url', label: 'Assertion consumer service URL', type: 'text', hint: "The gateway's URL ending in /ui/auth/saml/acs." },
+      { path: 'sso.saml.entity_id', label: 'Entity id', type: 'text', hint: 'Empty: the metadata URL.' },
+      { path: 'sso.saml.email_attribute', label: 'Email attribute', type: 'text', hint: 'Empty: email, mail or the NameID.' },
+      { path: 'sso.saml.name_attribute', label: 'Name attribute', type: 'text', hint: 'Empty: displayName or name.' },
+      { path: 'sso.saml.groups_attribute', label: 'Groups attribute', type: 'text' },
+    ],
+  },
+  {
     title: 'MCP',
     fields: [
       { path: 'mcp.public_url', label: 'Public URL of the gateway', type: 'text', hint: 'Names each virtual server for OAuth clients.' },
@@ -161,6 +174,7 @@ function parse(f, raw) {
       return Object.fromEntries(raw.filter((r) => r.name.trim()).map((r) => [r.name.trim(), { ...(r.description.trim() && { description: r.description.trim() }), permissions: r.permissions }]));
     case 'secret': return raw === '' ? undefined : raw;
   }
+  if (f.type === 'textarea') return raw.trim() === '' ? undefined : raw;
   return raw.trim() === '' ? undefined : raw.trim();
 }
 
@@ -273,6 +287,9 @@ function Setting({ f, info, value, detectors, permissions, customRoles, onChange
       break;
     case 'list':
       control = html`<textarea rows="3" value=${value} onInput=${set}></textarea>`;
+      break;
+    case 'textarea':
+      control = html`<textarea rows="6" class="mono" value=${value} onInput=${set}></textarea>`;
       break;
     case 'secret':
       control = html`<input type="password" autocomplete="off" value=${value} placeholder=${info.value ? '•••••••• (stored; type to replace)' : ''} onInput=${set} />`;

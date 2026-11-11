@@ -96,6 +96,9 @@ func (s *Server) uiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /ui/auth/config", auth(s.authConfig))
 	mux.HandleFunc("GET /ui/auth/login", auth(s.login))
 	mux.HandleFunc("GET /ui/auth/callback", auth(s.callback))
+	mux.HandleFunc("GET /ui/auth/saml/metadata", auth(s.samlMetadata))
+	mux.HandleFunc("GET /ui/auth/saml/login", auth(s.samlLogin))
+	mux.HandleFunc("POST /ui/auth/saml/acs", auth(s.samlACS))
 	mux.HandleFunc("POST /ui/auth/token", auth(s.tokenLogin))
 	mux.HandleFunc("POST /ui/auth/logout", auth(s.logout))
 }

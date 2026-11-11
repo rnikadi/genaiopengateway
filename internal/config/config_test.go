@@ -334,3 +334,29 @@ func TestPermissionsDocumented(t *testing.T) {
 		t.Errorf("docs/roles.md lists %v, the code has %v", documented, Permissions)
 	}
 }
+
+func TestSAMLConfig(t *testing.T) {
+	c, err := Parse([]byte(`
+store: {driver: sqlite, dsn: x}
+sso:
+  saml: {idp_metadata_url: "https://idp.example.com/metadata", acs_url: "https://gw.example.com/ui/auth/saml/acs"}
+  roles: [{group: platform, role: owner}]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := c.SSO.SAML; !c.AdminEnabled() || m.EntityID != "https://gw.example.com/ui/auth/saml/metadata" || m.GroupsAttribute != "groups" {
+		t.Fatalf("defaults: %+v", c.SSO.SAML)
+	}
+	for in, want := range map[string]string{
+		`{saml: {acs_url: "https://gw/ui/auth/saml/acs"}, roles: [{group: g, role: owner}]}`:                                                                                                                                  "exactly one of idp_metadata_url and idp_metadata",
+		`{saml: {idp_metadata: "<x/>", acs_url: "https://gw/ui/auth/callback"}, roles: [{group: g, role: owner}]}`:                                                                                                            "must be the gateway's URL ending in /ui/auth/saml/acs",
+		`{saml: {idp_metadata: "<x/>", acs_url: "https://gw/ui/auth/saml/acs"}}`:                                                                                                                                              "sso.roles is required with sso.saml",
+		`{saml: {idp_metadata: "<x/>", acs_url: "https://gw/ui/auth/saml/acs"}, oidc: {issuer: "https://id", client_id: c, client_secret: s, redirect_url: "https://gw/ui/auth/callback"}, roles: [{group: g, role: owner}]}`: "cannot both be set",
+	} {
+		_, err := Parse([]byte("store: {driver: sqlite, dsn: x}\nsso: " + in))
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: got %v, want %q", in, err, want)
+		}
+	}
+}

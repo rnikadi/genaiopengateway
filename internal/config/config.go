@@ -326,7 +326,10 @@ type Admin struct {
 
 // SSO configures operator sign-in to the admin UI and API (ADR 0016).
 type SSO struct {
-	OIDC       *OIDC         `yaml:"oidc"`
+	OIDC *OIDC `yaml:"oidc"`
+	// SAML signs operators in with a SAML 2.0 identity provider instead
+	// of OIDC (docs/saml.md).
+	SAML       *SAML         `yaml:"saml"`
 	SessionTTL Duration      `yaml:"session_ttl"`
 	Roles      []RoleMapping `yaml:"roles"`
 	// CustomRoles are named sets of permissions that role mappings can
@@ -335,6 +338,31 @@ type SSO struct {
 	// SCIM lets the identity provider provision users and groups
 	// (docs/scim.md).
 	SCIM SCIM `yaml:"scim"`
+}
+
+// Enabled reports whether operators sign in with an identity provider.
+func (s *SSO) Enabled() bool { return s.OIDC != nil || s.SAML != nil }
+
+// SAML is a SAML 2.0 identity provider operators sign in with. The
+// gateway is the service provider; its metadata is served at
+// /ui/auth/saml/metadata.
+type SAML struct {
+	// IDPMetadataURL or IDPMetadata (the XML itself) describe the
+	// identity provider: its sign-in URL and signing certificates.
+	IDPMetadataURL string `yaml:"idp_metadata_url"`
+	IDPMetadata    string `yaml:"idp_metadata"`
+	// ACSURL is the gateway's URL ending in /ui/auth/saml/acs, where the
+	// identity provider posts its response.
+	ACSURL string `yaml:"acs_url"`
+	// EntityID names the gateway to the identity provider; the default is
+	// its metadata URL.
+	EntityID string `yaml:"entity_id"`
+	// EmailAttribute, NameAttribute and GroupsAttribute name the
+	// assertion's attributes. Without an email attribute, the NameID is
+	// the email.
+	EmailAttribute  string `yaml:"email_attribute"`
+	NameAttribute   string `yaml:"name_attribute"`
+	GroupsAttribute string `yaml:"groups_attribute"`
 }
 
 // SCIM turns on the SCIM 2.0 endpoints under /scim/v2 when Token is set.
@@ -430,7 +458,7 @@ type UI struct {
 // AdminEnabled reports whether the admin API, and with it the UI, is on:
 // it needs a store and a way to sign in.
 func (c *Config) AdminEnabled() bool {
-	return c.Store.Driver != "" && (c.Admin.Token.Value() != "" || c.SSO.OIDC != nil)
+	return c.Store.Driver != "" && (c.Admin.Token.Value() != "" || c.SSO.Enabled())
 }
 
 // UIEnabled reports whether the admin UI is served.
@@ -1203,6 +1231,32 @@ func (c *Config) validateSSO(add func(string, ...any)) {
 		}
 		if c.Store.Driver == "" {
 			add("sso.oidc needs a store, where sessions are kept")
+		}
+	}
+	if m := s.SAML; m != nil {
+		if s.OIDC != nil {
+			add("sso.saml and sso.oidc cannot both be set: choose one identity provider")
+		}
+		if (m.IDPMetadataURL == "") == (m.IDPMetadata == "") {
+			add("sso.saml: set exactly one of idp_metadata_url and idp_metadata")
+		}
+		if m.IDPMetadataURL != "" && !httpURL(m.IDPMetadataURL) {
+			add("sso.saml.idp_metadata_url must be an http or https URL")
+		}
+		u, err := url.Parse(m.ACSURL)
+		if err != nil || !httpURL(m.ACSURL) || u.Path != "/ui/auth/saml/acs" {
+			add("sso.saml.acs_url must be the gateway's URL ending in /ui/auth/saml/acs")
+		} else if m.EntityID == "" {
+			m.EntityID = strings.TrimSuffix(m.ACSURL, "/acs") + "/metadata"
+		}
+		if m.GroupsAttribute == "" {
+			m.GroupsAttribute = "groups"
+		}
+		if len(s.Roles) == 0 {
+			add("sso.roles is required with sso.saml: without roles nobody can sign in")
+		}
+		if c.Store.Driver == "" {
+			add("sso.saml needs a store, where sessions are kept")
 		}
 	}
 	if s.SessionTTL < Duration(time.Minute) {
