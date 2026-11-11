@@ -15,7 +15,7 @@ export function Models() {
     <${Loading} state=${state}>${(d) => html`<${Table}
       rowKey=${(m) => m.name}
       rows=${d.data}
-      empty="No models are configured."
+      empty=${html`No models are configured. Owners add them with the <a href="#/setup">setup wizard</a> or on the <a href="#/config?kind=models">Configuration page</a>.`}
       columns=${[
         { label: 'Model', render: (m) => html`<strong>${m.name}</strong><div class="chips">${m.endpoints.map((e) => html`<span class="badge" key=${e}>${endpointNames[e] || e}</span>`)}</div>` },
         {

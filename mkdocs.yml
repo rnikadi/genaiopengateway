@@ -42,6 +42,9 @@ validation:
 nav:
   - Home: README.md
   - Get started:
+      - Quick start: quickstart.md
+      - Provider presets and prices: catalog.md
+      - gogctl CLI: gogctl.md
       - Product scope: product-scope.md
       - Architecture: architecture.md
       - Configuration: config.md

@@ -5,6 +5,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/gateway ./cmd/gateway
+	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/gogctl ./cmd/gogctl
 
 test:
 	go test -race ./...

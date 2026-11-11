@@ -4,6 +4,18 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Added
+
+- Zero-config start ([docs/quickstart.md](docs/quickstart.md)): without a config file the gateway starts on SQLite with in-memory limits, generates an admin token and an encryption key into `bootstrap.json` in its data directory (`-data`, `GOG_DATA_DIR`, `/var/lib/genaiopengateway` in the image), and prints the admin UI link and the token. `docker run` needs no mounted file.
+- A setup wizard in the admin UI: pick a provider preset, paste a key and choose models, create an organization, team and key, send a test request, and copy snippets for curl, Python, Node and MCP clients. The Overview points owners to it while no provider is configured. A browser test runs the whole flow in CI and fails if it takes 5 minutes or more.
+- Provider presets and a model price catalog ([docs/catalog.md](docs/catalog.md)) for OpenAI, Anthropic, Gemini, Mistral, Groq, DeepSeek, OpenRouter, Azure OpenAI, Bedrock, Vertex AI, Ollama and vLLM, served at `GET /admin/v1/catalog`.
+- `gogctl`, a command line tool over the admin API ([docs/gogctl.md](docs/gogctl.md)): organizations, teams, keys with rotation, usage, the catalog, and `config export` and `config import` of stored configuration objects as YAML for configuration as code. It ships in the release archives.
+- An install script (`scripts/install.sh`) that downloads the latest release for Linux or macOS and checks it against the release checksums.
+
+### Fixed
+
+- The release workflow signs the Helm chart: cosign now has registry credentials. The 0.8.0 chart was published without a signature.
+
 ## [0.8.0] - 2026-11-11
 
 Every model type and enterprise control built since 0.3: guardrails, Gemini, Vertex AI and Bedrock, a Helm chart, images, speech, transcription, video, realtime, batch, a response cache, and the whole configuration in the admin UI. The version follows the [roadmap](docs/roadmap.md), whose v0.5 and v0.8 scope this release covers.

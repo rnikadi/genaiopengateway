@@ -28,7 +28,7 @@ export function Overview() {
       api('GET', '/admin/v1/providers'),
     ]);
     const failing = providers.data.filter((p) => p.health.errors > 0);
-    return { byModel: byModel.data, byDay: byDay.data, review: pending.data.length + changed.data.length, alerts: alerts.data, failing };
+    return { byModel: byModel.data, byDay: byDay.data, review: pending.data.length + changed.data.length, alerts: alerts.data, failing, noProviders: providers.data.length === 0 };
   }, [org]);
 
   return html`
@@ -37,6 +37,12 @@ export function Overview() {
       const t = totals(d.byModel);
       const byCost = [...d.byModel].sort((a, b) => b.cost_usd - a.cost_usd);
       return html`
+        ${d.noProviders && html`<section class="panel attention">
+          <h2>Set up your gateway</h2>
+          <p>No providers are configured yet, so the gateway has no models to serve.
+            ${s.owner ? html` The <a href="#/setup">setup wizard</a> adds a provider, creates a first key and sends a test request in a few minutes.` : ' Ask an owner to add a provider.'}</p>
+          ${s.owner && html`<a class="button" href="#/setup">Start the setup wizard</a>`}
+        </section>`}
         <div class="cards">
           <${Card} label="Spend" value=${usd(t.cost_usd)} href="#/usage" />
           <${Card} label="Requests" value=${num(t.requests)} />
