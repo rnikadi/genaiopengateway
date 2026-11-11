@@ -140,6 +140,7 @@ providers:
     type: bedrock                    # every Bedrock model; see cloud-providers.md
     region: eu-central-1
     # api_key: ${AWS_BEARER_TOKEN_BEDROCK}   (default: the AWS credential chain, signed with SigV4)
+    # s3_output_uri: s3://acme-videos/reel   (where Nova Reel writes videos; see modalities.md)
     residency: eu                    # optional label; keys pinned to a residency use only matching providers (routing.md)
 
 models:

@@ -549,6 +549,9 @@ type Provider struct {
 	// Region configures a bedrock provider. Without APIKey, requests are
 	// signed with credentials from the AWS default chain.
 	Region string `yaml:"region"`
+	// S3OutputURI is where a bedrock provider's Nova Reel jobs write
+	// their videos, such as s3://bucket/videos, in the provider's region.
+	S3OutputURI string `yaml:"s3_output_uri"`
 	// Residency labels where the provider processes data, such as eu or
 	// us. Organizations, teams and keys can be pinned to labels
 	// (docs/routing.md#data-residency).
@@ -929,6 +932,9 @@ func (c *Config) validate() error {
 		case ProviderBedrock:
 			if !awsRegion.MatchString(p.Region) {
 				add("provider %q: bedrock needs a region such as us-east-1", name)
+			}
+			if u := p.S3OutputURI; u != "" && (!strings.HasPrefix(u, "s3://") || len(strings.TrimPrefix(u, "s3://")) < 3) {
+				add("provider %q: s3_output_uri must be an s3:// URI, such as s3://bucket/videos", name)
 			}
 		default:
 			add("provider %q: type must be one of %s, got %q", name, strings.Join(ProviderTypes, ", "), p.Type)

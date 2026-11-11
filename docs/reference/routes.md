@@ -155,3 +155,4 @@ Every route the gateway serves, generated from the handlers in `internal/server`
 | `GET` | `/scim/v2/Users/{id}` | `s.scimHandler(s.scimGetUser)` | scimHandler authenticates the identity provider's bearer token and answers errors in SCIM's shape. |
 | `PATCH` | `/scim/v2/Users/{id}` | `s.scimHandler(s.scimPatchUser)` | scimHandler authenticates the identity provider's bearer token and answers errors in SCIM's shape. |
 | `PUT` | `/scim/v2/Users/{id}` | `s.scimHandler(s.scimReplaceUser)` | scimHandler authenticates the identity provider's bearer token and answers errors in SCIM's shape. |
+| `GET` | `/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent` | `s.live` | live relays a Gemini Live API session (BidiGenerateContent) to one target. |
