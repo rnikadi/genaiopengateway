@@ -4,6 +4,18 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-11
+
+Easy to use and reliable at scale: the v0.9 and v0.10 scope of the [roadmap](docs/roadmap.md). A new user gets a first completion without writing YAML, and a provider that fails mid-load costs no requests when another target exists.
+
+### Upgrade notes
+
+- The circuit breaker is on by default (5 failures in a row, 30s cooldown). Set `routing.circuit_breaker.failures: 0` to keep the old behavior.
+- Upstream spans are renamed from `gateway.upstream` to `<operation> <model>`, such as `chat gpt-4.1-mini`; update trace queries and dashboards that match on the old name.
+- `GET /admin/v1/models` and `/admin/v1/providers` gain `strategy`, `sticky`, `retries`, per-target `circuit` and `residency` fields.
+- `streams` is a new stored configuration kind and `secrets.kms` a new startup setting; neither changes anything until it is set.
+- No database migrations.
+
 ### Added
 
 - Zero-config start ([docs/quickstart.md](docs/quickstart.md)): without a config file the gateway starts on SQLite with in-memory limits, generates an admin token and an encryption key into `bootstrap.json` in its data directory (`-data`, `GOG_DATA_DIR`, `/var/lib/genaiopengateway` in the image), and prints the admin UI link and the token. `docker run` needs no mounted file.
@@ -144,7 +156,8 @@ The first release: an OpenAI-compatible gateway with tenants, keys, limits, budg
 - Config reload on `SIGHUP` and graceful shutdown.
 - Signed binaries and images with SBOMs.
 
-[Unreleased]: https://github.com/rnikadi/genaiopengateway/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/rnikadi/genaiopengateway/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/rnikadi/genaiopengateway/compare/v0.8.0...v0.10.0
 [0.8.0]: https://github.com/rnikadi/genaiopengateway/compare/v0.3.0...v0.8.0
 [0.3.0]: https://github.com/rnikadi/genaiopengateway/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/rnikadi/genaiopengateway/compare/v0.1.0...v0.2.0
