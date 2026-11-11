@@ -6,6 +6,8 @@
 | [Architecture](architecture.md) | Components, packages, request lifecycle |
 | [Decisions](adr/README.md) | Architecture decision records |
 | [API](api.md) | Model API, admin API, errors, headers |
+| [Route reference](reference/routes.md) | Every route the gateway serves, generated from the handlers |
+| [Benchmarks](benchmarks.md) | Added latency and throughput, method and results |
 | [Configuration and data model](config.md) | YAML reference, database tables |
 | [Security and threat model](security.md) | Assets, trust boundaries, STRIDE, defaults |
 | [Provider adapters](providers.md) | Adapter interface, translation rules, conformance tests |

@@ -1,0 +1,21 @@
+name: Bug report
+description: Something does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Security issues go to a private advisory instead, see SECURITY.md.
+  - type: input
+    id: version
+    attributes: {label: Version, description: "Output of `gateway -version`, or the image tag."}
+    validations: {required: true}
+  - type: textarea
+    id: what
+    attributes: {label: What happened, description: What you did, what you expected and what you saw instead.}
+    validations: {required: true}
+  - type: textarea
+    id: config
+    attributes: {label: Relevant config, description: The parts of your config that matter, with secrets removed., render: yaml}
+  - type: textarea
+    id: logs
+    attributes: {label: Logs, description: Gateway log lines around the problem., render: text}

@@ -1,0 +1,79 @@
+# The documentation site, built from docs/ and published to GitHub Pages
+# by .github/workflows/docs.yml. Preview with:
+#   pip install -r docs/requirements.txt && mkdocs serve
+site_name: GenAIOpenGateway
+site_description: The open-source GenAI gateway with no enterprise edition
+site_url: https://rnikadi.github.io/genaiopengateway/
+repo_url: https://github.com/rnikadi/genaiopengateway
+repo_name: rnikadi/genaiopengateway
+edit_uri: edit/main/docs/
+docs_dir: docs
+strict: true
+hooks:
+  - scripts/mkdocs_hooks.py
+exclude_docs: |
+  requirements.txt
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle: {icon: material/weather-night, name: Dark mode}
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle: {icon: material/weather-sunny, name: Light mode}
+markdown_extensions:
+  - admonition
+  - tables
+  - toc: {permalink: true}
+  - pymdownx.superfences
+  - pymdownx.details
+validation:
+  links:
+    not_found: warn
+    anchors: warn
+    absolute_links: info
+    unrecognized_links: info
+nav:
+  - Home: README.md
+  - Get started:
+      - Product scope: product-scope.md
+      - Architecture: architecture.md
+      - Configuration: config.md
+      - Benchmarks: benchmarks.md
+  - Model API:
+      - API specification: api.md
+      - Route reference: reference/routes.md
+      - Images, audio, video and realtime: modalities.md
+      - Batch and files: batch.md
+      - Response cache: cache.md
+      - Providers: providers.md
+      - Gemini, Vertex AI and Bedrock: cloud-providers.md
+  - MCP gateway:
+      - MCP gateway: mcp.md
+      - Per-user MCP credentials: mcp-user-credentials.md
+  - Governance:
+      - Virtual keys: virtual-keys.md
+      - Team provider credentials: team-credentials.md
+      - Guardrails: guardrails.md
+      - Body logging: body-logging.md
+      - Alerts: alerts.md
+      - Security and threat model: security.md
+  - Admin UI:
+      - Admin UI and SSO: admin-ui.md
+      - Configuration views: admin-ui-config.md
+      - Editing configuration: admin-ui-config-editing.md
+      - Every setting in the UI: admin-ui-settings.md
+      - Playground: playground.md
+  - Operations:
+      - Deploying to Kubernetes: deploy-kubernetes.md
+      - Helm chart: helm.md
+      - Observability: observability.md
+      - Releases: releasing.md
+      - Roadmap: roadmap.md
+  - Decisions: adr/README.md

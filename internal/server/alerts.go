@@ -225,6 +225,7 @@ func (s *Server) checkKeyExpiry(ctx context.Context, now time.Time) {
 
 // --- admin API ---
 
+// listAlerts lists fired alerts, optionally for one organization or event.
 func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) error {
 	pg, err := page(r)
 	if err != nil {

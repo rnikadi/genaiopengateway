@@ -173,11 +173,13 @@ func (s *Server) mcpResourceMetadata(w http.ResponseWriter, r *http.Request) {
 
 // --- admin ---
 
+// listMCPServers lists upstream MCP servers and their status.
 func (s *Server) listMCPServers(w http.ResponseWriter, _ *http.Request) error {
 	writeJSON(w, http.StatusOK, map[string]any{"data": s.mcp.Servers()})
 	return nil
 }
 
+// listMCPTools lists upstream MCP tools with their pin and approval state.
 func (s *Server) listMCPTools(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
 	switch q.Get("status") {
@@ -193,6 +195,7 @@ func (s *Server) listMCPTools(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// approveMCPTool approves a pinned MCP tool's current definition.
 func (s *Server) approveMCPTool(w http.ResponseWriter, r *http.Request) error {
 	var body struct {
 		Hash string `json:"hash"`
@@ -218,6 +221,7 @@ func (s *Server) approveMCPTool(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// listMCPCalls lists audited MCP tool calls, newest first.
 func (s *Server) listMCPCalls(w http.ResponseWriter, r *http.Request) error {
 	pg, err := page(r)
 	if err != nil {
@@ -257,6 +261,7 @@ type virtualServerUpstream struct {
 	Tools  []string `json:"tools"` // empty means every tool
 }
 
+// listVirtualServers lists virtual MCP servers and the tools each exposes.
 func (s *Server) listVirtualServers(w http.ResponseWriter, _ *http.Request) error {
 	vs := s.rt.Load().cfg.MCP.VirtualServers
 	out := []virtualServer{}

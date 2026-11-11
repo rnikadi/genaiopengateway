@@ -46,6 +46,9 @@ jobs:
         # Without -race, which slows the code it measures.
         run: go test -run TestBuiltinsLatencyGate -count=1 ./internal/guardrail/
       - run: go build ./cmd/gateway
+      - name: Benchmark gate
+        # Fails when the gateway adds more than 10 ms at p50 (docs/benchmarks.md).
+        run: N=2000 C=16 GATE=10ms scripts/bench.sh
 
   docker:
     runs-on: ubuntu-latest
@@ -110,6 +113,17 @@ jobs:
         run: |
           pip install openai==2.8.1 websockets==15.0.1
           test/conformance/run.sh
+
+  docs:
+    # The documentation site builds without broken links.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install -r docs/requirements.txt
+      - run: mkdocs build --strict -d site
 
   helm:
     # Template checks, then the chart installed with 2 replicas into kind.

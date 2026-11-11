@@ -80,6 +80,7 @@ type configuredModel struct {
 	Targets   []configuredTarget  `json:"targets"`
 }
 
+// listConfiguredModels lists virtual models with their targets, endpoints and recent health.
 func (s *Server) listConfiguredModels(w http.ResponseWriter, r *http.Request) error {
 	rt := s.rt.Load()
 	health, err := s.health(r)
@@ -148,6 +149,7 @@ type configuredProvider struct {
 	Health      store.TargetHealth `json:"health"`
 }
 
+// listProviders lists configured providers with type, endpoint, auth kind and last-hour health; secrets are never returned.
 func (s *Server) listProviders(w http.ResponseWriter, r *http.Request) error {
 	cfg := s.rt.Load().cfg
 	health, err := s.health(r)
@@ -192,6 +194,7 @@ type configuredGuardrail struct {
 	VirtualServers []string `json:"virtual_servers"`
 }
 
+// listGuardrails lists the configured guardrails without their secrets.
 func (s *Server) listGuardrails(w http.ResponseWriter, _ *http.Request) error {
 	cfg := s.rt.Load().cfg
 	out := []configuredGuardrail{}

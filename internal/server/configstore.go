@@ -236,6 +236,7 @@ func entry(kind, name string, row *store.ConfigObject, fileSpec map[string]any) 
 	return e, nil
 }
 
+// listConfig lists every configuration object with where it comes from: the config file, the store, or both.
 func (s *Server) listConfig(w http.ResponseWriter, r *http.Request) error {
 	if err := requireOwner(r); err != nil {
 		return err
@@ -321,6 +322,7 @@ func (s *Server) configTarget(ctx context.Context, kind, name string) (*config.C
 	return file, fileSpec, row, err
 }
 
+// putConfig creates or replaces a stored configuration object, validated against the merged config.
 func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) error {
 	if err := requireOwner(r); err != nil {
 		return err

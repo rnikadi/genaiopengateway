@@ -589,6 +589,7 @@ func connectPage(w http.ResponseWriter, status int, title, text string) {
 
 // --- admin API ---
 
+// listMCPConnections lists users' upstream MCP connections, without their tokens.
 func (s *Server) listMCPConnections(w http.ResponseWriter, r *http.Request) error {
 	if err := requireOwner(r); err != nil {
 		return err

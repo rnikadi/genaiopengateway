@@ -41,6 +41,12 @@ cosign verify ghcr.io/rnikadi/genaiopengateway:X.Y.Z \
 
 The image carries an SPDX SBOM and SLSA provenance as attestations (`docker buildx imagetools inspect --format '{{ json .SBOM }}'`); binaries have `genaiopengateway_vX.Y.Z.spdx.json`.
 
+## Cadence
+
+A minor or patch release ships on the second Tuesday of each month when `main` has unreleased changes, so users can plan upgrades. Security fixes ship as patch releases whenever they are ready ([SECURITY.md](../SECURITY.md)). The steps above need no special access beyond write to the repository, so any maintainer can cut a release.
+
 ## Support
 
 Until 1.0, only the latest minor release receives fixes.
+
+From 1.0, the latest minor release and the one before it receive bug and security fixes. Every fourth minor release is a long-term support (LTS) release that receives security fixes for 12 months. The model API, admin API and config format keep the stability promise in [Versioning](#versioning).
