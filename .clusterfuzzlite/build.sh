@@ -4,6 +4,9 @@
 # checks it in CI).
 cd "$SRC/genaiopengateway"
 mod=github.com/rnikadi/genaiopengateway
+# The native Go fuzz build needs its testing shim in the module; this
+# changes go.mod inside the build container only.
+go get github.com/AdamKorcz/go-118-fuzz-build/testing
 
 fuzz() { compile_native_go_fuzzer "$mod/$1" "$2" "$3"; }
 
