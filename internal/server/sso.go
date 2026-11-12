@@ -73,6 +73,9 @@ type authFlow struct {
 	// Connect, when set, is the id of an MCP connect request whose user
 	// signs in only to prove who they are (docs/mcp-user-credentials.md).
 	Connect string `json:"c,omitempty"`
+	// Mine marks a sign-in for the user's own MCP connections page,
+	// which also only proves who they are.
+	Mine bool `json:"m,omitempty"`
 }
 
 // flowKey signs the flow cookie. It is derived from the client secret, so
@@ -211,6 +214,10 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	claims := map[string]any{}
 	if err := idt.Claims(&claims); err != nil {
 		fail(http.StatusUnauthorized, "The ID token's claims cannot be read.", err)
+		return
+	}
+	if f.Mine {
+		s.mySignedIn(w, r, oc, idt.Subject, verifiedEmail(claims))
 		return
 	}
 	if _, ok := claims[oc.GroupsClaim]; !ok {

@@ -199,7 +199,7 @@ func (s *Server) portal(w http.ResponseWriter, r *http.Request) error {
 		out = append(out, pt)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"owner": owner, "teams": out,
+		"owner": owner, "teams": out, "mcp_connections_url": myConnectionsURL(cfg),
 		"limits": map[string]any{"max_keys_per_user": cfg.SSO.Portal.MaxKeysPerUser, "max_key_ttl": duration(cfg.SSO.Portal.MaxKeyTTL)},
 	})
 	return nil

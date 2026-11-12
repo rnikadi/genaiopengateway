@@ -504,6 +504,8 @@ func (s *Server) Handler() http.Handler {
 	if s.store != nil {
 		mux.HandleFunc("GET /mcp/connect/callback", s.connectCallback)
 		mux.HandleFunc("GET /mcp/connect/{id}", s.connectStart)
+		mux.HandleFunc("GET "+myConnectionsPath, s.myConnections)
+		mux.HandleFunc("POST "+myConnectionsPath+"/{server}/disconnect", s.disconnectMine)
 		s.scimRoutes(mux)
 	}
 	mux.HandleFunc("/.well-known/oauth-protected-resource/mcp/{name}", s.mcpResourceMetadata)

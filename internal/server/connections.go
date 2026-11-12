@@ -612,18 +612,7 @@ func (s *Server) deleteMCPConnection(w http.ResponseWriter, r *http.Request) err
 	if err := requireOwner(r); err != nil {
 		return err
 	}
-	ctx := r.Context()
-	server, subject := r.PathValue("server"), r.PathValue("subject")
-	conn, err := s.store.GetMCPConnection(ctx, server, subject)
-	if err != nil {
-		return err
-	}
-	s.conns.revoke(ctx, server, conn)
-	if err := s.store.DeleteMCPConnection(ctx, server, subject); err != nil {
-		return err
-	}
-	s.conns.forget(connKey{server, subject})
-	if err := s.audit(ctx, "mcp.connection.delete", "mcp_connection", server+"/"+subject, "", map[string]any{"server": server, "subject": subject}); err != nil {
+	if err := s.removeConnection(r.Context(), r.PathValue("server"), r.PathValue("subject"), operatorFrom(r.Context()).actor(), "owner"); err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -181,6 +181,7 @@ Key, team and org policies gain `allowed_mcp_servers`, a list of virtual server 
 | `POST /admin/v1/mcp/servers/{server}/tools/{tool}/approve` | Approve the current definition. The body, `{"hash": "…"}`, carries the hash shown, so an admin approves what they saw; a definition that changed since answers `409`. |
 | `GET /admin/v1/mcp/calls?org_id=&team_id=&key_id=&server=&from=&to=` | Audit records, newest first, paginated |
 | `GET /mcp/connect/{id}`, `GET /mcp/connect/callback` | The browser side of the connect flow for `user_auth` servers |
+| `GET /mcp/connections`, `POST /mcp/connections/{server}/disconnect` | The page where users see and disconnect their own `user_auth` connections ([details](mcp-user-credentials.md#admin-api-and-ui)) |
 | `GET /admin/v1/mcp/connections?server=&subject=` | Users' connections to `user_auth` servers, without tokens (owners only) |
 | `DELETE /admin/v1/mcp/connections/{server}/{subject}` | Revoke a connection at the upstream when it can, and delete it (owners only, audited) |
 

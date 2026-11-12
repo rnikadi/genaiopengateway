@@ -20,8 +20,13 @@ export function Portal({ params }) {
   return html`<${PageHeader} title="My keys and access" sub="Create and rotate your own keys, see what your teams may use, and copy code to get started." />
     <${Loading} state=${state}>${() => {
       const { teams, limits, owner } = state.data;
+      const connections = state.data.mcp_connections_url && html`<section class="panel">
+        <h2>Your MCP connections</h2>
+        <p class="muted small">The accounts you connected so the gateway can call MCP servers as you, such as GitHub or Linear. See them and disconnect any of them on their own page.</p>
+        <p><a href=${state.data.mcp_connections_url} target="_blank" rel="noopener">Open your MCP connections</a></p>
+      </section>`;
       if (!teams.length) {
-        return html`<section class="panel"><p>You are not a developer on any team yet. Ask an admin to map one of your groups to the <code>developer</code> role for your team.</p></section>`;
+        return html`<section class="panel"><p>You are not a developer on any team yet. Ask an admin to map one of your groups to the <code>developer</code> role for your team.</p></section>${connections}`;
       }
       const t = teams.find((x) => x.id === team) || teams[0];
       const active = teams.flatMap((x) => x.keys).filter((k) => statusOf(k) === 'Active' || statusOf(k) === 'Rotating').length;
