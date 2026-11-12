@@ -304,11 +304,22 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 		writeAdminError(w, http.StatusForbidden, "forbidden", "cross-origin request refused")
 		return
 	}
+	// With SAML single logout, the identity provider ends its session
+	// too: the UI follows the redirect this returns.
+	var redirect string
 	if v := readCookie(r, sessionCookie); v != "" {
-		if err := s.store.DeleteSession(r.Context(), hashSession(v)); err != nil {
+		h := hashSession(v)
+		if ss, err := s.store.GetSession(r.Context(), h); err == nil {
+			redirect = s.samlLogoutURL(w, r, ss)
+		}
+		if err := s.store.DeleteSession(r.Context(), h); err != nil {
 			s.log.Error("deleting an admin session failed", "err", err)
 		}
 	}
 	setCookie(w, r, sessionCookie, "", -1)
+	if redirect != "" {
+		writeJSON(w, http.StatusOK, map[string]string{"redirect": redirect})
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }

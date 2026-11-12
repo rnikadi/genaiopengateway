@@ -27,6 +27,8 @@ func subcommand(args []string, stdout, stderr io.Writer) (bool, int) {
 		err = runBackup(args[1:], stdout, stderr)
 	case "restore":
 		err = runRestore(args[1:], stdout)
+	case "saml-keygen":
+		err = runSAMLKeygen(args[1:], stdout, stderr)
 	default:
 		return false, 0
 	}

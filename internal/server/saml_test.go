@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +30,27 @@ type fakeSAMLIdP struct {
 	srv     *httptest.Server
 	gateway http.Handler
 	user    *saml.Session
+	// noEncrypt hides the gateway's encryption key from the identity
+	// provider, so that it sends assertions in the clear.
+	noEncrypt bool
+	// participants and loggedOut are the identity provider's view of
+	// single logout.
+	participants []saml.SessionParticipant
+	loggedOut    int
+}
+
+func (f *fakeSAMLIdP) InvalidateSession(http.ResponseWriter, *http.Request, *saml.IdpLogoutRequest) error {
+	f.loggedOut++
+	return nil
+}
+
+func (f *fakeSAMLIdP) AddSessionParticipant(_ *http.Request, _ *saml.Session, p saml.SessionParticipant) error {
+	f.participants = append(f.participants[:0], p)
+	return nil
+}
+
+func (f *fakeSAMLIdP) SessionParticipants(*http.Request, func(*saml.Session) bool) ([]saml.SessionParticipant, error) {
+	return f.participants, nil
 }
 
 func (f *fakeSAMLIdP) GetSession(http.ResponseWriter, *http.Request, *saml.IdpAuthnRequest) *saml.Session {
@@ -47,6 +69,12 @@ func (f *fakeSAMLIdP) GetServiceProvider(_ *http.Request, _ string) (*saml.Entit
 	md, err := samlsp.ParseMetadata(rec.Body.Bytes())
 	if err != nil {
 		log.Printf("metadata: %v\n%s", err, rec.Body)
+	}
+	if f.noEncrypt && md != nil {
+		for i := range md.SPSSODescriptors {
+			d := &md.SPSSODescriptors[i]
+			d.KeyDescriptors = slices.DeleteFunc(d.KeyDescriptors, func(k saml.KeyDescriptor) bool { return k.Use == "encryption" })
+		}
 	}
 	return md, err
 }

@@ -244,7 +244,12 @@ function App() {
   }, []);
   const signOut = async () => {
     try {
-      await api('POST', 'auth/logout');
+      // With SAML single logout the identity provider ends its session too.
+      const out = await api('POST', 'auth/logout');
+      if (out?.redirect) {
+        location.assign(out.redirect);
+        return;
+      }
     } finally {
       setState({ signedOut: true });
     }

@@ -301,7 +301,8 @@ func (s *Server) settings(w http.ResponseWriter, r *http.Request) error {
 		sso["oidc"] = map[string]any{"issuer": o.Issuer, "client_id": o.ClientID, "redirect_url": o.RedirectURL, "groups_claim": o.GroupsClaim, "scopes": o.Scopes}
 	}
 	if m := cfg.SSO.SAML; m != nil {
-		sso["saml"] = map[string]any{"idp_metadata_url": m.IDPMetadataURL, "acs_url": m.ACSURL, "entity_id": m.EntityID, "groups_attribute": m.GroupsAttribute}
+		sso["saml"] = map[string]any{"idp_metadata_url": m.IDPMetadataURL, "acs_url": m.ACSURL, "entity_id": m.EntityID, "groups_attribute": m.GroupsAttribute,
+			"sp_key_pair": m.SPCertificate != "", "require_encrypted_assertions": m.RequireEncryptedAssertions}
 	}
 	out["sso"] = sso
 	mcp := map[string]any{"public_url": cfg.MCP.PublicURL, "refresh_interval": duration(cfg.MCP.RefreshInterval)}

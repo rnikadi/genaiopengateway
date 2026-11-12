@@ -35,6 +35,19 @@ type Session struct {
 type SessionClaims struct {
 	Email  string   `json:"email,omitempty"`
 	Groups []string `json:"groups,omitempty"`
+	// SAML is the identity provider's session, which single logout
+	// names.
+	SAML *SAMLSession `json:"saml,omitempty"`
+}
+
+// SAMLSession is how a SAML identity provider knows a session: the
+// NameID as it was sent, and the session index.
+type SAMLSession struct {
+	NameID          string `json:"name_id"`
+	Format          string `json:"format,omitempty"`
+	NameQualifier   string `json:"name_qualifier,omitempty"`
+	SPNameQualifier string `json:"sp_name_qualifier,omitempty"`
+	SessionIndex    string `json:"session_index,omitempty"`
 }
 
 // CreateSession stores a new session.

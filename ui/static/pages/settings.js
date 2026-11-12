@@ -90,6 +90,9 @@ const sections = [
       { path: 'sso.saml.email_attribute', label: 'Email attribute', type: 'text', hint: 'Empty: email, mail or the NameID.' },
       { path: 'sso.saml.name_attribute', label: 'Name attribute', type: 'text', hint: 'Empty: displayName or name.' },
       { path: 'sso.saml.groups_attribute', label: 'Groups attribute', type: 'text' },
+      { path: 'sso.saml.sp_certificate', label: "Gateway's certificate", type: 'textarea', hint: 'PEM. With the private key, the gateway signs its requests, takes encrypted assertions and supports single logout. Make a pair with: genaiopengateway saml-keygen.' },
+      { path: 'sso.saml.sp_private_key', label: "Gateway's private key", type: 'secret', hint: 'PEM; pasting it on one line is fine.' },
+      { path: 'sso.saml.require_encrypted_assertions', label: 'Assertions', type: 'bool', on: 'Must be encrypted', off: 'Encrypted or signed in the clear', hint: 'Refuse assertions the identity provider did not encrypt to the gateway.' },
     ],
   },
   {

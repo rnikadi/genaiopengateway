@@ -130,6 +130,8 @@ Every route the gateway serves, generated from the handlers in `internal/server`
 | `POST` | `/ui/auth/saml/acs` | `auth(s.samlACS)` | samlACS takes the identity provider's signed response, resolves roles and starts a session. |
 | `GET` | `/ui/auth/saml/login` | `auth(s.samlLogin)` | samlLogin sends the browser to the SAML identity provider with an AuthnRequest. |
 | `GET` | `/ui/auth/saml/metadata` | `auth(s.samlMetadata)` | samlMetadata serves the gateway's SAML service provider metadata for the identity provider. |
+| `GET` | `/ui/auth/saml/slo` | `auth(s.samlSLO)` | samlSLO is the gateway's single logout service: it takes the identity provider's LogoutRequests and its LogoutResponses to the gateway's own. |
+| `POST` | `/ui/auth/saml/slo` | `auth(s.samlSLO)` | samlSLO is the gateway's single logout service: it takes the identity provider's LogoutRequests and its LogoutResponses to the gateway's own. |
 | `POST` | `/ui/auth/token` | `auth(s.tokenLogin)` | tokenLogin signs in with the admin token when OIDC is not configured. |
 
 ## Discovery and operations

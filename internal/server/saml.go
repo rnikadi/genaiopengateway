@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -15,9 +16,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/beevik/etree"
 	saml2 "github.com/russellhaering/gosaml2"
 	samltypes "github.com/russellhaering/gosaml2/types"
 	dsig "github.com/russellhaering/goxmldsig"
+	dsigtypes "github.com/russellhaering/goxmldsig/types"
 
 	"github.com/rnikadi/genaiopengateway/internal/config"
 	"github.com/rnikadi/genaiopengateway/internal/store"
@@ -28,6 +31,10 @@ import (
 // provider with an AuthnRequest over the redirect binding and takes the
 // signed response on its assertion consumer service over the POST
 // binding. Roles and sessions then work as with OIDC.
+//
+// With a key pair of its own (sp_certificate and sp_private_key) the
+// gateway also signs its AuthnRequests, decrypts encrypted assertions
+// and takes part in single logout (saml_logout.go).
 
 const samlCookie = "gog_saml"
 
@@ -36,6 +43,17 @@ const samlCookie = "gog_saml"
 type samlProvider struct {
 	cfg config.SAML
 	sp  *saml2.SAMLServiceProvider
+	// key is the gateway's own key pair, or nil.
+	key *tls.Certificate
+	// idpCerts verify the identity provider's redirect-binding signatures.
+	idpCerts []*x509.Certificate
+}
+
+// singleLogout reports whether sign-out is passed on to the identity
+// provider: that needs the gateway's key, to sign the request, and an
+// identity provider that takes logout requests over the redirect binding.
+func (p *samlProvider) singleLogout() bool {
+	return p.key != nil && p.sp.IdentityProviderSLOURL != ""
 }
 
 // samlEntities is metadata that lists several entities.
@@ -133,6 +151,25 @@ func (s *Server) samlSP(ctx context.Context, cfg *config.SAML) (*samlProvider, e
 		AllowMissingAttributes: true,
 		Clock:                  dsig.NewRealClock(),
 	}
+	p.idpCerts = certs.Roots
+	pair, err := cfg.SPKeyPair()
+	if err != nil {
+		return nil, err
+	}
+	if pair != nil {
+		p.key = pair
+		// The key decrypts assertions and signs requests.
+		p.sp.SPKeyStore = dsig.TLSCertKeyStore(*pair)
+		p.sp.SignAuthnRequests = true
+		p.sp.SignAuthnRequestsAlgorithm = dsig.RSASHA256SignatureMethod
+		p.sp.ServiceProviderSLOURL = samlSLOURL(cfg)
+		for _, slo := range md.IDPSSODescriptor.SingleLogoutServices {
+			if slo.Binding == saml2.BindingHttpRedirect {
+				p.sp.IdentityProviderSLOURL = slo.Location
+				break
+			}
+		}
+	}
 	s.saml = p
 	return p, nil
 }
@@ -179,7 +216,6 @@ func (s *Server) samlMetadata(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "The identity provider's metadata cannot be read.", http.StatusBadGateway)
 		return
 	}
-	// The gateway signs and decrypts nothing, so it lists no keys.
 	md := &samltypes.EntityDescriptor{
 		ValidUntil: time.Now().UTC().Add(7 * 24 * time.Hour),
 		EntityID:   p.sp.ServiceProviderIssuer,
@@ -191,6 +227,26 @@ func (s *Server) samlMetadata(w http.ResponseWriter, r *http.Request) {
 				Binding: saml2.BindingHttpPost, Location: p.sp.AssertionConsumerServiceURL, Index: 1,
 			}},
 		},
+	}
+	// Without a key pair the gateway signs and decrypts nothing, so it
+	// lists no keys and no logout service.
+	if p.key != nil {
+		cert := []dsigtypes.X509Certificate{{Data: base64.StdEncoding.EncodeToString(p.key.Certificate[0])}}
+		d := md.SPSSODescriptor
+		d.AuthnRequestsSigned = true
+		d.KeyDescriptors = []samltypes.KeyDescriptor{
+			{Use: "signing", KeyInfo: dsigtypes.KeyInfo{X509Data: dsigtypes.X509Data{X509Certificates: cert}}},
+			{Use: "encryption", KeyInfo: dsigtypes.KeyInfo{X509Data: dsigtypes.X509Data{X509Certificates: cert}},
+				// AES-GCM first: CBC has no integrity protection.
+				EncryptionMethods: []samltypes.EncryptionMethod{
+					{Algorithm: samltypes.MethodAES256GCM}, {Algorithm: samltypes.MethodAES128GCM},
+					{Algorithm: samltypes.MethodAES256CBC}, {Algorithm: samltypes.MethodAES128CBC},
+				}},
+		}
+		d.SingleLogoutServices = []samltypes.Endpoint{
+			{Binding: saml2.BindingHttpRedirect, Location: p.sp.ServiceProviderSLOURL},
+			{Binding: saml2.BindingHttpPost, Location: p.sp.ServiceProviderSLOURL},
+		}
 	}
 	raw, err := xml.MarshalIndent(md, "", "  ")
 	if err != nil {
@@ -258,7 +314,7 @@ func (s *Server) samlACS(w http.ResponseWriter, r *http.Request) {
 		fail(http.StatusBadRequest, "The identity provider's response cannot be read.", err)
 		return
 	}
-	assertion, err := s.samlAssertion(r.Context(), p.sp, r.PostForm.Get("SAMLResponse"), f.RequestID)
+	assertion, err := s.samlAssertion(r.Context(), p, r.PostForm.Get("SAMLResponse"), f.RequestID)
 	if err != nil {
 		fail(http.StatusUnauthorized, "The identity provider's response is not valid.", err)
 		return
@@ -301,14 +357,18 @@ var samlSHA1 = []string{
 // provider's; the response must answer requestID and be addressed to
 // this gateway; the assertion must be current, for this gateway, and
 // not used before.
-func (s *Server) samlAssertion(ctx context.Context, sp *saml2.SAMLServiceProvider, encoded, requestID string) (*samltypes.Assertion, error) {
+func (s *Server) samlAssertion(ctx context.Context, p *samlProvider, encoded, requestID string) (*samltypes.Assertion, error) {
+	sp := p.sp
 	raw, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return nil, fmt.Errorf("the response is not base64: %w", err)
 	}
-	for _, alg := range samlSHA1 {
-		if bytes.Contains(raw, []byte(alg)) {
-			return nil, errors.New("the response is signed with SHA-1")
+	if samlUsesSHA1(raw) {
+		return nil, errors.New("the response is signed with SHA-1")
+	}
+	if p.cfg.RequireEncryptedAssertions {
+		if err := samlOnlyEncrypted(raw); err != nil {
+			return nil, err
 		}
 	}
 	resp, err := sp.ValidateEncodedResponse(encoded)
@@ -324,6 +384,14 @@ func (s *Server) samlAssertion(ctx context.Context, sp *saml2.SAMLServiceProvide
 	a := &resp.Assertions[0]
 	if !resp.SignatureValidated && !a.SignatureValidated {
 		return nil, errors.New("neither the response nor its assertion is signed")
+	}
+	// An encrypted assertion's signature was out of sight until now.
+	if a.Signature != nil {
+		for _, alg := range samlSHA1 {
+			if bytes.Contains(a.Signature.SignatureDocument, []byte(alg)) {
+				return nil, errors.New("the assertion is signed with SHA-1")
+			}
+		}
 	}
 	if a.Subject == nil || a.Subject.NameID == nil {
 		return nil, errors.New("the assertion has no subject")
@@ -365,6 +433,11 @@ func (s *Server) samlAssertion(ctx context.Context, sp *saml2.SAMLServiceProvide
 func samlOperator(cfg *config.SAML, a *samltypes.Assertion) *operator {
 	o := &operator{claims: &store.SessionClaims{}}
 	o.Subject = strings.TrimSpace(a.Subject.NameID.Value)
+	n := a.Subject.NameID
+	o.claims.SAML = &store.SAMLSession{NameID: n.Value, Format: n.Format, NameQualifier: n.NameQualifier, SPNameQualifier: n.SPNameQualifier}
+	if a.AuthnStatement != nil {
+		o.claims.SAML.SessionIndex = a.AuthnStatement.SessionIndex
+	}
 	email := ""
 	if cfg.EmailAttribute != "" {
 		if v := samlAttribute(a, cfg.EmailAttribute); len(v) > 0 {
@@ -416,4 +489,31 @@ func samlAttribute(a *samltypes.Assertion, name string) []string {
 		}
 	}
 	return out
+}
+
+// samlSLOURL is the gateway's single logout service, next to its ACS.
+func samlSLOURL(cfg *config.SAML) string {
+	return strings.TrimSuffix(cfg.ACSURL, "/acs") + "/slo"
+}
+
+// samlOnlyEncrypted refuses a response that carries an assertion in the
+// clear, when the settings require encryption.
+func samlOnlyEncrypted(raw []byte) error {
+	doc := etree.NewDocument()
+	if err := doc.ReadFromBytes(raw); err != nil || doc.Root() == nil {
+		return fmt.Errorf("the response is not XML: %v", err)
+	}
+	encrypted := 0
+	for _, el := range doc.Root().ChildElements() {
+		switch {
+		case el.Tag == "Assertion" && el.NamespaceURI() == saml2.SAMLAssertionNamespace:
+			return errors.New("the assertion is not encrypted, and the settings require encryption")
+		case el.Tag == "EncryptedAssertion" && el.NamespaceURI() == saml2.SAMLAssertionNamespace:
+			encrypted++
+		}
+	}
+	if encrypted == 0 {
+		return errors.New("the response has no encrypted assertion")
+	}
+	return nil
 }

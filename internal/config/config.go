@@ -4,6 +4,8 @@ package config
 
 import (
 	"context"
+	"crypto/rsa"
+	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -390,6 +392,55 @@ type SAML struct {
 	EmailAttribute  string `yaml:"email_attribute"`
 	NameAttribute   string `yaml:"name_attribute"`
 	GroupsAttribute string `yaml:"groups_attribute"`
+	// SPCertificate and SPPrivateKey are the gateway's own key pair, as
+	// PEM (gateway saml-keygen makes one). With them the gateway signs
+	// its requests, takes encrypted assertions and supports single
+	// logout.
+	SPCertificate string `yaml:"sp_certificate"`
+	SPPrivateKey  Secret `yaml:"sp_private_key"`
+	// RequireEncryptedAssertions refuses a response whose assertion is
+	// not encrypted to the gateway's key.
+	RequireEncryptedAssertions bool `yaml:"require_encrypted_assertions"`
+}
+
+// SPKeyPair returns the gateway's SAML key pair, or nil without one.
+func (m *SAML) SPKeyPair() (*tls.Certificate, error) {
+	if m.SPCertificate == "" && m.SPPrivateKey == "" {
+		return nil, nil
+	}
+	if m.SPCertificate == "" || m.SPPrivateKey == "" {
+		return nil, errors.New("set both sp_certificate and sp_private_key")
+	}
+	pair, err := tls.X509KeyPair(NormalizePEM(m.SPCertificate), NormalizePEM(m.SPPrivateKey.Value()))
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := pair.PrivateKey.(*rsa.PrivateKey); !ok {
+		return nil, errors.New("the key must be RSA, which assertion encryption needs")
+	}
+	return &pair, nil
+}
+
+var pemBlock = regexp.MustCompile(`-----BEGIN ([A-Z0-9 ]+)-----([A-Za-z0-9+/=\s]*)-----END ([A-Z0-9 ]+)-----`)
+
+// NormalizePEM rewraps PEM blocks whose line breaks were lost, as when a
+// key is pasted into a one-line field or an environment variable.
+func NormalizePEM(s string) []byte {
+	return []byte(pemBlock.ReplaceAllStringFunc(s, func(b string) string {
+		m := pemBlock.FindStringSubmatch(b)
+		body := strings.Join(strings.Fields(m[2]), "")
+		var out strings.Builder
+		out.WriteString("-----BEGIN " + m[1] + "-----\n")
+		for len(body) > 64 {
+			out.WriteString(body[:64] + "\n")
+			body = body[64:]
+		}
+		if body != "" {
+			out.WriteString(body + "\n")
+		}
+		out.WriteString("-----END " + m[3] + "-----\n")
+		return out.String()
+	}))
 }
 
 // SCIM turns on the SCIM 2.0 endpoints under /scim/v2 when Token is set.
@@ -1349,6 +1400,12 @@ func (c *Config) validateSSO(add func(string, ...any)) {
 		}
 		if m.GroupsAttribute == "" {
 			m.GroupsAttribute = "groups"
+		}
+		pair, err := m.SPKeyPair()
+		if err != nil {
+			add("sso.saml.sp_certificate and sp_private_key: %v", err)
+		} else if pair == nil && m.RequireEncryptedAssertions {
+			add("sso.saml.require_encrypted_assertions needs sp_certificate and sp_private_key, which the identity provider encrypts to")
 		}
 		if len(s.Roles) == 0 {
 			add("sso.roles is required with sso.saml: without roles nobody can sign in")
