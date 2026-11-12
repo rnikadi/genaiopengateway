@@ -232,17 +232,20 @@ await step('owner sees everything the gateway is configured with', async () => {
   assert.ok(await page.locator('td:has-text("Anthropic")').count(), 'provider types are shown');
   await page.click('nav >> text=Models');
   // chat-default is on the Providers page too, so wait for what only Models shows.
-  await page.waitForSelector('td strong:has-text("chat-default") + .chips .badge:has-text("Chat completions")');
+  await page.waitForSelector('td:has(strong:has-text("chat-default")) .chips .badge:has-text("Chat completions")');
   await page.click('nav >> text=Guardrails');
   await page.click('[role=tab]:has-text("Definitions")');
   await page.waitForSelector('td code:has-text("no-pii")');
   await page.click('nav >> text=Alerts');
-  await page.waitForSelector('h2:has-text("Webhooks")');
+  await page.click('[role=tab]:has-text("Webhooks")');
+  await page.waitForSelector('text=Budget alerts fire at');
   await page.click('nav >> text=Settings');
+  await page.waitForSelector('label:has-text("Identity provider")');
+  const signInPage = await page.content();
+  await page.click('.subnav >> text=Startup values');
   await page.waitForSelector('dt:has-text("Version")');
-  assert.ok(await page.locator('text=Identity provider').count(), 'sign-in settings are shown');
-  const html = await page.content();
-  for (const secret of [adminToken, 'local-dex-client-secret']) assert.ok(!html.includes(secret), 'no secret on the settings page');
+  const html = signInPage + await page.content();
+  for (const secret of [adminToken, 'local-dex-client-secret']) assert.ok(!html.includes(secret), 'no secret on the settings pages');
   await ctx.close();
 });
 
