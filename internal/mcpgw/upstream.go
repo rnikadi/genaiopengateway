@@ -34,6 +34,11 @@ type upstream struct {
 	mu      sync.Mutex
 	session *mcp.ClientSession
 	users   map[string]*userSession
+	// idle holds sessions kept for held calls, and calls maps a session
+	// to the held call that uses it (relay.go).
+	idle   []*mcp.ClientSession
+	closed bool
+	calls  sync.Map
 
 	catalog atomic.Pointer[catalog]
 	up      atomic.Bool
@@ -63,16 +68,17 @@ func (c *catalog) seal() {
 }
 
 func newUpstream(name string, cfg config.MCPServer, base http.RoundTripper, creds Credentials, maxUsers int) *upstream {
-	return &upstream{
+	u := &upstream{
 		name:     name,
 		cfg:      cfg,
-		client:   mcp.NewClient(&mcp.Implementation{Name: "genaiopengateway", Version: Version}, nil),
 		base:     base,
 		http:     &http.Client{Transport: &headerTransport{base: base, headers: cfg.Headers}},
 		creds:    creds,
 		maxUsers: max(maxUsers, 1),
 		users:    map[string]*userSession{},
 	}
+	u.client = mcp.NewClient(&mcp.Implementation{Name: "genaiopengateway", Version: Version}, u.clientOptions())
+	return u
 }
 
 // perUser reports whether calls use each user's own credentials.
@@ -101,20 +107,32 @@ func (u *upstream) connect(ctx context.Context) (*mcp.ClientSession, error) {
 	if u.session != nil {
 		return u.session, nil
 	}
-	var t mcp.Transport
-	if len(u.cfg.Command) > 0 {
-		t = &mcp.CommandTransport{Command: u.command()}
-	} else {
-		// The gateway only sends requests, so it needs no stream for
-		// server-initiated messages.
-		t = &mcp.StreamableClientTransport{Endpoint: u.cfg.URL, HTTPClient: u.http, DisableStandaloneSSE: true, MaxRetries: -1}
-	}
-	cs, err := u.client.Connect(ctx, t, nil)
+	cs, err := u.open(ctx, "")
 	if err != nil {
 		return nil, err
 	}
 	u.session = cs
 	return cs, nil
+}
+
+// open starts a session with the shared credential, or with a user's.
+func (u *upstream) open(ctx context.Context, subject string) (*mcp.ClientSession, error) {
+	var t mcp.Transport
+	switch {
+	case len(u.cfg.Command) > 0:
+		t = &mcp.CommandTransport{Command: u.command()}
+	case subject != "":
+		hc := &http.Client{Transport: &headerTransport{
+			base:    &bearerTransport{base: u.base, server: u.name, subject: subject, creds: u.creds},
+			headers: u.cfg.Headers,
+		}}
+		t = &mcp.StreamableClientTransport{Endpoint: u.cfg.URL, HTTPClient: hc, DisableStandaloneSSE: true, MaxRetries: -1}
+	default:
+		// The gateway only sends requests, so it needs no stream for
+		// messages the server sends outside a call.
+		t = &mcp.StreamableClientTransport{Endpoint: u.cfg.URL, HTTPClient: u.http, DisableStandaloneSSE: true, MaxRetries: -1}
+	}
+	return u.client.Connect(ctx, t, nil)
 }
 
 // drop forgets a broken session so the next call opens a new one.
@@ -134,6 +152,11 @@ func (u *upstream) close() {
 		_ = u.session.Close()
 		u.session = nil
 	}
+	u.closed = true
+	for _, cs := range u.idle {
+		go cs.Close()
+	}
+	u.idle = nil
 	for subject := range u.users {
 		u.closeUserLocked(subject)
 	}
@@ -145,6 +168,10 @@ func (u *upstream) close() {
 // had already closed or the upstream no longer knew it, f is retried
 // once on a new session.
 func (u *upstream) do(ctx context.Context, subject string, f func(context.Context, *mcp.ClientSession) error) error {
+	if h := callFrom(ctx).held; h != nil {
+		// A held call has its own deadline, which waits for the client.
+		return u.exclusive(ctx, subject, h, f)
+	}
 	ctx, cancel := context.WithTimeout(ctx, u.cfg.Timeout.Std())
 	defer cancel()
 	for attempt := 0; ; attempt++ {

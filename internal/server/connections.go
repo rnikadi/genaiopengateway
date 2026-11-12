@@ -430,12 +430,29 @@ func (c *connections) revoke(ctx context.Context, server string, conn *store.MCP
 
 // --- the connect flow in the browser ---
 
-// verifySubject reports whether the connect page signs the user in to
-// check their identity: SSO must be configured with the identity
-// provider that issues MCP tokens, or the subjects would not compare.
-func verifySubject(cfg *config.Config) bool {
+// Ways the gateway can tell who the browser's user is, to compare them
+// with the subject of an MCP access token.
+const (
+	viaOIDC = "oidc"
+	viaSAML = "saml"
+)
+
+// verifySubject says how the connect page signs the user in to check
+// who they are, or "" when it cannot. With OIDC that needs the gateway's
+// sign-in to use the identity provider that issues MCP tokens, or the
+// subjects would not compare. With SAML it needs the attribute that
+// carries the same value as those tokens' subject.
+func verifySubject(cfg *config.Config) string {
 	sso, mo := cfg.SSO.OIDC, cfg.MCP.OAuth
-	return sso != nil && mo != nil && strings.TrimRight(sso.Issuer, "/") == strings.TrimRight(mo.Issuer, "/")
+	switch {
+	case mo == nil:
+		return ""
+	case sso != nil && strings.TrimRight(sso.Issuer, "/") == strings.TrimRight(mo.Issuer, "/"):
+		return viaOIDC
+	case cfg.SSO.SAML != nil && cfg.SSO.SAML.MCPSubjectAttribute != "":
+		return viaSAML
+	}
+	return ""
 }
 
 // connectStart serves the link a user opens: it checks who they are
@@ -452,7 +469,11 @@ func (s *Server) connectStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := s.rt.Load().cfg
-	if verifySubject(cfg) {
+	switch verifySubject(cfg) {
+	case viaSAML:
+		s.samlStart(w, r, cfg.SSO.SAML, samlFlow{Return: "/ui/", Connect: id})
+		return
+	case viaOIDC:
 		c, err := s.oidc(r.Context(), cfg.SSO.OIDC)
 		if err != nil {
 			s.log.Error("reaching the identity provider failed", "err", err)

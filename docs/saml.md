@@ -23,7 +23,7 @@ sso:
     - {group: ai-platform, role: owner}
 ```
 
-The same fields are on the **Settings** page under **SAML sign-in**.
+The same fields are on the **Settings** page under **SAML sign-in**. `mcp_subject_attribute` is for gateways with per-user MCP servers: it lets the MCP connect flow check who a user is ([mcp-user-credentials.md](mcp-user-credentials.md#with-saml-sign-in)).
 
 The gateway is the service provider, and it publishes its metadata at `https://<gateway>/ui/auth/saml/metadata`:
 

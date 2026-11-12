@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -22,6 +23,8 @@ import (
 
 	"github.com/crewjam/saml"
 	"github.com/crewjam/saml/samlsp"
+	"github.com/rnikadi/genaiopengateway/internal/config"
+	"golang.org/x/oauth2"
 )
 
 // fakeSAMLIdP is a SAML identity provider that signs in whoever user is.
@@ -232,3 +235,140 @@ func flowFor(requestID string) string {
 }
 
 func b64(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
+
+// through starts at a gateway page that signs the user in with SAML,
+// follows the browser to the identity provider and posts its response
+// back. It returns the gateway's answer to the response.
+func (f *fakeSAMLIdP) through(t *testing.T, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	f.gateway.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+	if rec.Code != http.StatusFound || !strings.HasPrefix(rec.Header().Get("Location"), f.srv.URL+"/sso") {
+		t.Fatalf("%s = %d to %s: %s", path, rec.Code, rec.Header().Get("Location"), rec.Body)
+	}
+	var cookie *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == samlCookie {
+			cookie = c
+		}
+	}
+	idpRec := httptest.NewRecorder()
+	f.idp.ServeSSO(idpRec, httptest.NewRequest("GET", rec.Header().Get("Location"), nil))
+	m := samlFormValue.FindStringSubmatch(idpRec.Body.String())
+	if m == nil {
+		t.Fatalf("the identity provider did not answer with a form: %d %s", idpRec.Code, idpRec.Body)
+	}
+	return f.post(cookie, html.UnescapeString(m[1]))
+}
+
+// With SAML sign-in, the MCP connect flow and connections page check
+// who the user is by the attribute that carries the subject of their
+// MCP tokens (docs/mcp-user-credentials.md).
+func TestSAMLProvesMCPUser(t *testing.T) {
+	f := newFakeSAMLIdP(t)
+	up := newUserUpstream(t)
+	e := newAdminEnv(t, "")
+	var org idResp
+	e.call("POST", "/admin/v1/orgs", `{"name":"acme"}`, 201, &org)
+	parse := func(attribute string) *config.Config {
+		t.Helper()
+		cfg, err := config.Parse([]byte(`
+admin: {token: ` + adminToken + `}
+store: {driver: sqlite, dsn: unused}
+secrets: {encryption_key: "` + testEncryptionKey + `"}
+sso:
+  saml: {idp_metadata_url: "` + f.srv.URL + `/metadata", acs_url: "http://example.com/ui/auth/saml/acs"` + attribute + `}
+  roles: [{group: gateway-owners, role: owner}]
+mcp:
+  public_url: http://example.com
+  oauth: {issuer: "https://idp.example", organization: ` + org.ID + `, team_claim: groups}
+  servers:
+    gh: {url: "` + up.URL + `/mcp", user_auth: {client_id: gw-client, client_secret: gw-secret, scopes: [repo], authorization_url: "` + up.URL + `/authorize", token_url: "` + up.URL + `/token"}}
+  virtual_servers:
+    dev: {servers: [{server: gh}]}
+`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cfg
+	}
+	f.gateway = e.h
+	// Ada has no role on the gateway: proving who she is needs none.
+	f.user = &saml.Session{ID: "s1", NameID: "ada@example.com", UserEmail: "ada@example.com", CustomAttributes: []saml.Attribute{
+		{Name: "uid", Values: []saml.AttributeValue{{Type: "xs:string", Value: "ada-sub"}}},
+	}}
+	ctx := context.Background()
+
+	// Without the attribute the gateway cannot tell who a user is.
+	cfg := parse("")
+	if err := e.srv.Reload(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if rec := do(e.h, "GET", "/mcp/connections", "", ""); rec.Code != 404 || myConnectionsURL(cfg) != "" {
+		t.Fatalf("without the attribute: %d %q", rec.Code, myConnectionsURL(cfg))
+	}
+
+	cfg = parse(`, mcp_subject_attribute: uid`)
+	if err := e.srv.Reload(cfg); err != nil {
+		t.Fatal(err)
+	}
+	for _, subject := range []string{"ada-sub", "bob-sub"} {
+		up.set(func(u *userUpstream) { u.access["at-"+subject], u.refresh["rt-"+subject] = subject, subject })
+	}
+	if err := e.srv.conns.save(ctx, "gh", "bob-sub", []string{"repo"}, &oauth2.Token{AccessToken: "at-bob-sub", RefreshToken: "rt-bob-sub", Expiry: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The connections page: Ada sees her own, which are none.
+	rec := f.through(t, "/mcp/connections")
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/mcp/connections" {
+		t.Fatalf("after sign-in: %d %s %s", rec.Code, rec.Header().Get("Location"), rec.Body)
+	}
+	var me *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == myConnCookie {
+			me = c
+		}
+		if c.Name == sessionCookie && c.Value != "" {
+			t.Fatal("proving who she is started an admin session")
+		}
+	}
+	if me == nil {
+		t.Fatal("no connections cookie")
+	}
+	req := httptest.NewRequest("GET", "/mcp/connections", nil)
+	req.AddCookie(me)
+	page := httptest.NewRecorder()
+	e.h.ServeHTTP(page, req)
+	if page.Code != 200 || !strings.Contains(page.Body.String(), "ada@example.com") || !strings.Contains(page.Body.String(), "gh") || strings.Contains(page.Body.String(), "<button") {
+		t.Fatalf("Ada's page: %d %s", page.Code, page.Body)
+	}
+
+	// A connect link works for the user it was made for, and for no other.
+	link := func(subject string) string {
+		u, err := e.srv.conns.ConnectURL(ctx, "gh", subject, "dev")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimPrefix(u, "http://example.com")
+	}
+	if rec := f.through(t, link("ada-sub")); rec.Code != http.StatusFound || !strings.HasPrefix(rec.Header().Get("Location"), up.URL+"/authorize") {
+		t.Fatalf("Ada's own link: %d %s %s", rec.Code, rec.Header().Get("Location"), rec.Body)
+	}
+	if rec := f.through(t, link("bob-sub")); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "someone else") {
+		t.Fatalf("Bob's link opened by Ada: %d %s", rec.Code, rec.Body)
+	}
+
+	// An assertion without the attribute proves nothing.
+	f.user.CustomAttributes = nil
+	if rec := f.through(t, link("ada-sub")); rec.Code != http.StatusForbidden {
+		t.Fatalf("no attribute: %d %s", rec.Code, rec.Body)
+	}
+	// The NameID can be the subject.
+	if err := e.srv.Reload(parse(`, mcp_subject_attribute: NameID`)); err != nil {
+		t.Fatal(err)
+	}
+	if rec := f.through(t, link("ada@example.com")); rec.Code != http.StatusFound {
+		t.Fatalf("NameID as the subject: %d %s", rec.Code, rec.Body)
+	}
+}

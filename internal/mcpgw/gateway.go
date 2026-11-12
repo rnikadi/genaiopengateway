@@ -70,14 +70,23 @@ type Gateway struct {
 	upstreams map[string]*upstream
 	loops     map[string]context.CancelFunc
 
+	// held are the calls that wait for a client's answer (relay.go).
+	heldMu sync.Mutex
+	held   map[string]*held
+
 	servers atomic.Pointer[map[string]*mcp.Server]
-	handler http.Handler
+	// lists are the hashes of what each virtual server lists, and retired
+	// the replaced servers that clients still listen to (listen.go).
+	lists     map[string]listHashes
+	retired   map[string][]*mcp.Server
+	listeners atomic.Int64
+	handler   http.Handler
 }
 
 // New starts the gateway. Upstreams are listed in the background until
 // ctx is done.
 func New(ctx context.Context, cfg config.MCP, opts Options) *Gateway {
-	g := &Gateway{opts: opts, ctx: ctx, pins: opts.Pins, upstreams: map[string]*upstream{}, loops: map[string]context.CancelFunc{}}
+	g := &Gateway{opts: opts, ctx: ctx, pins: opts.Pins, upstreams: map[string]*upstream{}, loops: map[string]context.CancelFunc{}, held: map[string]*held{}}
 	if g.pins == nil {
 		g.pins = newMemPins()
 	}
@@ -290,8 +299,11 @@ func (g *Gateway) rebuild() {
 // and swaps them in at once.
 func (g *Gateway) rebuildLocked() {
 	next := make(map[string]*mcp.Server, len(g.cfg.VirtualServers))
+	lists := make(map[string]listHashes, len(g.cfg.VirtualServers))
 	for name, vs := range g.cfg.VirtualServers {
-		next[name] = g.buildServer(name, vs)
+		next[name], lists[name] = g.buildServer(name, vs)
 	}
+	prev := *g.servers.Load()
 	g.servers.Store(&next)
+	g.notifyListeners(prev, lists)
 }

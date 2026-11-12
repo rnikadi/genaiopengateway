@@ -434,6 +434,11 @@ type SAML struct {
 	EmailAttribute  string `yaml:"email_attribute"`
 	NameAttribute   string `yaml:"name_attribute"`
 	GroupsAttribute string `yaml:"groups_attribute"`
+	// MCPSubjectAttribute names the assertion attribute whose value is
+	// the subject of the same user's MCP access tokens, or "NameID" for
+	// the NameID. With it, the MCP connect flow and connections page
+	// check who the browser's user is (docs/mcp-user-credentials.md).
+	MCPSubjectAttribute string `yaml:"mcp_subject_attribute"`
 	// SPCertificate and SPPrivateKey are the gateway's own key pair, as
 	// PEM (gateway saml-keygen makes one). With them the gateway signs
 	// its requests, takes encrypted assertions and supports single
@@ -851,7 +856,21 @@ type MCPServer struct {
 	// UserAuth makes the gateway call this server with each user's own
 	// OAuth token (docs/mcp-user-credentials.md).
 	UserAuth *UserAuth `yaml:"user_auth"`
+	// ClientRequests names what this server may ask of the client
+	// through the gateway while it serves a call: "elicitation" (input
+	// from the user) and "sampling" (a completion from the client's
+	// model). Empty means nothing (docs/mcp.md#requests-for-input).
+	ClientRequests []string `yaml:"client_requests"`
 }
+
+// What an MCP server may ask of the client.
+const (
+	MCPElicitation = "elicitation"
+	MCPSampling    = "sampling"
+)
+
+// Relays reports whether the server may ask the client for kind.
+func (s MCPServer) Relays(kind string) bool { return slices.Contains(s.ClientRequests, kind) }
 
 // UserAuth registers the gateway as an OAuth client of an upstream MCP
 // server. Endpoints left empty are discovered from the server's metadata.
@@ -1595,6 +1614,9 @@ func (c *Config) validateMCP(add func(string, ...any)) {
 			if s.Command[0] == "" {
 				add("mcp server %q: command must name a program", name)
 			}
+			if len(s.ClientRequests) > 0 {
+				add("mcp server %q: client_requests is for url servers", name)
+			}
 			if len(s.Headers) > 0 || s.UserAuth != nil {
 				add("mcp server %q: headers and user_auth are for url servers; a command server takes env", name)
 			}
@@ -1609,6 +1631,11 @@ func (c *Config) validateMCP(add func(string, ...any)) {
 		}
 		if s.PinTools == "" {
 			s.PinTools = PinOn
+		}
+		for _, k := range s.ClientRequests {
+			if k != MCPElicitation && k != MCPSampling {
+				add("mcp server %q: client_requests takes elicitation and sampling, not %q", name, k)
+			}
 		}
 		if s.PinTools == PinStrict && c.Store.Driver == "" {
 			add("mcp server %q: pin_tools: strict needs a store, where approvals are kept", name)

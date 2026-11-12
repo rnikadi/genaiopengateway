@@ -185,6 +185,12 @@ func (s *Server) samlReplay(ctx context.Context, assertionID string, expiresAt t
 type samlFlow struct {
 	RequestID string `json:"i"`
 	Return    string `json:"r"`
+	// Connect and Mine mark a sign-in that only proves who the user is,
+	// for the MCP connect flow and connections page (see authFlow). The
+	// cookie is not signed and need not be: whatever it says, the
+	// assertion's subject must equal the connect request's.
+	Connect string `json:"c,omitempty"`
+	Mine    bool   `json:"m,omitempty"`
 }
 
 // samlCookieOptions lets the identity provider's cross-site POST carry
@@ -264,6 +270,12 @@ func (s *Server) samlLogin(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	s.samlStart(w, r, cfg, samlFlow{Return: returnPath(r.URL.Query().Get("return"))})
+}
+
+// samlStart sends the browser to the identity provider and remembers f
+// for the response.
+func (s *Server) samlStart(w http.ResponseWriter, r *http.Request, cfg *config.SAML, f samlFlow) {
 	p, err := s.samlSP(r.Context(), cfg)
 	if err != nil {
 		s.log.Error("reading the SAML identity provider failed", "err", err)
@@ -280,7 +292,8 @@ func (s *Server) samlLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	raw, _ := json.Marshal(samlFlow{RequestID: doc.Root().SelectAttrValue("ID", ""), Return: returnPath(r.URL.Query().Get("return"))})
+	f.RequestID = doc.Root().SelectAttrValue("ID", "")
+	raw, _ := json.Marshal(f)
 	setSAMLCookie(w, r, base64.RawURLEncoding.EncodeToString(raw), authFlowTTL)
 	http.Redirect(w, r, to, http.StatusFound)
 }
@@ -320,6 +333,20 @@ func (s *Server) samlACS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	o := samlOperator(mc, assertion)
+	if f.Connect != "" || f.Mine {
+		// The user only proves who they are: no role and no session.
+		subject := samlMCPSubject(mc, assertion)
+		if verifySubject(cfg) != viaSAML || subject == "" {
+			fail(http.StatusForbidden, "The identity provider's response does not say who you are to MCP servers. Ask an administrator to check the MCP subject attribute.", nil)
+			return
+		}
+		if f.Mine {
+			s.mySignedIn(w, r, cfg, subject, o.claims.Email)
+		} else {
+			s.connectSignedIn(w, r, f.Connect, subject)
+		}
+		return
+	}
 	o.claims.Groups = samlAttribute(assertion, mc.GroupsAttribute)
 	groups, active, err := s.directoryGroups(r.Context(), o.claims)
 	if err != nil {
@@ -473,6 +500,19 @@ func samlOperator(cfg *config.SAML, a *samltypes.Assertion) *operator {
 
 // samlAttribute returns an attribute's values, matched by name or
 // friendly name.
+// samlMCPSubject returns the value that equals the subject of the
+// user's MCP access tokens, or "" when the assertion does not carry
+// exactly one.
+func samlMCPSubject(cfg *config.SAML, a *samltypes.Assertion) string {
+	if strings.EqualFold(cfg.MCPSubjectAttribute, "NameID") {
+		return strings.TrimSpace(a.Subject.NameID.Value)
+	}
+	if v := samlAttribute(a, cfg.MCPSubjectAttribute); len(v) == 1 {
+		return v[0]
+	}
+	return ""
+}
+
 func samlAttribute(a *samltypes.Assertion, name string) []string {
 	if a.AttributeStatement == nil {
 		return nil

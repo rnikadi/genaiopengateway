@@ -507,6 +507,8 @@ function MCPServerForm({ spec, onChange }) {
       <//>
     </div>
     <${Field} label="Headers" setting="mcp.servers.headers" hint="Sent to the server, such as an API key. Values are encrypted."><${Headers} ...${p} path="headers" secret /><//>
+    <${Field} label="May ask the client for" setting="mcp.servers.client_requests" hint="What the server may request while it serves a call. elicitation: input from the user, shown by their MCP client. sampling: a completion from the client's model. None checked: such requests are refused. Check these only for servers you trust to ask people questions.">
+      <${Checks} ...${p} path="client_requests" options=${['elicitation', 'sampling']} /><//>
     <label class="check"><input type="checkbox" checked=${userAuth} onChange=${() => onChange(put(spec, 'user_auth', userAuth ? undefined : { client_id: '' }))} /> Call the server with each user's own sign-in (OAuth)</label>
     ${userAuth && html`
       <div class="row">

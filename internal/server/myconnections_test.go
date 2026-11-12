@@ -80,7 +80,7 @@ mcp:
 		e.h.ServeHTTP(rec, r)
 		return rec
 	}
-	good := sealMyConn(cfg.SSO.OIDC, me)
+	good := sealMyConn(cfg, me)
 
 	// The page lists only the signed-in user's connections, never tokens.
 	rec := req("GET", "/mcp/connections", good, "", nil)
@@ -98,7 +98,7 @@ mcp:
 	expired := *me
 	expired.Expires = time.Now().Add(-time.Minute).Unix()
 	flow := sealFlow(cfg.SSO.OIDC, &authFlow{State: "alice-sub", Expires: time.Now().Add(time.Minute).Unix()})
-	for name, cookie := range map[string]string{"forged": good[:len(good)-2] + "xx", "expired": sealMyConn(cfg.SSO.OIDC, &expired), "flow cookie": flow} {
+	for name, cookie := range map[string]string{"forged": good[:len(good)-2] + "xx", "expired": sealMyConn(cfg, &expired), "flow cookie": flow} {
 		if rec := req("POST", "/mcp/connections/gh/disconnect", cookie, "http://gw.example", url.Values{"csrf": {"tok"}}); rec.Code != 401 {
 			t.Fatalf("%s cookie: %d", name, rec.Code)
 		}
