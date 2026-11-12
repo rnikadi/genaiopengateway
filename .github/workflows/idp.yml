@@ -58,7 +58,7 @@ jobs:
       - name: Keycloak log
         if: failure()
         run: docker logs gog-keycloak 2>&1 | tail -200
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: keycloak-${{ matrix.protocol }}
@@ -115,7 +115,7 @@ jobs:
           set -a; . "$WORK.env"; set +a
           rm "$WORK.env"
           test/idp/run.sh ${{ matrix.idp }} ${{ matrix.protocol }}
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: ${{ matrix.idp }}-${{ matrix.protocol }}
