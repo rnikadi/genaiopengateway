@@ -17,7 +17,7 @@ a2a:
       description: Plans team offsites                     # replaces the card's description
 ```
 
-Agents can also be added and changed in the admin UI under **Configuration → A2A agents**, or through the [config objects API](api.md) as kind `a2a_agents`. Header values are encrypted like other secrets.
+Agents can also be added and changed in the admin UI on the **Agents** page, or through the [config objects API](api.md) as kind `a2a_agents`. Header values are encrypted like other secrets.
 
 Agent names use lowercase letters, digits, `-` and `_`.
 

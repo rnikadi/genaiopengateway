@@ -8,6 +8,7 @@ A stream copies records to another system as the gateway writes them. You can se
 | `audit` | One per entry of the audit log: changes through the admin API or UI, tool approvals, and the other actions the log records |
 | `mcp_calls` | One per MCP tool call |
 | `guardrail_events` | One per guardrail match |
+| `denials` | One per model request refused by a policy, limit, Cedar rule, residency or guardrail ([why-denied.md](why-denied.md)) |
 
 ```yaml
 streams:
@@ -25,7 +26,7 @@ streams:
     flush_interval: 10s                        # default 5s
 ```
 
-Owners can also add streams in the admin UI, on the **Streams** tab of the Configuration page. They can also use the admin API at `PUT /admin/v1/config/streams/{name}`. The URL, secret and header values are encrypted in the database. Every replica applies a change within `store.refresh_interval`.
+Owners can also add streams in the admin UI, under **Settings → Notifications**. They can also use the admin API at `PUT /admin/v1/config/streams/{name}`. The URL, secret and header values are encrypted in the database. Every replica applies a change within `store.refresh_interval`.
 
 ## Format
 
@@ -52,4 +53,4 @@ A record goes to streams only after it is written to the database. The database 
 - When a replica shuts down, it sends what its streams hold for as long as the shutdown grace period allows.
 - Delivery is at least once in practice: a receiver that times out after storing a batch gets it again on the retry. Deduplicate on `data.id`, or on `data.request_id` for usage.
 
-`gog_stream_records_total{stream, result}` counts records `delivered` and `dropped`. Alert on dropped records if the receiver needs everything. To fill a gap, export the records from the database: the `usage`, `audit_log`, `mcp_calls` and `guardrail_events` tables.
+`gog_stream_records_total{stream, result}` counts records `delivered` and `dropped`. Alert on dropped records if the receiver needs everything. To fill a gap, export the records from the database: the `usage`, `audit_log`, `mcp_calls`, `guardrail_events` and `denials` tables.

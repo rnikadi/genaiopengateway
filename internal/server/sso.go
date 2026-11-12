@@ -73,6 +73,9 @@ type authFlow struct {
 	// Connect, when set, is the id of an MCP connect request whose user
 	// signs in only to prove who they are (docs/mcp-user-credentials.md).
 	Connect string `json:"c,omitempty"`
+	// Mine marks a sign-in for the user's own MCP connections page,
+	// which also only proves who they are.
+	Mine bool `json:"m,omitempty"`
 }
 
 // flowKey signs the flow cookie. It is derived from the client secret, so
@@ -213,6 +216,10 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		fail(http.StatusUnauthorized, "The ID token's claims cannot be read.", err)
 		return
 	}
+	if f.Mine {
+		s.mySignedIn(w, r, oc, idt.Subject, verifiedEmail(claims))
+		return
+	}
 	if _, ok := claims[oc.GroupsClaim]; !ok {
 		// Some providers put groups only in UserInfo.
 		if ui, err := c.provider.UserInfo(ctx, oauth2.StaticTokenSource(tok)); err == nil {
@@ -304,11 +311,22 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 		writeAdminError(w, http.StatusForbidden, "forbidden", "cross-origin request refused")
 		return
 	}
+	// With SAML single logout, the identity provider ends its session
+	// too: the UI follows the redirect this returns.
+	var redirect string
 	if v := readCookie(r, sessionCookie); v != "" {
-		if err := s.store.DeleteSession(r.Context(), hashSession(v)); err != nil {
+		h := hashSession(v)
+		if ss, err := s.store.GetSession(r.Context(), h); err == nil {
+			redirect = s.samlLogoutURL(w, r, ss)
+		}
+		if err := s.store.DeleteSession(r.Context(), h); err != nil {
 			s.log.Error("deleting an admin session failed", "err", err)
 		}
 	}
 	setCookie(w, r, sessionCookie, "", -1)
+	if redirect != "" {
+		writeJSON(w, http.StatusOK, map[string]string{"redirect": redirect})
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }

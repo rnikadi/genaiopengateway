@@ -127,6 +127,12 @@ func New(cfg map[string]config.Guardrail, client *http.Client, version string, c
 				return nil, fmt.Errorf("guardrail %q: %w", name, err)
 			}
 			c = &patterns{r: r}
+		case config.GuardrailInjection:
+			ic, err := newInjection(g)
+			if err != nil {
+				return nil, fmt.Errorf("guardrail %q: %w", name, err)
+			}
+			c = ic
 		case config.GuardrailModel:
 			re, err := regexp.Compile(g.UnsafeIf)
 			if err != nil {

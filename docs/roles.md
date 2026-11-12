@@ -15,6 +15,7 @@ There are three built-in roles, and owners can define more as custom roles.
 | `owner` | Every permission, in every organization, and the gateway itself: organizations and their policies, configuration, settings, MCP tool approvals, alerts, sessions. Always gateway-wide. |
 | `admin` | Every permission below. Needs an `org`. |
 | `viewer` | `org.read`, `teams.read`, `keys.read`, `usage.read`, `audit.read`, `alerts.read`. |
+| `developer` | `keys.self`, `playground.use`. Needs an `org`. Sees only **My keys and access** and the playground ([developer-portal.md](developer-portal.md)). |
 
 The admin token acts as `owner`.
 
@@ -35,6 +36,7 @@ The admin token acts as `owner`.
 | `batches.write` | Cancelling batches |
 | `cache.clear` | Clearing cached answers ([cache.md](cache.md)) |
 | `playground.use` | Calling models from the playground as a team ([playground.md](playground.md)) |
+| `keys.self` | Creating, rotating and revoking one's own keys in the developer portal, within `sso.portal` limits ([developer-portal.md](developer-portal.md)) |
 
 Anything not tied to an organization, such as the configuration, settings and the audit log across all organizations, needs `owner`, or for reading, a gateway-wide grant with the permission.
 
@@ -54,7 +56,7 @@ sso:
     - {group: search-leads, role: admin, org: acme, team: search}       # one team
 ```
 
-A custom role's name is lowercase letters, digits, `-` and `_`, and cannot be `owner`, `admin` or `viewer`. Startup, and saving in the UI, fails on an unknown permission or a mapping to a role that does not exist. Owners edit custom roles and mappings on the **Settings** page, under **Single sign-on**, and changes apply to signed-in users at once.
+A custom role's name is lowercase letters, digits, `-` and `_`, and cannot be `owner`, `admin`, `viewer` or `developer`. Startup, and saving in the UI, fails on an unknown permission or a mapping to a role that does not exist. Owners edit custom roles and mappings on the **Settings** page, under **Single sign-on**, and changes apply to signed-in users at once.
 
 ## Team grants
 

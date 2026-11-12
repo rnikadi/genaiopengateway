@@ -70,6 +70,8 @@ type Server struct {
 	bodies *usage.Writer[capturedBody]
 	// guardEvents is nil without a store.
 	guardEvents *usage.Writer[store.GuardrailEvent]
+	// denials records refused requests (docs/why-denied.md); nil without a store.
+	denials *usage.Writer[store.Denial]
 
 	limiter *limits.Limiter
 	valkey  *limits.Valkey // nil unless the valkey driver is used
@@ -142,6 +144,7 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error)
 		s.calls = usage.NewWriter(streamed(s, config.RecordMCPCalls, st.InsertMCPCalls), log, "mcp_calls")
 		s.bodies = usage.NewWriterSize(s.writeBodies, log, "request_bodies", bodyQueue)
 		s.guardEvents = usage.NewWriter(streamed(s, config.RecordGuardrailEvents, st.InsertGuardrailEvents), log, "guardrail_events")
+		s.denials = usage.NewWriter(streamed(s, config.RecordDenials, st.InsertDenials), log, "denials")
 		st.OnAudit(func(e store.AuditEntry) { stream.Publish(s.streams, config.RecordAudit, []store.AuditEntry{e}) })
 		s.source = st
 	} else if cfg.ControlPlane.URL != "" {
@@ -261,6 +264,7 @@ func (s *Server) Start(ctx context.Context) {
 	go s.sessionPruneLoop(ctx)
 	go s.notifier.Run(ctx)
 	go s.keyExpiryLoop(ctx)
+	go s.forecastLoop(ctx)
 	go s.bodyPruneLoop(ctx)
 	go s.connectionsLoop(ctx)
 	go s.batchPollLoop(ctx)
@@ -276,6 +280,7 @@ func (s *Server) Close(ctx context.Context) {
 			s.bodies.Close(ctx)
 		}
 		s.guardEvents.Close(ctx)
+		s.denials.Close(ctx)
 	}
 	s.stop()
 	// Streams flush what they hold once stopped; wait for that as long
@@ -384,7 +389,7 @@ func (s *Server) usageWriteErrors() float64 {
 	if s.usage == nil {
 		return 0
 	}
-	return float64(s.usage.Dropped() + s.calls.Dropped() + s.guardEvents.Dropped())
+	return float64(s.usage.Dropped() + s.calls.Dropped() + s.guardEvents.Dropped() + s.denials.Dropped())
 }
 
 // snapshotAge is zero without a store or before the first load, which
@@ -407,8 +412,24 @@ func (s *Server) pruneLoop(ctx context.Context) {
 	t := time.NewTicker(time.Hour)
 	defer t.Stop()
 	for {
-		if retention := s.rt.Load().cfg.Store.UsageRetention.Std(); retention > 0 {
-			s.prune(ctx, time.Now().Add(-retention))
+		// Days are summed before their rows are pruned, and rows are
+		// pruned by whole UTC days, so every day is either all there or
+		// in the rollups (docs/analytics.md).
+		now := time.Now()
+		cfg := s.rt.Load().cfg.Store
+		if err := s.rollupUsage(ctx, now); err != nil {
+			s.log.Error("rolling up usage failed; pruning is skipped", "err", err)
+		} else {
+			if retention := cfg.UsageRetention.Std(); retention > 0 {
+				s.prune(ctx, store.DayStart(now.Add(-retention)))
+			}
+			if retention := cfg.RollupRetention.Std(); retention > 0 {
+				if n, err := s.store.PruneRollups(ctx, now.Add(-retention)); err != nil {
+					s.log.Error("pruning usage rollups failed", "err", err)
+				} else if n > 0 {
+					s.log.Info("pruned usage rollups", "rows", n)
+				}
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -416,6 +437,37 @@ func (s *Server) pruneLoop(ctx context.Context) {
 		case <-t.C:
 		}
 	}
+}
+
+// rawFrom is the start of the first UTC day whose usage rows are all
+// kept, or zero when usage is kept forever.
+func (s *Server) rawFrom(now time.Time) time.Time {
+	if retention := s.rt.Load().cfg.Store.UsageRetention.Std(); retention > 0 {
+		return store.DayStart(now.Add(-retention))
+	}
+	return time.Time{}
+}
+
+// rollupUsage rebuilds the daily rollups from the last day that has
+// them, or from the first day of usage, to today. Usage rows arrive up
+// to a day late from data planes, so the last day is always redone.
+func (s *Server) rollupUsage(ctx context.Context, now time.Time) error {
+	last, first, err := s.store.RollupBounds(ctx)
+	if err != nil {
+		return err
+	}
+	from := first
+	if !last.IsZero() {
+		from = last.AddDate(0, 0, -1)
+	}
+	if from.IsZero() {
+		return nil // no usage yet
+	}
+	// Days before the first usage row are pruned; their rollups stay.
+	if from.Before(first) {
+		from = first
+	}
+	return s.store.RollupUsage(ctx, from, store.DayStart(now).AddDate(0, 0, 1))
 }
 
 // prune deletes usage, MCP call and guardrail event records from before.
@@ -437,6 +489,12 @@ func (s *Server) prune(ctx context.Context, before time.Time) {
 		s.log.Error("pruning guardrail events failed", "err", err)
 	} else if n > 0 {
 		s.log.Info("pruned guardrail events", "rows", n)
+	}
+	n, err = s.store.PruneDenials(ctx, before)
+	if err != nil {
+		s.log.Error("pruning denials failed", "err", err)
+	} else if n > 0 {
+		s.log.Info("pruned denials", "rows", n)
 	}
 }
 
@@ -494,10 +552,13 @@ func (s *Server) Handler() http.Handler {
 	if s.store != nil {
 		mux.HandleFunc("GET /mcp/connect/callback", s.connectCallback)
 		mux.HandleFunc("GET /mcp/connect/{id}", s.connectStart)
+		mux.HandleFunc("GET "+myConnectionsPath, s.myConnections)
+		mux.HandleFunc("POST "+myConnectionsPath+"/{server}/disconnect", s.disconnectMine)
 		s.scimRoutes(mux)
 	}
 	mux.HandleFunc("/.well-known/oauth-protected-resource/mcp/{name}", s.mcpResourceMetadata)
 	s.adminRoutes(mux)
+	s.portalRoutes(mux)
 	s.uiRoutes(mux)
 	return s.recoverer(withRequestID(withSecurityHeaders(mux)))
 }

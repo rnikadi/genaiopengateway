@@ -1,4 +1,4 @@
-import { html, useState, useEffect, api, qs, useSession, PageHeader, OrgPicker, defaultOrg, Table, ErrorBox, JSONView, when } from '../lib.js';
+import { html, useState, useEffect, api, qs, useSession, PageHeader, OrgPicker, defaultOrg, Table, ErrorBox, JSONView, Ago } from '../lib.js';
 
 // Audit lists who changed what, newest first.
 export function Audit() {
@@ -36,7 +36,7 @@ export function Audit() {
       rows=${list.items}
       empty="Nothing has been changed yet."
       columns=${[
-        { label: 'Time', render: (e) => when(e.ts) },
+        { label: 'Time', render: (e) => html`<${Ago} t=${e.ts} />` },
         { label: 'Who', render: (e) => e.actor },
         { label: 'Action', render: (e) => html`<code>${e.action}</code>` },
         { label: 'Resource', render: resource },

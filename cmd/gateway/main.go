@@ -30,10 +30,21 @@ const shutdownGrace = 50 * time.Second
 
 func main() {
 	config.RegisterUnwrapper(kms.Unwrap)
+	if ok, code := subcommand(os.Args[1:], os.Stdout, os.Stderr); ok {
+		os.Exit(code)
+	}
 	path := flag.String("config", "config.yaml", "path to the config file; without one the gateway starts with zero config")
 	dataDir := flag.String("data", envOr("GOG_DATA_DIR", config.DefaultDataDir), "data directory for a start without a config file")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+	// The image's entrypoint passes -config before any arguments, so a
+	// subcommand can also follow the global flags, which it inherits.
+	if flag.NArg() > 0 {
+		args := append([]string{flag.Arg(0), "-config", *path, "-data", *dataDir}, flag.Args()[1:]...)
+		if ok, code := subcommand(args, os.Stdout, os.Stderr); ok {
+			os.Exit(code)
+		}
+	}
 	if *showVersion {
 		fmt.Println(version)
 		return

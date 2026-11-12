@@ -232,3 +232,45 @@ func tighter(a, b Window) Window {
 // RetryAfterSeconds rounds a duration up to whole seconds for the
 // retry-after header.
 func RetryAfterSeconds(d time.Duration) int64 { return int64(math.Ceil(d.Seconds())) }
+
+// LevelUsage is what one level (organization, team or key) has used of
+// its limits, for explaining a refusal (docs/why-denied.md).
+type LevelUsage struct {
+	Level        string
+	RPM, RPMUsed int64
+	TPM, TPMUsed int64
+	Budget       *policy.Budget
+	Spent        float64
+	// Reset is when the per-minute counters start again.
+	Reset time.Duration
+}
+
+// Peek reads, without counting anything, what each level of a principal
+// has used of its limits now.
+func (l *Limiter) Peek(ctx context.Context, p *auth.Principal) ([3]LevelUsage, error) {
+	now := l.now()
+	window := now.Truncate(time.Minute)
+	ids := scopes(p)
+	var out [3]LevelUsage
+	for i, pol := range p.Policies {
+		u := LevelUsage{Level: levelNames[i], RPM: pol.RPM, TPM: pol.TPM, Budget: pol.Budget, Reset: window.Add(time.Minute).Sub(now)}
+		spend := ""
+		if pol.Budget != nil {
+			spend, _ = spendKey(ids[i], pol.Budget.Period, now)
+		}
+		keys := []string{minuteKey("rpm", ids[i], window), minuteKey("tpm", ids[i], window)}
+		if spend != "" {
+			keys = append(keys, spend)
+		}
+		v, err := l.b.Get(ctx, keys...)
+		if err != nil {
+			return out, err
+		}
+		u.RPMUsed, u.TPMUsed = int64(v[0]), int64(v[1])
+		if spend != "" {
+			u.Spent = v[2]
+		}
+		out[i] = u
+	}
+	return out, nil
+}

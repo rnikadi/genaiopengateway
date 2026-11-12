@@ -4,6 +4,8 @@ package config
 
 import (
 	"context"
+	"crypto/rsa"
+	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -224,9 +226,11 @@ type Guardrail struct {
 	Type   string   `yaml:"type"`
 	Action string   `yaml:"action"`
 	Stages []string `yaml:"stages"`
-	// Detect names the pii detectors; nil means all of them.
+	// Detect names the pii detectors, or the checks of an injection
+	// guardrail; nil means all of them.
 	Detect []string `yaml:"detect"`
-	// Patterns are the RE2 expressions of a regex guardrail.
+	// Patterns are the RE2 expressions of a regex guardrail, or extra
+	// ones for an injection guardrail.
 	Patterns []string `yaml:"patterns"`
 	// Model, Prompt and UnsafeIf configure a model guardrail.
 	Model    string `yaml:"model"`
@@ -245,6 +249,9 @@ const (
 	GuardrailRegex   = "regex"
 	GuardrailModel   = "model"
 	GuardrailWebhook = "webhook"
+	// GuardrailInjection is the built-in prompt injection check
+	// (docs/prompt-injection.md).
+	GuardrailInjection = "injection"
 
 	ActionBlock  = "block"
 	ActionRedact = "redact"
@@ -258,6 +265,19 @@ const (
 	OnErrorAllow = "allow"
 	OnErrorBlock = "block"
 )
+
+// The checks of an injection guardrail, which detect selects.
+const (
+	InjectionOverride     = "override"
+	InjectionRole         = "role"
+	InjectionPromptLeak   = "prompt_leak"
+	InjectionFakeTurn     = "fake_turn"
+	InjectionHiddenText   = "hidden_text"
+	InjectionExfiltration = "exfiltration"
+)
+
+// InjectionChecks lists the injection checks in the order they run.
+var InjectionChecks = []string{InjectionOverride, InjectionRole, InjectionPromptLeak, InjectionFakeTurn, InjectionHiddenText, InjectionExfiltration}
 
 // Guardrail defaults and bounds.
 const (
@@ -276,7 +296,17 @@ func (g *Guardrail) External() bool {
 type Alerts struct {
 	// BudgetThresholds are shares of a budget at which to alert.
 	BudgetThresholds []float64 `yaml:"budget_thresholds"`
-	Webhooks         []Webhook `yaml:"webhooks"`
+	// SpendAnomaly tunes the spend.anomaly alert (docs/forecast.md).
+	SpendAnomaly SpendAnomaly `yaml:"spend_anomaly"`
+	Webhooks     []Webhook    `yaml:"webhooks"`
+}
+
+// SpendAnomaly says when a day's spend counts as unusual: at least
+// Factor times the daily average of the two weeks before, and at least
+// MinUSD. A Factor of 0 turns the alert off.
+type SpendAnomaly struct {
+	Factor float64 `yaml:"factor"`
+	MinUSD float64 `yaml:"min_usd"`
 }
 
 // Alert events.
@@ -284,6 +314,8 @@ const (
 	EventBudgetThreshold = "budget.threshold"
 	EventMCPToolPending  = "mcp.tool_pending"
 	EventKeyExpiring     = "key.expiring"
+	EventBudgetForecast  = "budget.forecast"
+	EventSpendAnomaly    = "spend.anomaly"
 )
 
 // Webhook formats.
@@ -313,6 +345,7 @@ const (
 	RecordAudit           = "audit"
 	RecordMCPCalls        = "mcp_calls"
 	RecordGuardrailEvents = "guardrail_events"
+	RecordDenials         = "denials"
 
 	DefaultStreamBatchSize     = 500
 	DefaultStreamFlushInterval = 5 * time.Second
@@ -320,7 +353,7 @@ const (
 )
 
 // RecordTypes lists what a stream can carry.
-var RecordTypes = []string{RecordUsage, RecordAudit, RecordMCPCalls, RecordGuardrailEvents}
+var RecordTypes = []string{RecordUsage, RecordAudit, RecordMCPCalls, RecordGuardrailEvents, RecordDenials}
 
 // Stream sends records to a webhook as signed NDJSON batches, or appends
 // them to a JSON Lines file for a log shipper.
@@ -365,6 +398,17 @@ type SSO struct {
 	// SCIM lets the identity provider provision users and groups
 	// (docs/scim.md).
 	SCIM SCIM `yaml:"scim"`
+	// Portal limits what developers do for themselves in the developer
+	// portal (docs/developer-portal.md).
+	Portal Portal `yaml:"portal"`
+}
+
+// Portal limits developers' own keys.
+type Portal struct {
+	// MaxKeysPerUser is how many unrevoked keys one person may own.
+	MaxKeysPerUser int `yaml:"max_keys_per_user"`
+	// MaxKeyTTL is the longest expiry a developer may give a key.
+	MaxKeyTTL Duration `yaml:"max_key_ttl"`
 }
 
 // Enabled reports whether operators sign in with an identity provider.
@@ -390,6 +434,55 @@ type SAML struct {
 	EmailAttribute  string `yaml:"email_attribute"`
 	NameAttribute   string `yaml:"name_attribute"`
 	GroupsAttribute string `yaml:"groups_attribute"`
+	// SPCertificate and SPPrivateKey are the gateway's own key pair, as
+	// PEM (gateway saml-keygen makes one). With them the gateway signs
+	// its requests, takes encrypted assertions and supports single
+	// logout.
+	SPCertificate string `yaml:"sp_certificate"`
+	SPPrivateKey  Secret `yaml:"sp_private_key"`
+	// RequireEncryptedAssertions refuses a response whose assertion is
+	// not encrypted to the gateway's key.
+	RequireEncryptedAssertions bool `yaml:"require_encrypted_assertions"`
+}
+
+// SPKeyPair returns the gateway's SAML key pair, or nil without one.
+func (m *SAML) SPKeyPair() (*tls.Certificate, error) {
+	if m.SPCertificate == "" && m.SPPrivateKey == "" {
+		return nil, nil
+	}
+	if m.SPCertificate == "" || m.SPPrivateKey == "" {
+		return nil, errors.New("set both sp_certificate and sp_private_key")
+	}
+	pair, err := tls.X509KeyPair(NormalizePEM(m.SPCertificate), NormalizePEM(m.SPPrivateKey.Value()))
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := pair.PrivateKey.(*rsa.PrivateKey); !ok {
+		return nil, errors.New("the key must be RSA, which assertion encryption needs")
+	}
+	return &pair, nil
+}
+
+var pemBlock = regexp.MustCompile(`-----BEGIN ([A-Z0-9 ]+)-----([A-Za-z0-9+/=\s]*)-----END ([A-Z0-9 ]+)-----`)
+
+// NormalizePEM rewraps PEM blocks whose line breaks were lost, as when a
+// key is pasted into a one-line field or an environment variable.
+func NormalizePEM(s string) []byte {
+	return []byte(pemBlock.ReplaceAllStringFunc(s, func(b string) string {
+		m := pemBlock.FindStringSubmatch(b)
+		body := strings.Join(strings.Fields(m[2]), "")
+		var out strings.Builder
+		out.WriteString("-----BEGIN " + m[1] + "-----\n")
+		for len(body) > 64 {
+			out.WriteString(body[:64] + "\n")
+			body = body[64:]
+		}
+		if body != "" {
+			out.WriteString(body + "\n")
+		}
+		out.WriteString("-----END " + m[3] + "-----\n")
+		return out.String()
+	}))
 }
 
 // SCIM turns on the SCIM 2.0 endpoints under /scim/v2 when Token is set.
@@ -421,6 +514,9 @@ const (
 	RoleOwner  = "owner"
 	RoleAdmin  = "admin"
 	RoleViewer = "viewer"
+	// RoleDeveloper uses the developer portal: own keys within the
+	// team's policy, and the playground (docs/developer-portal.md).
+	RoleDeveloper = "developer"
 )
 
 // Permissions an operator role can hold, each over the organizations or
@@ -440,13 +536,17 @@ const (
 	PermBatchesWrite     = "batches.write"
 	PermCacheClear       = "cache.clear"
 	PermPlayground       = "playground.use"
+	PermKeysSelf         = "keys.self"
 )
 
 // Permissions lists every permission, in the order the docs give them.
 var Permissions = []string{
 	PermOrgRead, PermTeamsRead, PermTeamsWrite, PermKeysRead, PermKeysWrite, PermCredentialsWrite,
-	PermUsageRead, PermAuditRead, PermAlertsRead, PermBodiesRead, PermBatchesWrite, PermCacheClear, PermPlayground,
+	PermUsageRead, PermAuditRead, PermAlertsRead, PermBodiesRead, PermBatchesWrite, PermCacheClear, PermPlayground, PermKeysSelf,
 }
+
+// developerPermissions are what the developer role holds.
+var developerPermissions = []string{PermKeysSelf, PermPlayground}
 
 // viewerPermissions are what the viewer role holds: everything an
 // organization's admin reads, except logged bodies.
@@ -459,6 +559,8 @@ func (s *SSO) RolePermissions(role string) []string {
 		return Permissions
 	case RoleViewer:
 		return viewerPermissions
+	case RoleDeveloper:
+		return developerPermissions
 	}
 	if r, ok := s.CustomRoles[role]; ok {
 		return r.Permissions
@@ -504,6 +606,9 @@ type Store struct {
 	DSN             Secret   `yaml:"dsn"`
 	RefreshInterval Duration `yaml:"refresh_interval"`
 	UsageRetention  Duration `yaml:"usage_retention"`
+	// RollupRetention is how long daily usage rollups are kept. Zero
+	// keeps them forever (docs/analytics.md).
+	RollupRetention Duration `yaml:"rollup_retention"`
 }
 
 // Limiter configures where rate limit and budget counters live.
@@ -855,6 +960,8 @@ const (
 	DefaultMCPTimeout         = time.Minute
 	DefaultMaxUserSessions    = 1000
 	DefaultSessionTTL         = 8 * time.Hour
+	DefaultPortalMaxKeys      = 5
+	DefaultPortalKeyTTL       = 90 * 24 * time.Hour
 	MinAdminTokenLength       = 32
 	MinStaticKeyLength        = 16
 )
@@ -886,8 +993,8 @@ func decode(root *yaml.Node) (*Config, error) {
 			Semantic: SemanticCache{Threshold: DefaultCacheThreshold, MaxEntries: DefaultCacheVectors}},
 		Store:       Store{RefreshInterval: Duration(DefaultRefreshInterval)},
 		MCP:         MCP{RefreshInterval: Duration(DefaultMCPRefresh), MaxUserSessions: DefaultMaxUserSessions},
-		SSO:         SSO{SessionTTL: Duration(DefaultSessionTTL)},
-		Alerts:      Alerts{BudgetThresholds: DefaultBudgetThresholds},
+		SSO:         SSO{SessionTTL: Duration(DefaultSessionTTL), Portal: Portal{MaxKeysPerUser: DefaultPortalMaxKeys, MaxKeyTTL: Duration(DefaultPortalKeyTTL)}},
+		Alerts:      Alerts{BudgetThresholds: DefaultBudgetThresholds, SpendAnomaly: SpendAnomaly{Factor: 3, MinUSD: 5}},
 		BodyLogging: BodyLogging{Retention: Duration(DefaultBodyRetention), MaxBodyBytes: DefaultMaxBodyBytes},
 		Routing:     Routing{CircuitBreaker: CircuitBreaker{Failures: DefaultBreakerFailures, Cooldown: Duration(DefaultBreakerCooldown)}},
 	}
@@ -941,6 +1048,9 @@ func (c *Config) validate() error {
 	case "", "sqlite", "postgres":
 	default:
 		add("store.driver must be sqlite or postgres, got %q", c.Store.Driver)
+	}
+	if r, u := c.Store.RollupRetention.Std(), c.Store.UsageRetention.Std(); r > 0 && (u == 0 || r < u) {
+		add("store.rollup_retention must be at least store.usage_retention: rollups are what remains after usage rows are pruned")
 	}
 	if c.Store.Driver != "" && c.Store.DSN.Value() == "" {
 		add("store.dsn is required when store.driver is set")
@@ -1175,6 +1285,17 @@ func (c *Config) validateGuardrails(add func(string, ...any)) {
 			if _, err := redact.New(redact.Config{Builtin: []string{}, Patterns: g.Patterns}); err != nil {
 				add("%v", err)
 			}
+		case GuardrailInjection:
+			for _, d := range g.Detect {
+				if !slices.Contains(InjectionChecks, d) {
+					add("unknown injection check %q; the checks are %s", d, strings.Join(InjectionChecks, ", "))
+				}
+			}
+			for _, p := range g.Patterns {
+				if _, err := regexp.Compile(p); err != nil {
+					add("pattern %q: %v", p, err)
+				}
+			}
 		case GuardrailModel:
 			if _, ok := c.Models[g.Model]; !ok {
 				add("model %q is not configured", g.Model)
@@ -1190,7 +1311,7 @@ func (c *Config) validateGuardrails(add func(string, ...any)) {
 				add("url must be https, or http to localhost")
 			}
 		default:
-			add("type must be pii, regex, model or webhook, got %q", g.Type)
+			add("type must be pii, regex, injection, model or webhook, got %q", g.Type)
 		}
 		if g.Type == GuardrailWebhook && g.Action == "" {
 			g.Action = ActionBlock // the webhook's reply decides: block or redact
@@ -1200,6 +1321,9 @@ func (c *Config) validateGuardrails(add func(string, ...any)) {
 		case ActionRedact:
 			if g.Type == GuardrailModel {
 				add("a model guardrail cannot redact; use block or log")
+			}
+			if g.Type == GuardrailInjection {
+				add("an injection guardrail cannot redact; use block or log")
 			}
 		default:
 			add("action must be block, redact or log, got %q", g.Action)
@@ -1255,6 +1379,12 @@ func (c *Config) validateAlerts(add func(string, ...any)) {
 			add("alerts.budget_thresholds values must be above 0 and at most 1, got %v", t)
 		}
 	}
+	if f := a.SpendAnomaly.Factor; f != 0 && f < 1.5 {
+		add("alerts.spend_anomaly.factor must be 0 (off) or at least 1.5, got %v", f)
+	}
+	if a.SpendAnomaly.MinUSD < 0 {
+		add("alerts.spend_anomaly.min_usd must not be negative")
+	}
 	names := map[string]bool{}
 	for i := range a.Webhooks {
 		w := &a.Webhooks[i]
@@ -1279,7 +1409,7 @@ func (c *Config) validateAlerts(add func(string, ...any)) {
 		}
 		for _, e := range w.Events {
 			switch e {
-			case EventBudgetThreshold, EventMCPToolPending, EventKeyExpiring:
+			case EventBudgetThreshold, EventMCPToolPending, EventKeyExpiring, EventBudgetForecast, EventSpendAnomaly:
 			default:
 				add("alerts webhook %q: unknown event %q", w.Name, e)
 			}
@@ -1350,12 +1480,23 @@ func (c *Config) validateSSO(add func(string, ...any)) {
 		if m.GroupsAttribute == "" {
 			m.GroupsAttribute = "groups"
 		}
+		pair, err := m.SPKeyPair()
+		if err != nil {
+			add("sso.saml.sp_certificate and sp_private_key: %v", err)
+		} else if pair == nil && m.RequireEncryptedAssertions {
+			add("sso.saml.require_encrypted_assertions needs sp_certificate and sp_private_key, which the identity provider encrypts to")
+		}
 		if len(s.Roles) == 0 {
 			add("sso.roles is required with sso.saml: without roles nobody can sign in")
 		}
 		if c.Store.Driver == "" {
 			add("sso.saml needs a store, where sessions are kept")
 		}
+	}
+	if p := s.Portal; p.MaxKeysPerUser < 1 || p.MaxKeysPerUser > 100 {
+		add("sso.portal.max_keys_per_user must be between 1 and 100")
+	} else if p.MaxKeyTTL < Duration(time.Hour) || p.MaxKeyTTL > Duration(366*24*time.Hour) {
+		add("sso.portal.max_key_ttl must be between 1h and 366d")
 	}
 	if s.SessionTTL < Duration(time.Minute) {
 		add("sso.session_ttl must be at least 1m")
@@ -1375,18 +1516,18 @@ func (c *Config) validateSSO(add func(string, ...any)) {
 		switch {
 		case r.Role == RoleOwner && r.Org != "":
 			add("sso.roles[%d]: owner is gateway-wide and takes no org", i)
-		case r.Role == RoleAdmin && r.Org == "":
-			add("sso.roles[%d]: admin needs an org", i)
+		case (r.Role == RoleAdmin || r.Role == RoleDeveloper) && r.Org == "":
+			add("sso.roles[%d]: %s needs an org", i, r.Role)
 		case r.Team != "" && r.Org == "":
 			add("sso.roles[%d]: team needs an org", i)
 		case s.RolePermissions(r.Role) == nil:
-			add("sso.roles[%d]: role must be owner, admin, viewer or one of sso.custom_roles, got %q", i, r.Role)
+			add("sso.roles[%d]: role must be owner, admin, viewer, developer or one of sso.custom_roles, got %q", i, r.Role)
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(s.CustomRoles)) {
 		r := s.CustomRoles[name]
 		switch {
-		case name == RoleOwner || name == RoleAdmin || name == RoleViewer:
+		case name == RoleOwner || name == RoleAdmin || name == RoleViewer || name == RoleDeveloper:
 			add("sso.custom_roles.%s: the name is a built-in role", name)
 		case !mcpName.MatchString(name):
 			add("sso.custom_roles.%s: names are lowercase letters, digits, - and _", name)

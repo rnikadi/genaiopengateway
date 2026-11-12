@@ -37,6 +37,10 @@ jobs:
           unformatted=$(gofmt -l .)
           if [ -n "$unformatted" ]; then echo "$unformatted"; exit 1; fi
       - run: go vet ./...
+      - name: fuzz targets
+        # Each target's seed corpus runs with the tests; this checks that
+        # continuous fuzzing builds every target.
+        run: scripts/check-fuzz-targets.sh
       - name: staticcheck
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
       - name: govulncheck
@@ -121,6 +125,20 @@ jobs:
         if: failure()
         working-directory: deploy/compose
         run: docker compose -f compose.yaml -f compose.sso.yaml logs
+
+  upgrade:
+    # The previous release's database upgraded by this build, then backed
+    # up and restored (docs/backup.md).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          check-latest: true
+      - run: scripts/upgrade-test.sh
 
   quickstart:
     # Zero-config start and the setup wizard, driven by a browser.

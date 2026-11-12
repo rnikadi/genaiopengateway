@@ -16,3 +16,4 @@ pids="$pids $!"
 for _ in $(seq 1 100); do curl -sf http://127.0.0.1:8080/readyz >/dev/null && break; sleep 0.2; done
 cat "$work/banner.log"
 BOOTSTRAP_FILE="$work/data/bootstrap.json" node "$here/quickstart.mjs" || { tail -40 "$work/gateway.log"; exit 1; }
+BOOTSTRAP_FILE="$work/data/bootstrap.json" node "$here/a11y.mjs"

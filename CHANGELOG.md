@@ -4,6 +4,33 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- `store.usage_retention` now prunes by whole UTC days, so the oldest kept day is complete; usage rows live up to a day longer than before. The first start after the upgrade sums every day that still has usage rows into the new `usage_daily` table (migration 0023), which takes a few seconds on a large table.
+- The admin UI's **Configuration** page is gone: each object is edited on its own page. Bookmarks to `#/config?kind=…` still open the right page. The page titles **Overview**, **Virtual keys** and **Usage** are now **Home**, **Keys** and **Usage and cost**. The admin UI's layout is not covered by the support policy, and the admin API is unchanged.
+
+### Security
+
+- A realtime client could change its session's model by writing `session.update` with `\u` escapes, or with a repeated `type` key, and a Gemini Live client could send a second `setup` written with escapes. The gateway now reads these messages as the upstream does, and drops messages whose keys repeat. Found by the new fuzz targets.
+- A Gemini Live setup naming the model `models/` alone is refused instead of reaching the router with an empty model.
+
+### Added
+
+- `genaiopengateway backup` and `restore` ([docs/backup.md](docs/backup.md)): a consistent snapshot of the database taken while the gateway serves, restored all or nothing into SQLite or Postgres, whichever the backup came from. The restore checks the schema version, the row counts and that the target has the encryption key the stored secrets need. This is also the way to move a zero-config SQLite install to Postgres.
+- A simpler admin UI ([docs/admin-ui.md](docs/admin-ui.md#layout-v11)). The menu has five groups named after jobs (Home, Access, AI services, Monitor, Settings) instead of 17 items in one list. Home opens with what needs attention, each with its action, and a setup checklist for owners. Providers, models, guardrails, MCP servers, virtual MCP servers, alert webhooks, streams and A2A agents are edited on the page that lists them. Search (Ctrl K) finds pages, organizations, models, MCP servers and keys. Settings are split into seven sub-pages, sizes are entered with a unit, and only values that are not the default carry a badge. The MCP page has tabs, with what needs review first. Times show as "5 minutes ago". On a phone the menu folds away.
+- Accessibility checks: CI runs axe-core over every admin UI page in the light and dark themes and fails on any WCAG 2.2 AA violation. The UI has a skip link, moves focus to each new page's heading, labels every settings control, and underlines links in text.
+- SAML hardening ([docs/saml.md](docs/saml.md#the-gateways-key-pair)). With a key pair of its own (`sp_certificate` and `sp_private_key`; `genaiopengateway saml-keygen` makes one), the gateway signs its AuthnRequests, takes encrypted assertions (`require_encrypted_assertions` refuses any other) and supports single logout in both directions: signing out of the gateway signs the user out of the identity provider, and the identity provider's signed logout requests end every gateway session of that user. Without a key pair nothing changes.
+- Continuous fuzzing ([docs/security-audit.md](docs/security-audit.md#fuzzing)): 15 Go fuzz targets for the OpenAI translation to Anthropic, Gemini and Bedrock, the realtime and Gemini Live relays, the stream tap and redaction, run by ClusterFuzzLite on pull requests and nightly. An OpenSSF Scorecard workflow and README badge.
+- Sign-in tested through real identity providers in a browser ([docs/identity-providers.md](docs/identity-providers.md)): Keycloak with OIDC and SAML (signed requests, encrypted assertions and single logout) on every change to sign-in code, and Okta, Entra ID, Google and PingOne nightly once their test tenants are connected. Step-by-step setup for each.
+- A developer portal ([docs/developer-portal.md](docs/developer-portal.md)). People with the new `developer` role sign in to **My keys and access**, where they create, rotate and revoke their own keys in their teams, see the team's models, limits and MCP servers, see this month's use of their keys, request MCP access, and copy code to start with. Keys are owned by the person's email and always expire; `sso.portal` sets how many each person may have and for how long.
+- Daily usage rollups and a warehouse feed ([docs/analytics.md](docs/analytics.md)). Usage is summed hourly into `usage_daily`, one row per UTC day, key, model, target and endpoint. Usage reports and the chargeback and FOCUS exports now reach back past `store.usage_retention`, reading rollups for the days whose rows are pruned; `store.rollup_retention` bounds the rollups (default: kept forever). `GET /admin/v1/usage/rollups` streams them as JSON lines or CSV for loading into a warehouse.
+- Prompt injection presets ([docs/prompt-injection.md](docs/prompt-injection.md)). A new guardrail type, `injection`, checks in-process for the wording and markers that prompt injection reuses: instruction overrides, unrestricted personas, requests for the system prompt, chat template tokens and fake turns, invisible characters, and links or requests that send data out. `detect` selects checks and `patterns` adds your own. It catches known attacks, not every attack, so the page also gives a ready prompt for a classifier model, which the admin UI fills in.
+- Spend forecasts and unusual spend alerts ([docs/forecast.md](docs/forecast.md)). **Usage and cost** shows where each monthly budget is heading at the last week's rate. Two new alert events: `budget.forecast`, when a monthly budget is set to run out before the month ends, and `spend.anomaly`, when a team's last 24 hours cost several times its usual day (`alerts.spend_anomaly`, default 3 times and at least $5). Webhooks receive them once the events are added to their `events`. Also `GET /admin/v1/usage/forecast`.
+- Chargeback and FOCUS exports ([docs/chargeback.md](docs/chargeback.md)). **Usage and cost** downloads a statement with one line per team and its share of the total, and the same usage in the FinOps FOCUS 1.2 columns that cost tools import, one row per day, team, upstream model and endpoint. Also `GET /admin/v1/usage/export`.
+- Users see and disconnect their own upstream MCP accounts at `{mcp.public_url}/mcp/connections` ([docs/mcp-user-credentials.md](docs/mcp-user-credentials.md#admin-api-and-ui)), after signing in with the identity provider; no role on the gateway is needed. Disconnecting revokes the token at the upstream when it can and is audited. Available when `sso.oidc` and `mcp.oauth` use the same issuer; developers find the link on **My keys and access**.
+- "Why was this denied?" ([docs/why-denied.md](docs/why-denied.md)). For a key and a model or MCP tool, the explainer runs every check a request goes through (key, allowed models or MCP servers at each level, Cedar, residency, rate limits, budgets, guardrails, tool approval) and says which one says no and what would change it. Refused requests are recorded with their reason and listed under **Requests, Refused**, each linked to the explainer; developers can explain their own keys. A new `denials` stream record type.
+- An upgrade and restore drill in CI (`scripts/upgrade-test.sh`): the previous release's database is upgraded by this build, backed up and restored, and must keep serving the same organizations, keys and configuration.
+
 ## [1.0.0] - 2026-11-12
 
 The 1.0 release: every modality, A2A agents, hosted stdio MCP servers, a control plane for data planes without a database, and a Kubernetes operator. From this release the APIs, config format, CLI, Terraform provider, Helm values and CRDs are stable under the [support policy](docs/releasing.md#support), and 1.0 is a long-term support release.
@@ -33,6 +60,7 @@ The third-party security audit planned for 1.0 has not been performed; [docs/sec
 
 ### Fixed
 
+- The admin UI's guardrail form failed to open a classifier guardrail that has a prompt, and saved a typed prompt in a shape the gateway refused. The prompt is now an ordinary text box.
 - `gogctl config import` and the Terraform `genaiopengateway_config_object` resource accept `a2a_agents`.
 
 ## [0.11.0] - 2026-11-11

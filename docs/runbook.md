@@ -8,6 +8,10 @@ What to do when the gateway alerts. The rules are in [`deploy/helm/genaiopengate
 - **Docker Compose**: `docker compose --profile observability up -d` starts Prometheus with the rules and Grafana with the dashboard at `localhost:3000`.
 - **Anything else**: add `alerts.yaml` to Prometheus `rule_files`, and import `dashboard.json` into Grafana. The dashboard asks for a Prometheus data source.
 
+## Backups and upgrades
+
+Back up before every upgrade, and restore to recover from a bad change or a lost database: see [backup.md](backup.md).
+
 ## First steps for any alert
 
 1. Open the dashboard and narrow it to the time of the alert.
@@ -33,7 +37,7 @@ Every target of a model is failing, so its requests get 502 or the last upstream
   - `server_error` means the provider is having an outage.
   - `connection_error` means DNS, the network or egress rules are failing.
 - Test one target directly from a replica, with its key, to tell a gateway problem from a provider one.
-- To restore service, add a target on another provider to the model. Owners can do this on the Configuration page, and every replica picks it up within `store.refresh_interval`. See [routing](routing.md).
+- To restore service, add a target on another provider to the model. Owners can do this on the Models page, and every replica picks it up within `store.refresh_interval`. See [routing](routing.md).
 - If a provider key was revoked or rotated, update it on the provider's form.
 
 ## GatewayCircuitOpen
@@ -80,7 +84,7 @@ A target served traffic for an hour without a price. Its spend counts as zero, s
 
 An upstream MCP server has failed its catalog refresh for 10 minutes. Its tools stay listed from the last good catalog, and calls to them fail.
 
-- Check the server's URL and credentials on the Configuration page.
+- Check the server's URL and credentials on the MCP page, **Servers** tab.
 - For servers with per-user sign-in, check that the server's OAuth endpoints are reachable.
 
 ## GatewayBodiesDropped

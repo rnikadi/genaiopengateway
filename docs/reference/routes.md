@@ -62,7 +62,9 @@ Every route the gateway serves, generated from the handlers in `internal/server`
 | `DELETE` | `/admin/v1/config/{kind}/{name}` | `s.deleteConfig` | deleteConfig removes an object from the running config: a stored one is deleted, and one from the file gets a deletion marker (ADR 0028). |
 | `PUT` | `/admin/v1/config/{kind}/{name}` | `s.putConfig` | putConfig creates or replaces a stored configuration object, validated against the merged config. |
 | `POST` | `/admin/v1/config/{kind}/{name}/reset` | `s.resetConfig` | resetConfig removes the stored copy or deletion marker of a file object, so the file's version applies again. |
+| `GET` | `/admin/v1/denials` | `s.listDenials` | listDenials lists recorded refusals the operator may read. |
 | `GET` | `/admin/v1/directory` | `s.listDirectory` | listDirectory lists provisioned users with their groups, and the groups, for owners. |
+| `POST` | `/admin/v1/explain` | `s.explain` | explain answers whether a key may make a request now, and why not. |
 | `GET` | `/admin/v1/guardrail-events` | `s.listGuardrailEvents` | listGuardrailEvents serves GET /admin/v1/guardrail-events. |
 | `GET` | `/admin/v1/guardrails` | `s.listGuardrails` | listGuardrails lists the configured guardrails without their secrets. |
 | `GET` | `/admin/v1/keys` | `s.listAllKeys` | listAllKeys lists keys across teams, limited to the organizations the operator can read (docs/virtual-keys.md). |
@@ -100,6 +102,11 @@ Every route the gateway serves, generated from the handlers in `internal/server`
 | `POST` | `/admin/v1/playground/audio/transcriptions` | `s.playground(provider.Transcriptions)` | playground lets an operator call a model as a team, with the team's policies, through the same handler that serves API keys (docs/playground.md). |
 | `POST` | `/admin/v1/playground/chat/completions` | `s.playground(provider.ChatCompletions)` | playground lets an operator call a model as a team, with the team's policies, through the same handler that serves API keys (docs/playground.md). |
 | `POST` | `/admin/v1/playground/images/generations` | `s.playground(provider.ImageGenerations)` | playground lets an operator call a model as a team, with the team's policies, through the same handler that serves API keys (docs/playground.md). |
+| `GET` | `/admin/v1/portal` | `s.portal` | portal returns, for each of the person's teams, what it may use, the person's keys and their use this month. |
+| `POST` | `/admin/v1/portal/keys/{key_id}/revoke` | `s.portalRevokeKey` | portalRevokeKey revokes one of the person's keys at once. |
+| `POST` | `/admin/v1/portal/keys/{key_id}/rotate` | `s.portalRotateKey` | portalRotateKey gives one of the person's keys a new secret; the old one works for the grace period, at most portalMaxGrace. |
+| `POST` | `/admin/v1/portal/teams/{team_id}/keys` | `s.portalCreateKey` | portalCreateKey creates a key the person owns, with no policy of its own and an expiry within sso.portal.max_key_ttl. |
+| `POST` | `/admin/v1/portal/teams/{team_id}/requests` | `s.portalRequestAccess` | portalRequestAccess asks the team's admins for a virtual MCP server, as the MCP catalog does. |
 | `GET` | `/admin/v1/providers` | `s.listProviders` | listProviders lists configured providers with type, endpoint, auth kind and last-hour health; secrets are never returned. |
 | `DELETE` | `/admin/v1/requests` | `s.deleteRequestBodies` | deleteRequestBodies deletes an organization's bodies before a time. |
 | `GET` | `/admin/v1/requests` | `s.listRequests` | listRequests lists logged request bodies' metadata, newest first. |
@@ -115,6 +122,9 @@ Every route the gateway serves, generated from the handlers in `internal/server`
 | `GET` | `/admin/v1/teams/{team_id}/keys` | `s.listKeys` | listKeys lists a team's keys without their secrets. |
 | `POST` | `/admin/v1/teams/{team_id}/keys` | `s.createKey` | createKey creates a key in a team and returns its secret once. |
 | `GET` | `/admin/v1/usage` | `s.queryUsage` | queryUsage sums usage and cost over a time range, grouped by model, team, key, provider, endpoint or day. |
+| `GET` | `/admin/v1/usage/export` | `s.exportUsage` | exportUsage streams usage as CSV: format=chargeback (the default) or format=focus. |
+| `GET` | `/admin/v1/usage/forecast` | `s.listForecasts` | listForecasts returns the forecast of each monthly budget the caller may see usage of. |
+| `GET` | `/admin/v1/usage/rollups` | `s.exportRollups` | exportRollups streams the daily usage rollups, for loading into a warehouse (docs/analytics.md): JSON lines by default, or format=csv. |
 | `GET` | `/admin/v1/videos` | `s.listAdminVideos` | listAdminVideos lists video jobs for operators, newest first. |
 
 ## Admin UI and sign-in
@@ -130,6 +140,8 @@ Every route the gateway serves, generated from the handlers in `internal/server`
 | `POST` | `/ui/auth/saml/acs` | `auth(s.samlACS)` | samlACS takes the identity provider's signed response, resolves roles and starts a session. |
 | `GET` | `/ui/auth/saml/login` | `auth(s.samlLogin)` | samlLogin sends the browser to the SAML identity provider with an AuthnRequest. |
 | `GET` | `/ui/auth/saml/metadata` | `auth(s.samlMetadata)` | samlMetadata serves the gateway's SAML service provider metadata for the identity provider. |
+| `GET` | `/ui/auth/saml/slo` | `auth(s.samlSLO)` | samlSLO is the gateway's single logout service: it takes the identity provider's LogoutRequests and its LogoutResponses to the gateway's own. |
+| `POST` | `/ui/auth/saml/slo` | `auth(s.samlSLO)` | samlSLO is the gateway's single logout service: it takes the identity provider's LogoutRequests and its LogoutResponses to the gateway's own. |
 | `POST` | `/ui/auth/token` | `auth(s.tokenLogin)` | tokenLogin signs in with the admin token when OIDC is not configured. |
 
 ## Discovery and operations

@@ -42,6 +42,7 @@ type Settings struct {
 	Store struct {
 		RefreshInterval Duration `yaml:"refresh_interval"`
 		UsageRetention  Duration `yaml:"usage_retention"`
+		RollupRetention Duration `yaml:"rollup_retention"`
 	} `yaml:"store"`
 	Limiter struct {
 		FailOpenRateLimits bool `yaml:"fail_open_rate_limits"`
@@ -52,7 +53,8 @@ type Settings struct {
 	Cache       Cache       `yaml:"cache"`
 	Routing     Routing     `yaml:"routing"`
 	Alerts      struct {
-		BudgetThresholds []float64 `yaml:"budget_thresholds"`
+		BudgetThresholds []float64    `yaml:"budget_thresholds"`
+		SpendAnomaly     SpendAnomaly `yaml:"spend_anomaly"`
 	} `yaml:"alerts"`
 	SSO SSO `yaml:"sso"`
 	MCP struct {
@@ -119,10 +121,10 @@ func (d Duration) Format() string {
 // SettingsOf returns the settings part of a config.
 func SettingsOf(c *Config) Settings {
 	var s Settings
-	s.Store.RefreshInterval, s.Store.UsageRetention = c.Store.RefreshInterval, c.Store.UsageRetention
+	s.Store.RefreshInterval, s.Store.UsageRetention, s.Store.RollupRetention = c.Store.RefreshInterval, c.Store.UsageRetention, c.Store.RollupRetention
 	s.Limiter.FailOpenRateLimits, s.Limiter.FailOpenBudgets = c.Limiter.FailOpenRateLimits, c.Limiter.FailOpenBudgets
 	s.Limits, s.BodyLogging, s.Cache, s.SSO = c.Limits, c.BodyLogging, c.Cache, c.SSO
-	s.Alerts.BudgetThresholds = c.Alerts.BudgetThresholds
+	s.Alerts.BudgetThresholds, s.Alerts.SpendAnomaly = c.Alerts.BudgetThresholds, c.Alerts.SpendAnomaly
 	s.MCP.PublicURL, s.MCP.RefreshInterval, s.MCP.MaxUserSessions, s.MCP.OAuth = c.MCP.PublicURL, c.MCP.RefreshInterval, c.MCP.MaxUserSessions, c.MCP.OAuth
 	s.A2A.PublicURL = c.A2A.PublicURL
 	return s

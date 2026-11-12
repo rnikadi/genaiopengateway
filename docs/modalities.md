@@ -225,7 +225,7 @@ A caller owns a job when it is in the same organization and team. Static keys fr
 ## Admin UI
 
 - **Models page**: the new endpoints show as badges beside chat and embeddings.
-- **Configuration page**: the model form gets the new price fields.
+- **Models page**: the model form gets the new price fields.
 - **Usage page**: the new counts are shown.
 - **Playground**: an image tab (prompt, generated images) and a speech tab (text to audio, audio to text). It runs as a team with the team's policies, as chat does.
 

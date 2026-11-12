@@ -21,6 +21,12 @@
 | [Admin UI and SSO](admin-ui.md) | Pages, roles, OIDC sign-in, sessions, admin API changes |
 | [Roles and permissions](roles.md) | Built-in and custom roles, permissions, team grants |
 | [SAML sign-in](saml.md) | Signing operators in with a SAML 2.0 identity provider |
+| [Identity providers](identity-providers.md) | Setup for Keycloak, Okta, Entra ID, Google and PingOne, and how each is tested |
+| [Developer portal](developer-portal.md) | Developers creating and rotating their own keys, and requesting MCP access |
+| [Why was this denied?](why-denied.md) | Which policy, limit, Cedar rule or guardrail refused a request, and what would change it |
+| [Forecasts and unusual spend](forecast.md) | Where each monthly budget is heading, and alerts for a budget set to run out early or a day that cost far more than usual |
+| [Usage rollups and analytics](analytics.md) | Daily totals that outlive the usage rows, and feeding a warehouse or BI tool |
+| [Chargeback and FOCUS exports](chargeback.md) | CSV statements of spend per team, and the same usage in FinOps FOCUS columns for cost tools |
 | [SCIM provisioning](scim.md) | Users and groups from Okta, Entra ID and others, deprovisioning |
 | [Cedar policies](cedar.md) | Attribute-based rules per organization for models and MCP tools |
 | [Admin UI: configuration views](admin-ui-config.md) | Providers, models, guardrails, alerts and settings in the UI |
@@ -39,10 +45,12 @@
 | [Streams](streams.md) | Usage, audit, MCP call and guardrail records sent to a webhook or a file as they are written |
 | [Alerts](alerts.md) | Budget thresholds and other events, webhooks and Slack |
 | [Guardrails](guardrails.md) | PII, pattern, classifier and webhook checks on model and MCP calls |
+| [Prompt injection presets](prompt-injection.md) | The built-in injection checks, a ready classifier prompt, and where to attach them |
 | [Gemini, Vertex AI and Bedrock](cloud-providers.md) | Cloud adapters, credentials and translation rules |
 | [Deploying to Kubernetes](deploy-kubernetes.md) | Installing and running the Helm chart |
 | [Helm chart](helm.md) | Kubernetes deployment design |
 | [Observability](observability.md) | Logs, metrics, traces, usage records |
 | [Runbook](runbook.md) | Dashboard, alert rules, and what to do for each alert |
+| [Backup and upgrades](backup.md) | Backing up and restoring the database, moving between SQLite and Postgres, upgrading |
 | [Releases](releasing.md) | Versioning, artifacts, support |
 | [Roadmap](roadmap.md) | Phases and gates |

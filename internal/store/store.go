@@ -497,6 +497,8 @@ type KeyFilter struct {
 	TeamID  string
 	// Query matches the name, prefix or owner, ignoring case.
 	Query string
+	// Owner matches the owner exactly, ignoring case.
+	Owner string
 	// Status is active, expiring (within 7 days), expired, revoked or
 	// rotating (a previous secret still works).
 	Status string
@@ -533,6 +535,9 @@ func (s *Store) ListAllKeys(ctx context.Context, f KeyFilter, p Page) ([]*Key, b
 	}
 	if f.TeamID != "" {
 		where, args = append(where, "team_id = ?"), append(args, f.TeamID)
+	}
+	if f.Owner != "" {
+		where, args = append(where, "LOWER(owner) = ?"), append(args, strings.ToLower(f.Owner))
 	}
 	if f.Query != "" {
 		q := "%" + strings.ToLower(f.Query) + "%"
@@ -667,6 +672,10 @@ type UsageQuery struct {
 	From, To             time.Time
 	// GroupBy is "model", "team", "key", "day", "provider" or "endpoint".
 	GroupBy string
+	// RawFrom, when set, is the start of the first UTC day whose usage
+	// rows are all still there. Days before it are read from the daily
+	// rollups (docs/analytics.md).
+	RawFrom time.Time
 }
 
 // UsageRow is one aggregated group.
@@ -694,26 +703,15 @@ func (s *Store) QueryUsage(ctx context.Context, uq UsageQuery) ([]UsageRow, erro
 		"model":    "model",
 		"team":     "team_id",
 		"key":      "key_id",
-		"day":      "CAST(ts / 86400000 AS TEXT)",
+		"day":      "CAST(day AS TEXT)",
 		"provider": "provider",
 		"endpoint": "endpoint",
 	}[uq.GroupBy]
 	if group == "" {
 		return nil, fmt.Errorf("group_by must be model, team, key, day, provider or endpoint")
 	}
-	where := []string{"ts >= ?", "ts < ?"}
-	args := []any{uq.From.UnixMilli(), uq.To.UnixMilli()}
-	for col, v := range map[string]string{"org_id": uq.OrgID, "team_id": uq.TeamID, "key_id": uq.KeyID} {
-		if v != "" {
-			where = append(where, col+" = ?")
-			args = append(args, v)
-		}
-	}
-	query := `SELECT ` + group + ` AS g, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),
-		COALESCE(SUM(cached_input_tokens), 0), COALESCE(SUM(reasoning_tokens), 0), COALESCE(SUM(images), 0), COALESCE(SUM(characters), 0),
-		COALESCE(SUM(audio_seconds), 0), COALESCE(SUM(video_seconds), 0), COALESCE(SUM(cost_usd), 0),
-		COALESCE(SUM(cache_hit), 0), COALESCE(SUM(saved_usd), 0)
-		FROM usage WHERE ` + strings.Join(where, " AND ") + ` GROUP BY g ORDER BY g`
+	src, args := s.usageSource(uq)
+	query := `SELECT ` + group + ` AS g, ` + usageSums + ` FROM ` + src + ` GROUP BY g ORDER BY g`
 	rows, err := s.db.QueryContext(ctx, s.q(query), args...)
 	if err != nil {
 		return nil, err

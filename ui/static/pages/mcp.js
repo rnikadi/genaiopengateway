@@ -1,6 +1,7 @@
 import {
-  html, useState, useEffect, api, qs, useLoad, useSession, Loading, Table, Modal, Confirm, PageHeader, ErrorBox, JSONView, OrgPicker, defaultOrg, when, num, Field, none,
+  html, useState, useEffect, api, qs, useLoad, useSession, Loading, Table, Modal, Confirm, PageHeader, ErrorBox, JSONView, OrgPicker, defaultOrg, when, num, Field, none, Ago, Tabs
 } from '../lib.js';
+import { useConfigObjects, DeletedObjects } from './config.js';
 
 const statusBadge = {
   approved: html`<span class="badge good">Approved</span>`,
@@ -8,8 +9,14 @@ const statusBadge = {
   changed: html`<span class="badge bad">Changed</span>`,
 };
 
-export function MCP() {
+const tabNames = { review: 'To review', catalog: 'Catalog', servers: 'Servers', virtual: 'Virtual servers', tools: 'Tools', calls: 'Calls' };
+
+// MCP is one page per job: what needs a decision first, then the catalog,
+// the servers and virtual servers (editable by owners), the tools and the
+// calls (docs/admin-ui.md).
+export function MCP({ params }) {
   const s = useSession();
+  const [tab, setTab] = useState(tabNames[params.get('tab')] ? params.get('tab') : params.get('edit') ? 'servers' : 'review');
   const [review, setReview] = useState(null);
   const [filter, setFilter] = useState('');
   // tick reloads the catalog and the requests when either changes.
@@ -23,64 +30,77 @@ export function MCP() {
     ]);
     return { servers: servers.data, tools: tools.data, virtual: virtual.data };
   });
+  const servers = useConfigObjects('mcp_servers', { params: tab === 'servers' ? params : null, onChange: state.reload });
+  const virtual = useConfigObjects('mcp_virtual_servers', { params: tab === 'virtual' ? params : null, onChange: state.reload });
+  const toReview = (state.data?.tools || []).filter((t) => t.status !== 'approved');
+  const tabs = { ...tabNames, review: toReview.length ? `To review (${toReview.length})` : 'To review' };
 
   return html`
-    <${PageHeader} title="MCP" sub="Upstream MCP servers, the tools they offer, and the virtual servers clients connect to." />
-    <${Catalog} tick=${tick} onChange=${bump} />
-    <${AccessRequests} tick=${tick} onChange=${bump} />
+    <${PageHeader} title="MCP" sub="The MCP servers behind the gateway, the tools they offer, and the virtual servers clients connect to." />
+    <${Tabs} tabs=${tabs} value=${tab} onChange=${setTab} />
+    ${tab === 'review' && html`<${AccessRequests} tick=${tick} onChange=${bump} />`}
+    ${tab === 'catalog' && html`<${Catalog} tick=${tick} onChange=${bump} />`}
+    ${tab === 'calls' && html`<${Calls} />`}
     <${Loading} state=${state}>${(d) => {
-      const toReview = d.tools.filter((t) => t.status !== 'approved');
       const shown = filter ? d.tools.filter((t) => t.status === filter) : d.tools;
       return html`
-        ${toReview.length > 0 && html`<section class="panel attention">
+        ${tab === 'review' && html`<section class=${`panel${toReview.length ? ' attention' : ''}`}>
           <h2>Tools to review</h2>
           <p class="muted">Pinned servers hide a tool from clients until an owner approves its definition, and hide it again if the definition changes.</p>
           <${Table}
             rowKey=${(t) => t.server + '/' + t.tool}
             rows=${toReview}
+            empty="Every tool is approved."
             columns=${[
               { label: 'Tool', render: (t) => html`<code>${t.server}/${t.tool}</code>` },
               { label: 'Status', render: (t) => statusBadge[t.status] },
-              { label: 'Seen', render: (t) => when(t.updated_at) },
-              { label: '', render: (t) => html`<button class="link" onClick=${() => setReview(t)}>Review</button>` },
+              { label: 'Seen', render: (t) => html`<${Ago} t=${t.updated_at} />` },
+              { label: html`<span class="sr-only">Actions</span>`, render: (t) => html`<button class="secondary" onClick=${() => setReview(t)}>Review</button>` },
             ]}
           />
         </section>`}
-        <section class="panel">
-          <h2>Servers</h2>
+        ${tab === 'servers' && html`<section class="panel">
+          <div class="panel-header"><h2>Servers</h2>${servers.newButton}</div>
           <${Table}
             rowKey=${(v) => v.name}
             rows=${d.servers}
             empty="No MCP servers are configured."
             columns=${[
-              { label: 'Server', render: (v) => html`<strong>${v.name}</strong><br /><span class="muted small">${v.url}</span>` },
+              { label: 'Server', render: (v) => html`<strong>${v.name}</strong> ${servers.source(v.name)}<br /><span class="muted small">${v.url}</span>` },
               { label: 'Status', render: (v) => (v.up ? html`<span class="badge good">Up</span>` : html`<span class="badge bad">Down</span>`) },
               { label: 'Credentials', render: (v) => (v.user_auth ? 'Per user' : 'Shared') },
               { label: 'Pinning', render: (v) => v.pin_tools },
               { label: 'Tools', num: true, render: (v) => html`${num(v.tools)}${v.hidden_tools ? html` <span class="muted small">(${num(v.hidden_tools)} hidden)</span>` : ''}` },
               { label: 'Prompts', num: true, render: (v) => num(v.prompts) },
               { label: 'Resources', num: true, render: (v) => num(v.resources) },
-              { label: 'Refreshed', render: (v) => when(v.refreshed_at) },
+              { label: 'Refreshed', render: (v) => html`<${Ago} t=${v.refreshed_at} />` },
+              ...(servers.owner ? [{ label: html`<span class="sr-only">Actions</span>`, render: (v) => servers.actions(v.name) }] : []),
             ]}
           />
         </section>
-        <section class="panel">
-          <h2>Virtual servers</h2>
+        <${DeletedObjects} cfg=${servers} />
+        ${s.owner && d.servers.some((v) => v.user_auth) && html`<${Connections} />`}
+        ${servers.dialogs}`}
+        ${tab === 'virtual' && html`<section class="panel">
+          <div class="panel-header"><h2>Virtual servers</h2>${virtual.newButton}</div>
           <${Table}
             rowKey=${(v) => v.name}
             rows=${d.virtual}
             empty="No virtual servers are configured."
             columns=${[
-              { label: 'Name', render: (v) => html`<strong>${v.name}</strong>${v.description && html`<br /><span class="muted small">${v.description}</span>`}` },
+              { label: 'Name', render: (v) => html`<strong>${v.name}</strong> ${virtual.source(v.name)}${v.description && html`<br /><span class="muted small">${v.description}</span>`}` },
               { label: 'Endpoint', render: (v) => html`<code class="small">/mcp/${v.name}</code>` },
               {
                 label: 'Upstreams',
                 render: (v) => html`<ul class="plain">${v.servers.map((u) => html`<li key=${u.server}><code>${u.server}</code>${u.prefix && html` as <code>${u.prefix}*</code>`}${u.tools?.length ? html` <span class="muted small">${u.tools.join(', ')}</span>` : html` <span class="muted small">all tools</span>`}</li>`)}</ul>`,
               },
+              ...(virtual.owner ? [{ label: html`<span class="sr-only">Actions</span>`, render: (v) => virtual.actions(v.name) }] : []),
             ]}
           />
         </section>
-        <section class="panel">
+        <${DeletedObjects} cfg=${virtual} />
+        ${virtual.dialogs}`}
+        ${tab === 'tools' && html`<section class="panel">
           <div class="panel-header"><h2>Tools</h2>
             <label class="inline"><span>Status</span><select value=${filter} onChange=${(e) => setFilter(e.target.value)}>
               <option value="">All</option><option value="approved">Approved</option><option value="pending">New</option><option value="changed">Changed</option>
@@ -93,13 +113,11 @@ export function MCP() {
             columns=${[
               { label: 'Tool', render: (t) => html`<code>${t.server}/${t.tool}</code>` },
               { label: 'Status', render: (t) => statusBadge[t.status] },
-              { label: 'Updated', render: (t) => when(t.updated_at) },
-              { label: '', render: (t) => html`<button class="link" onClick=${() => setReview(t)}>Definition</button>` },
+              { label: 'Updated', render: (t) => html`<${Ago} t=${t.updated_at} />` },
+              { label: html`<span class="sr-only">Actions</span>`, render: (t) => html`<button class="link" onClick=${() => setReview(t)}>Definition</button>` },
             ]}
           />
-        </section>
-        ${s.owner && d.servers.some((v) => v.user_auth) && html`<${Connections} />`}
-        <${Calls} />
+        </section>`}
         ${review && html`<${Review} tool=${review} canApprove=${s.owner} onClose=${() => setReview(null)} onApproved=${() => { setReview(null); state.reload(); }} />`}`;
     }}<//>`;
 }
@@ -204,7 +222,7 @@ function AccessRequests({ tick, onChange }) {
         { label: 'Team', render: (q) => html`<a href=${`#/teams/${encodeURIComponent(q.team_id)}`}>${q.team_name || q.team_id}</a>` },
         { label: 'Server', render: (q) => html`<code>${q.server}</code>` },
         { label: 'Reason', render: (q) => html`<span class="small">${q.reason}</span>` },
-        { label: 'Requested', render: (q) => html`${when(q.created_at)}<div class="muted small">${q.requested_by}</div>` },
+        { label: 'Requested', render: (q) => html`<${Ago} t=${q.created_at} /><div class="muted small">${q.requested_by}</div>` },
         { label: 'Status', render: (q) => html`${requestBadge[q.status]}${q.decided_by && html`<div class="muted small">${q.decided_by}${q.note && html` · ${q.note}`}</div>`}` },
         { label: '', render: (q) => q.can_decide && html`<div class="row-actions">
           <button class="link" onClick=${() => setDeciding({ q, action: 'approve' })}>Approve</button>
@@ -285,8 +303,8 @@ function Connections() {
         { label: 'Server', render: (c) => html`<code>${c.server}</code>` },
         { label: 'User', render: (c) => c.subject },
         { label: 'Scopes', render: (c) => html`<span class="small">${(c.scopes || []).join(' ')}</span>` },
-        { label: 'Connected', render: (c) => when(c.created_at) },
-        { label: 'Last used', render: (c) => when(c.last_used_at) },
+        { label: 'Connected', render: (c) => html`<${Ago} t=${c.created_at} />` },
+        { label: 'Last used', render: (c) => html`<${Ago} t=${c.last_used_at} />` },
         { label: '', render: (c) => html`<button class="link danger" onClick=${() => setRevoking(c)}>Revoke</button>` },
       ]}
     />`}<//>
@@ -329,7 +347,7 @@ function Calls() {
       rows=${list.items}
       empty="No MCP calls yet."
       columns=${[
-        { label: 'Time', render: (c) => when(c.ts) },
+        { label: 'Time', render: (c) => html`<${Ago} t=${c.ts} />` },
         { label: 'Virtual server', render: (c) => c.virtual_server },
         { label: 'Call', render: (c) => html`<code>${c.method}${c.name ? ' ' + c.name : ''}</code>` },
         { label: 'Upstream', render: (c) => c.server },

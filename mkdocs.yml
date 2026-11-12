@@ -68,6 +68,7 @@ nav:
       - Virtual keys: virtual-keys.md
       - Team provider credentials: team-credentials.md
       - Guardrails: guardrails.md
+      - Prompt injection presets: prompt-injection.md
       - Body logging: body-logging.md
       - Alerts: alerts.md
       - Streams: streams.md
@@ -80,6 +81,12 @@ nav:
       - Roles and permissions: roles.md
       - SCIM provisioning: scim.md
       - SAML sign-in: saml.md
+      - Identity providers: identity-providers.md
+      - Developer portal: developer-portal.md
+      - Why was this denied?: why-denied.md
+      - Chargeback and FOCUS exports: chargeback.md
+      - Forecasts and unusual spend: forecast.md
+      - Usage rollups and analytics: analytics.md
       - Cedar policies: cedar.md
       - Configuration views: admin-ui-config.md
       - Editing configuration: admin-ui-config-editing.md
@@ -92,6 +99,7 @@ nav:
       - Kubernetes operator: operator.md
       - Observability: observability.md
       - Runbook: runbook.md
+      - Backup and upgrades: backup.md
       - Releases: releasing.md
       - Roadmap: roadmap.md
   - Decisions: adr/README.md

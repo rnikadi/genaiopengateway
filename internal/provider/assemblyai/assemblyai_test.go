@@ -84,7 +84,13 @@ func TestTimeout(t *testing.T) {
 	cfg := up.Start(t)
 	cfg.Timeout = config.Duration(50 * time.Millisecond)
 	resp, _ := nativetest.Send(t, New(cfg, http.DefaultClient), &provider.Request{Endpoint: provider.Transcriptions, Model: "universal", Body: []byte(`{}`), Files: file()})
-	if resp.StatusCode != http.StatusGatewayTimeout || up.Calls[len(up.Calls)-1].Method != "DELETE" {
-		t.Fatalf("%d, last call %+v", resp.StatusCode, up.Calls[len(up.Calls)-1])
+	// A poll cancelled by the timeout can reach the upstream after the
+	// DELETE, so look for the DELETE among all calls, not only the last.
+	deleted := false
+	for _, c := range up.Calls {
+		deleted = deleted || c.Method == "DELETE"
+	}
+	if resp.StatusCode != http.StatusGatewayTimeout || !deleted {
+		t.Fatalf("%d, calls %+v", resp.StatusCode, up.Calls)
 	}
 }

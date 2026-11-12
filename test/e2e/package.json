@@ -2,6 +2,11 @@
   "name": "genaiopengateway-e2e",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node admin-ui.mjs" },
-  "dependencies": { "playwright": "1.56.1" }
+  "scripts": {
+    "test": "node admin-ui.mjs"
+  },
+  "dependencies": {
+    "axe-core": "4.10.2",
+    "playwright": "1.56.1"
+  }
 }

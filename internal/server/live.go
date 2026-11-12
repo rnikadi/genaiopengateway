@@ -43,7 +43,7 @@ func (s *Server) live(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(ctx)
 	defer func() { s.finish(rt, rec, span, start) }()
 	fail := func(status int, code, msg string) {
-		rec.Status, rec.ErrorCode = status, code
+		rec.Status, rec.ErrorCode, rec.ErrorMessage = status, code, msg
 		writeError(w, provider.GenerateContent, status, code, msg)
 	}
 
@@ -77,7 +77,7 @@ func (s *Server) live(w http.ResponseWriter, r *http.Request) {
 	limit := rt.cfg.Limits.MaxRequestBytes
 	client.SetReadLimit(limit)
 	refuse := func(status int, code, msg string) {
-		rec.Status, rec.ErrorCode = status, code
+		rec.Status, rec.ErrorCode, rec.ErrorMessage = status, code, msg
 		if len(msg) > 120 {
 			msg = msg[:120]
 		}
@@ -197,10 +197,13 @@ func liveSetup(data []byte) (string, func(string) []byte) {
 	}
 	var setup map[string]json.RawMessage
 	var model string
-	if json.Unmarshal(msg["setup"], &setup) != nil || json.Unmarshal(setup["model"], &model) != nil || model == "" {
+	if json.Unmarshal(msg["setup"], &setup) != nil || json.Unmarshal(setup["model"], &model) != nil {
 		return "", nil
 	}
-	return strings.TrimPrefix(model, "models/"), func(upstream string) []byte {
+	if model = strings.TrimPrefix(model, "models/"); model == "" {
+		return "", nil
+	}
+	return model, func(upstream string) []byte {
 		setup["model"], _ = json.Marshal("models/" + strings.TrimPrefix(upstream, "models/"))
 		msg["setup"], _ = json.Marshal(setup)
 		out, _ := json.Marshal(msg)
@@ -211,7 +214,8 @@ func liveSetup(data []byte) (string, func(string) []byte) {
 // liveClientMessage drops a second setup, which could name another
 // model; everything else passes.
 func liveClientMessage(data []byte) []byte {
-	if bytes.Contains(data, []byte(`"setup"`)) {
+	// A setup key is in plain text unless it uses \u escapes.
+	if bytes.Contains(data, []byte(`"setup"`)) || bytes.Contains(data, []byte(`\u`)) {
 		var msg map[string]json.RawMessage
 		if json.Unmarshal(data, &msg) == nil && msg["setup"] != nil {
 			return []byte{}

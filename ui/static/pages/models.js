@@ -1,4 +1,5 @@
-import { html, api, useSession, useLoad, Loading, Table, PageHeader, Health, endpointNames, providerTypes, priceText } from '../lib.js';
+import { html, api, useLoad, useSession, Loading, Table, PageHeader, Health, endpointNames, providerTypes, priceText } from '../lib.js';
+import { useConfigObjects, DeletedObjects } from './config.js';
 
 
 // silent marks a target that served nothing while a later one did: it is
@@ -16,19 +17,21 @@ function Circuit({ c }) {
 
 const silent = (targets, i) => !targets[i].health?.requests && targets.slice(i + 1).some((t) => t.health?.requests);
 
-export function Models() {
-  const s = useSession();
+export function Models({ params }) {
   const state = useLoad(() => api('GET', '/admin/v1/models'));
+  const cfg = useConfigObjects('models', { params, onChange: state.reload });
+  const s = useSession();
   return html`
-    <${PageHeader} title="Models" sub="Virtual models from the gateway's configuration. The strategy chooses the first target and the rest are fallbacks; health covers the last hour. Endpoints are those the targets' provider types support: an embedding model on an OpenAI-compatible provider still lists chat.">
-      ${s.owner && html`<a class="button secondary" href="#/config?kind=models">Manage in Configuration</a>`}
+    <${PageHeader} title="Models" sub="The model names clients ask for. The strategy picks the first target and the rest are fallbacks; health covers the last hour.">
+      ${s.has('playground.use') && html`<a class="button secondary" href="#/playground">Try in the playground</a>`}
+      ${cfg.newButton}
     <//>
     <${Loading} state=${state}>${(d) => html`<${Table}
       rowKey=${(m) => m.name}
       rows=${d.data}
-      empty=${html`No models are configured. Owners add them with the <a href="#/setup">setup wizard</a> or on the <a href="#/config?kind=models">Configuration page</a>.`}
+      empty=${cfg.owner ? html`No models yet. <a href="#/setup">Add a provider from a preset</a> to get its models, or add one with New model.` : 'No models are configured.'}
       columns=${[
-        { label: 'Model', render: (m) => html`<strong>${m.name}</strong><div class="chips">${m.endpoints.map((e) => html`<span class="badge" key=${e}>${endpointNames[e] || e}</span>`)}</div><div class="muted small">${strategyNames[m.strategy] || m.strategy}${m.sticky ? ', sticky per user' : ''}${m.retries?.attempts ? ` · ${m.retries.attempts} ${m.retries.attempts === 1 ? 'retry' : 'retries'}` : ''}</div>` },
+        { label: 'Model', render: (m) => html`<strong>${m.name}</strong> ${cfg.source(m.name)}<div class="chips">${m.endpoints.map((e) => html`<span class="badge" key=${e}>${endpointNames[e] || e}</span>`)}</div><div class="muted small">${strategyNames[m.strategy] || m.strategy}${m.sticky ? ', sticky per user' : ''}${m.retries?.attempts ? ` · ${m.retries.attempts} ${m.retries.attempts === 1 ? 'retry' : 'retries'}` : ''}</div>` },
         {
           label: 'Targets',
           render: (m) => html`<ol class="targets">${m.targets.map(
@@ -40,7 +43,9 @@ export function Models() {
             </li>`,
           )}</ol>`,
         },
-        ...(s.owner ? [{ label: '', render: (m) => html`<a class="button secondary" href=${`#/config?kind=models&edit=${encodeURIComponent(m.name)}`}>Edit</a>` }] : []),
+        ...(cfg.owner ? [{ label: html`<span class="sr-only">Actions</span>`, render: (m) => cfg.actions(m.name) }] : []),
       ]}
-    />`}<//>`;
+    />`}<//>
+    <${DeletedObjects} cfg=${cfg} />
+    ${cfg.dialogs}`;
 }

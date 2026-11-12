@@ -48,7 +48,7 @@ var SecretFields = map[string][][]string{
 	KindAlertWebhooks: {{"url"}, {"secret"}},
 	KindStreams:       {{"url"}, {"secret"}, {"headers", "*"}},
 	KindA2AAgents:     {{"headers", "*"}},
-	KindSettings:      {{"sso", "oidc", "client_secret"}},
+	KindSettings:      {{"sso", "oidc", "client_secret"}, {"sso", "saml", "sp_private_key"}},
 }
 
 // objectName is what a stored object may be called: it appears in URLs,

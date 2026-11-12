@@ -97,7 +97,7 @@ await step('owner creates, rotates and revokes a virtual key', async () => {
   const team = await adminAPI('POST', `/admin/v1/orgs/${org.id}/teams`, { name: 'apps' });
   const owner = `svc-${run}@example.com`;
   const { ctx, page } = await signIn('owner@example.com');
-  await page.click('nav >> text=Virtual keys');
+  await page.click('nav >> text="Keys"');
   await page.click('button:has-text("New key")');
   await page.selectOption('.modal select', team.id);
   await page.fill('.modal label:has-text("Name") input', 'billing');
@@ -184,8 +184,8 @@ await step('owner turns on a guardrail and sees it block', async () => {
 await step('owner calls a model as a team in the playground', async () => {
   const { ctx, page } = await signIn('owner@example.com');
   const org = (await adminAPI('GET', '/admin/v1/orgs?limit=500')).data.find((o) => o.name === orgName);
-  await page.click('nav >> text=Playground');
-  // The Overview has an organization picker too: pick on the playground.
+  await page.click('.topbar >> text=Playground');
+  // Home has an organization picker too: pick on the playground.
   await page.waitForSelector('h1:has-text("Playground")');
   await page.selectOption('label:has-text("Organization") select', org.id);
   try {
@@ -232,17 +232,20 @@ await step('owner sees everything the gateway is configured with', async () => {
   assert.ok(await page.locator('td:has-text("Anthropic")').count(), 'provider types are shown');
   await page.click('nav >> text=Models');
   // chat-default is on the Providers page too, so wait for what only Models shows.
-  await page.waitForSelector('td strong:has-text("chat-default") + .chips .badge:has-text("Chat completions")');
+  await page.waitForSelector('td:has(strong:has-text("chat-default")) .chips .badge:has-text("Chat completions")');
   await page.click('nav >> text=Guardrails');
   await page.click('[role=tab]:has-text("Definitions")');
   await page.waitForSelector('td code:has-text("no-pii")');
   await page.click('nav >> text=Alerts');
-  await page.waitForSelector('h2:has-text("Webhooks")');
+  await page.click('[role=tab]:has-text("Webhooks")');
+  await page.waitForSelector('text=Budget alerts fire at');
   await page.click('nav >> text=Settings');
+  await page.waitForSelector('[data-setting="sso.oidc.issuer"]');
+  const signInPage = await page.content();
+  await page.click('.subnav >> text=Startup values');
   await page.waitForSelector('dt:has-text("Version")');
-  assert.ok(await page.locator('text=Identity provider').count(), 'sign-in settings are shown');
-  const html = await page.content();
-  for (const secret of [adminToken, 'local-dex-client-secret']) assert.ok(!html.includes(secret), 'no secret on the settings page');
+  const html = signInPage + await page.content();
+  for (const secret of [adminToken, 'local-dex-client-secret']) assert.ok(!html.includes(secret), 'no secret on the settings pages');
   await ctx.close();
 });
 
@@ -290,20 +293,25 @@ await step('owner changes a gateway setting and resets it', async () => {
   }
   const { ctx, page } = await signIn('owner@example.com');
   await page.click('nav >> text=Settings');
+  await page.click('.subnav >> text=Limits');
   const field = (path) => page.locator(`[data-setting="${path}"]`);
-  await field('limits.max_realtime_session').locator('.badge:has-text("Default")').waitFor();
-  assert.ok(await field('limits.max_realtime_session').locator('text=Default: 30m').count(), 'the default is shown');
+  await field('limits.max_realtime_session').locator('text=Default: 30m').waitFor();
+  assert.equal(await field('limits.max_realtime_session').locator('.badge').count(), 0, 'a default value has no badge');
+  // Sizes are entered with a unit.
+  assert.equal(await field('limits.max_request_bytes').locator('select').inputValue(), String(1 << 20));
   await field('limits.max_realtime_session').locator('input').fill('45m');
   await page.locator('section:has(h2:has-text("Request limits")) button[type=submit]').click();
   await field('limits.max_realtime_session').locator('.badge:has-text("Set here")').waitFor();
   const stored = (await adminAPI('GET', '/admin/v1/settings')).fields.find((f) => f.path === 'limits.max_realtime_session');
   assert.deepEqual([stored.value, stored.source], ['45m', 'stored']);
   // A bad value is refused with the reason, and nothing is saved.
+  await page.click('.subnav >> text=MCP and agents');
   await field('mcp.refresh_interval').locator('input').fill('soon');
   await page.locator('section:has(h2:has-text("MCP")) button[type=submit]').click();
   await page.waitForSelector('section:has(h2:has-text("MCP")) .notice.error:has-text("invalid duration")');
+  await page.click('.subnav >> text=Limits');
   await field('limits.max_realtime_session').locator('button:has-text("Reset")').click();
-  await field('limits.max_realtime_session').locator('.badge:has-text("Default")').waitFor();
+  await field('limits.max_realtime_session').locator('.badge').waitFor({ state: 'detached' });
   assert.ok(!(await adminAPI('GET', '/admin/v1/settings')).stored.limits, 'the reset removes the stored value');
   await ctx.close();
 });
@@ -311,8 +319,8 @@ await step('owner changes a gateway setting and resets it', async () => {
 await step('owner adds a guardrail with the form', async () => {
   const { ctx, page } = await signIn('owner@example.com');
   const name = `e2e-regex-${run}`;
-  await page.click('nav >> text=Configuration');
-  await page.click('[role=tab]:has-text("Guardrails")');
+  await page.click('nav >> text=Guardrails');
+  await page.click('[role=tab]:has-text("Definitions")');
   await page.click('button:has-text("New guardrail")');
   await page.fill('.modal label:has-text("Name") input', name);
   await page.selectOption('.modal [data-setting="guardrails.type"] select', 'regex');
@@ -328,11 +336,11 @@ await step('owner adds a guardrail with the form', async () => {
 await step('owner changes a model from the config file and resets it', async () => {
   const { ctx, page } = await signIn('owner@example.com');
   await adminAPI('POST', '/admin/v1/config/models/chat-default/reset').catch(() => {});
-  // Edit on the Models page opens the same editor on the Configuration page.
+  // Models are edited on the Models page.
   await page.click('nav >> text=Models');
-  await page.locator('tr', { has: page.locator('strong', { hasText: /^chat-default$/ }) }).locator('a:has-text("Edit")').click();
+  const row = page.locator('tr', { has: page.locator('strong', { hasText: /^chat-default$/ }) });
+  await row.locator('button:has-text("Edit")').click();
   await page.waitForSelector('.modal >> text=comes from the config file');
-  const row = page.locator('tr', { has: page.locator('td code', { hasText: /^chat-default$/ }) });
   await page.locator('.modal [data-setting="models.targets.price.output_per_mtok"] input').first().fill('2.5');
   await page.click('.modal button[type=submit]');
   await row.locator('.badge:has-text("Changed here")').waitFor();
@@ -352,21 +360,21 @@ await step('owner adds a provider and a model from the UI', async () => {
   const { ctx, page } = await signIn('owner@example.com');
   const provider = `e2e-${run}`;
   const model = `e2e-chat-${run}`;
-  await page.click('nav >> text=Configuration');
-  await page.waitForSelector('td code:has-text("openai")');
+  await page.click('nav >> text=Providers');
+  await page.waitForSelector('td strong:has-text("openai")');
   assert.ok(await page.locator('.badge:has-text("From config file")').count(), 'file objects are labelled');
   await page.click('button:has-text("New provider")');
   await page.fill('.modal label:has-text("Name") input', provider);
   await page.fill('.modal label:has-text("Base URL") input', 'http://127.0.0.1:9/v1');
   await page.click('.modal button[type=submit]');
-  await page.waitForSelector(`td code:has-text("${provider}")`);
-  await page.click('[role=tab]:has-text("Models")');
+  await page.waitForSelector(`td strong:has-text("${provider}")`);
+  await page.click('nav >> text=Models');
   await page.click('button:has-text("New model")');
   await page.fill('.modal label:has-text("Name") input', model);
   await page.selectOption('.modal label:has-text("provider") select', provider);
   await page.fill('.modal label:has-text("Upstream model") input', 'm');
   await page.click('.modal button[type=submit]');
-  await page.waitForSelector(`td code:has-text("${model}")`);
+  await page.waitForSelector(`td strong:has-text("${model}")`);
   // A model on a provider that does not exist is refused, with the reason.
   await page.click('button:has-text("New model")');
   await page.fill('.modal label:has-text("Name") input', `broken-${run}`);
@@ -375,9 +383,6 @@ await step('owner adds a provider and a model from the UI', async () => {
   await page.click('.modal button[type=submit]');
   await page.waitForSelector('.modal .notice.error:has-text("missing")');
   await page.click('.modal button:has-text("Cancel")');
-  // The new model is live on this replica.
-  await page.click('nav >> text=Models');
-  await page.waitForSelector(`td strong:has-text("${model}")`);
   await adminAPI('DELETE', `/admin/v1/config/models/${model}`);
   await adminAPI('DELETE', `/admin/v1/config/providers/${provider}`);
   const audit = await adminAPI('GET', '/admin/v1/audit?limit=4');
@@ -399,7 +404,7 @@ await step('viewer reads but cannot change anything', async () => {
   assert.equal(await pageFetch(page, 'GET', '/admin/v1/settings'), 403);
   assert.equal(await pageFetch(page, 'GET', '/admin/v1/config'), 403);
   assert.equal(await pageFetch(page, 'GET', '/admin/v1/providers'), 200);
-  assert.equal(await page.locator('nav >> text=Playground').count(), 0, 'the playground is for owners and admins');
+  assert.equal(await page.locator('.topbar >> text=Playground').count(), 0, 'the playground is for owners and admins');
   await page.goto(`${base}/ui/#/config`);
   await page.waitForSelector('h1:has-text("Owners only")');
   await ctx.close();

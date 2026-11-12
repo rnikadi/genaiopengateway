@@ -1,5 +1,9 @@
 # GenAIOpenGateway
 
+[![ci](https://github.com/rnikadi/genaiopengateway/actions/workflows/ci.yml/badge.svg)](https://github.com/rnikadi/genaiopengateway/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/rnikadi/genaiopengateway/badge)](https://scorecard.dev/viewer/?uri=github.com/rnikadi/genaiopengateway)
+[![fuzz](https://github.com/rnikadi/genaiopengateway/actions/workflows/fuzz.yml/badge.svg)](docs/security-audit.md#fuzzing)
+
 **The GenAI gateway with no enterprise edition.** One open-source gateway for every model type and every MCP server, with SSO, budgets, guardrails and audit included, under Apache-2.0, with no paid tier and no license keys ([charter](CHARTER.md)).
 
 [Documentation](https://rnikadi.github.io/genaiopengateway/) · [Releases](https://github.com/rnikadi/genaiopengateway/releases) · [Benchmarks](docs/benchmarks.md) · [Roadmap](docs/roadmap.md)

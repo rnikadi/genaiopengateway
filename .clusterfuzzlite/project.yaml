@@ -1,0 +1,3 @@
+# ClusterFuzzLite runs the Go fuzz targets in CI (docs/security-audit.md#fuzzing).
+# The same Dockerfile and build.sh are what an OSS-Fuzz project needs.
+language: go

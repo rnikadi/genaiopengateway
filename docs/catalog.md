@@ -6,7 +6,7 @@ Each preset has the provider type, base URL or cloud location, where to get a ke
 
 ## Prices are a starting point
 
-Prices are copied into each target when the wizard creates it, so they are ordinary config: change them on the Configuration page or in the config file, and nothing changes when the catalog does. They are each provider's public list price when the catalog version was written, without negotiated discounts, and providers change prices without notice, so check the linked price list before relying on cost reports.
+Prices are copied into each target when the wizard creates it, so they are ordinary config: change them on the model's form on the Models page or in the config file, and nothing changes when the catalog does. They are each provider's public list price when the catalog version was written, without negotiated discounts, and providers change prices without notice, so check the linked price list before relying on cost reports.
 
 The catalog is refreshed with each release. A test checks that every preset, with every model, is a config the gateway accepts.
 
