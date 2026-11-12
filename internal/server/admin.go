@@ -59,6 +59,7 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	h("POST /admin/v1/keys/{key_id}/rotate", s.rotateKey)
 	h("GET /admin/v1/keys", s.listAllKeys)
 	h("GET /admin/v1/usage", s.queryUsage)
+	h("GET /admin/v1/usage/export", s.exportUsage)
 	h("GET /admin/v1/audit", s.listAudit)
 	h("GET /admin/v1/mcp/servers", s.listMCPServers)
 	h("GET /admin/v1/mcp/tools", s.listMCPTools)
@@ -782,28 +783,12 @@ func (s *Server) revokeKey(w http.ResponseWriter, r *http.Request) error {
 
 // queryUsage sums usage and cost over a time range, grouped by model, team, key, provider, endpoint or day.
 func (s *Server) queryUsage(w http.ResponseWriter, r *http.Request) error {
-	q := r.URL.Query()
-	if err := s.readScope(r, config.PermUsageRead, q.Get("org_id"), q.Get("team_id"), q.Get("key_id")); err != nil {
+	uq, err := s.usageFilter(r)
+	if err != nil {
 		return err
 	}
-	now := time.Now().UTC()
-	uq := store.UsageQuery{
-		OrgID: q.Get("org_id"), TeamID: q.Get("team_id"), KeyID: q.Get("key_id"),
-		From:    time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC),
-		To:      now.Add(time.Millisecond),
-		GroupBy: q.Get("group_by"),
-	}
-	if uq.GroupBy == "" {
+	if uq.GroupBy = r.URL.Query().Get("group_by"); uq.GroupBy == "" {
 		uq.GroupBy = "model"
-	}
-	for name, dst := range map[string]*time.Time{"from": &uq.From, "to": &uq.To} {
-		if v := q.Get(name); v != "" {
-			t, err := time.Parse(time.RFC3339, v)
-			if err != nil {
-				return badRequest("%s must be an RFC 3339 time", name)
-			}
-			*dst = t
-		}
 	}
 	switch uq.GroupBy {
 	case "model", "team", "key", "day", "provider", "endpoint":
@@ -818,6 +803,31 @@ func (s *Server) queryUsage(w http.ResponseWriter, r *http.Request) error {
 		"from": uq.From, "to": uq.To, "group_by": uq.GroupBy, "data": rows,
 	})
 	return nil
+}
+
+// usageFilter reads the scope and time range of a usage query: this
+// month so far unless from and to say otherwise.
+func (s *Server) usageFilter(r *http.Request) (store.UsageQuery, error) {
+	q := r.URL.Query()
+	if err := s.readScope(r, config.PermUsageRead, q.Get("org_id"), q.Get("team_id"), q.Get("key_id")); err != nil {
+		return store.UsageQuery{}, err
+	}
+	now := time.Now().UTC()
+	uq := store.UsageQuery{
+		OrgID: q.Get("org_id"), TeamID: q.Get("team_id"), KeyID: q.Get("key_id"),
+		From: time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC),
+		To:   now.Add(time.Millisecond),
+	}
+	for name, dst := range map[string]*time.Time{"from": &uq.From, "to": &uq.To} {
+		if v := q.Get(name); v != "" {
+			t, err := time.Parse(time.RFC3339, v)
+			if err != nil {
+				return uq, badRequest("%s must be an RFC 3339 time", name)
+			}
+			*dst = t
+		}
+	}
+	return uq, nil
 }
 
 // listAudit lists audit log entries, newest first, optionally for one organization.

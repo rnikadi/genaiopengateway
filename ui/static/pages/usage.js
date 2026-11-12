@@ -1,9 +1,14 @@
 import {
   html, useState, api, useLoad, useSession, Loading, Table, Bars, Columns, PageHeader, OrgPicker, defaultOrg, Card,
-  periods, usageQuery, totals, downloadCSV, usd, num, compact, endpointNames, mediaSummary,
+  periods, usageQuery, totals, qs, downloadCSV, usd, num, compact, endpointNames, mediaSummary,
 } from '../lib.js';
 
 const groups = { model: 'Model', team: 'Team', key: 'Key', day: 'Day', provider: 'Provider', endpoint: 'Endpoint' };
+
+function exportURL(f, format) {
+  const [from, to] = periods[f.period][1]();
+  return '/admin/v1/usage/export' + qs({ format, org_id: f.org, team_id: f.team, from: from.toISOString(), to: to?.toISOString() });
+}
 
 export function Usage({ params }) {
   const s = useSession();
@@ -62,6 +67,12 @@ export function Usage({ params }) {
         <section class="panel">
           <h2>Spend by ${groups[f.group_by].toLowerCase()}</h2>
           ${f.group_by === 'day' ? html`<${Columns} items=${items} format=${usd} />` : html`<${Bars} items=${[...items].sort((a, b) => b.value - a.value).slice(0, 15)} format=${usd} />`}
+        </section>
+        <section class="panel">
+          <div class="panel-header"><div><h2>Exports for finance</h2>
+            <p class="muted small">The whole period as CSV, for ${f.team ? 'this team' : f.org ? 'this organization' : 'every organization'}. The chargeback statement has one line per team with its share of the total. FOCUS has one line per day, team and model in the FinOps FOCUS columns that cost tools import.</p></div>
+            <div class="row-actions"><a class="button secondary" href=${exportURL(f, 'chargeback')} download>Chargeback CSV</a>
+            <a class="button secondary" href=${exportURL(f, 'focus')} download>FOCUS CSV</a></div></div>
         </section>
         <section class="panel">
           <div class="panel-header"><h2>Details</h2>${d.data.length > 0 && html`<button class="secondary" onClick=${() => csv(d.data)}>Download CSV</button>`}</div>

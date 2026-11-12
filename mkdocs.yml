@@ -83,6 +83,7 @@ nav:
       - Identity providers: identity-providers.md
       - Developer portal: developer-portal.md
       - Why was this denied?: why-denied.md
+      - Chargeback and FOCUS exports: chargeback.md
       - Cedar policies: cedar.md
       - Configuration views: admin-ui-config.md
       - Editing configuration: admin-ui-config-editing.md

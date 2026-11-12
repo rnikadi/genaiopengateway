@@ -1,0 +1,64 @@
+package store
+
+import (
+	"context"
+	"strings"
+	"time"
+)
+
+// UsageExportRow is one day's usage of one upstream model by one team
+// on one endpoint: the grain of the cost exports (docs/chargeback.md).
+type UsageExportRow struct {
+	Day           time.Time
+	OrgID, TeamID string
+	Provider      string
+	UpstreamModel string
+	Model         string
+	Endpoint      string
+	UsageRow
+}
+
+// UsageExport aggregates usage between From (inclusive) and To
+// (exclusive) by UTC day, team, upstream model and endpoint. GroupBy is
+// ignored.
+func (s *Store) UsageExport(ctx context.Context, uq UsageQuery) ([]UsageExportRow, error) {
+	where := []string{"ts >= ?", "ts < ?"}
+	args := []any{uq.From.UnixMilli(), uq.To.UnixMilli()}
+	if uq.OrgID != "" {
+		where = append(where, "org_id = ?")
+		args = append(args, uq.OrgID)
+	}
+	if uq.TeamID != "" {
+		where = append(where, "team_id = ?")
+		args = append(args, uq.TeamID)
+	}
+	if uq.KeyID != "" {
+		where = append(where, "key_id = ?")
+		args = append(args, uq.KeyID)
+	}
+	rows, err := s.db.QueryContext(ctx, s.q(`SELECT ts / 86400000 AS d, org_id, team_id, provider, upstream_model, model, endpoint,
+		COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),
+		COALESCE(SUM(cached_input_tokens), 0), COALESCE(SUM(reasoning_tokens), 0), COALESCE(SUM(images), 0), COALESCE(SUM(characters), 0),
+		COALESCE(SUM(audio_seconds), 0), COALESCE(SUM(video_seconds), 0), COALESCE(SUM(cost_usd), 0),
+		COALESCE(SUM(cache_hit), 0), COALESCE(SUM(saved_usd), 0)
+		FROM usage WHERE `+strings.Join(where, " AND ")+`
+		GROUP BY d, org_id, team_id, provider, upstream_model, model, endpoint
+		ORDER BY d, org_id, team_id, provider, upstream_model, model, endpoint`), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []UsageExportRow{}
+	for rows.Next() {
+		var r UsageExportRow
+		var day int64
+		if err := rows.Scan(&day, &r.OrgID, &r.TeamID, &r.Provider, &r.UpstreamModel, &r.Model, &r.Endpoint,
+			&r.Requests, &r.InputTokens, &r.OutputTokens, &r.CachedInputTokens, &r.ReasoningTokens,
+			&r.Images, &r.Characters, &r.AudioSeconds, &r.VideoSeconds, &r.CostUSD, &r.CacheHits, &r.SavedUSD); err != nil {
+			return nil, err
+		}
+		r.Day = toTime(day * 86400000)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
