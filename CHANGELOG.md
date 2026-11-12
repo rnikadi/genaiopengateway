@@ -4,9 +4,15 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- The admin UI's **Configuration** page is gone: each object is edited on its own page. Bookmarks to `#/config?kind=…` still open the right page. The page titles **Overview**, **Virtual keys** and **Usage** are now **Home**, **Keys** and **Usage and cost**. The admin UI's layout is not covered by the support policy, and the admin API is unchanged.
+
 ### Added
 
 - `genaiopengateway backup` and `restore` ([docs/backup.md](docs/backup.md)): a consistent snapshot of the database taken while the gateway serves, restored all or nothing into SQLite or Postgres, whichever the backup came from. The restore checks the schema version, the row counts and that the target has the encryption key the stored secrets need. This is also the way to move a zero-config SQLite install to Postgres.
+- A simpler admin UI ([docs/admin-ui.md](docs/admin-ui.md#layout-v11)). The menu has five groups named after jobs (Home, Access, AI services, Monitor, Settings) instead of 17 items in one list. Home opens with what needs attention, each with its action, and a setup checklist for owners. Providers, models, guardrails, MCP servers, virtual MCP servers, alert webhooks, streams and A2A agents are edited on the page that lists them. Search (Ctrl K) finds pages, organizations, models, MCP servers and keys. Settings are split into seven sub-pages, sizes are entered with a unit, and only values that are not the default carry a badge. The MCP page has tabs, with what needs review first. Times show as "5 minutes ago". On a phone the menu folds away.
+- Accessibility checks: CI runs axe-core over every admin UI page in the light and dark themes and fails on any WCAG 2.2 AA violation. The UI has a skip link, moves focus to each new page's heading, labels every settings control, and underlines links in text.
 - An upgrade and restore drill in CI (`scripts/upgrade-test.sh`): the previous release's database is upgraded by this build, backed up and restored, and must keep serving the same organizations, keys and configuration.
 
 ## [1.0.0] - 2026-11-12

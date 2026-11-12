@@ -1,4 +1,5 @@
 import { html, useState, api, useLoad, useSession, Loading, Table, PageHeader, KV, ErrorBox, Confirm, num, policySummary } from '../lib.js';
+import { ConfigKind } from './config.js';
 
 // Settings edits the gateway's own settings, for owners
 // (docs/admin-ui-settings.md). Each field shows its value, its default and
@@ -113,8 +114,21 @@ const sections = [
   },
 ];
 
+// Settings are split into pages by subject; each page holds sections from
+// above, by title (docs/admin-ui.md).
+const pages = [
+  { slug: 'sign-in', title: 'Sign-in and SSO', sections: ['Single sign-on', 'SAML sign-in'], sessions: true },
+  { slug: 'limits', title: 'Limits', sections: ['Request limits', 'If the limiter is unreachable', 'Circuit breaker'] },
+  { slug: 'data', title: 'Logging and data', sections: ['Data and refresh', 'Body logging'] },
+  { slug: 'cache', title: 'Cache', sections: ['Response cache'] },
+  { slug: 'notifications', title: 'Notifications', sections: ['Budget alerts'], streams: true },
+  { slug: 'mcp', title: 'MCP and agents', sections: ['MCP', 'A2A agents'] },
+  { slug: 'startup', title: 'Startup values', sections: [], startup: true },
+];
+
+// The default is shown in each field's hint, so only a value that is not
+// the default gets a badge saying where it comes from.
 const sourceBadge = {
-  default: html`<span class="badge">Default</span>`,
   file: html`<span class="badge warn" title="From the configuration file">Config file</span>`,
   stored: html`<span class="badge good" title="Saved in the admin UI; wins over the configuration file">Set here</span>`,
 };
@@ -209,25 +223,38 @@ function deletePath(obj, path) {
 
 const save = (spec) => api('PUT', '/admin/v1/config/settings/gateway', spec);
 
-export function Settings() {
+export function Settings({ args = [], params }) {
+  const page = pages.find((p) => p.slug === args[0]) || pages[0];
   const state = useLoad(() => api('GET', '/admin/v1/settings'));
   const [signOut, setSignOut] = useState(false);
   const [signedOut, setSignedOut] = useState(null);
   return html`
-    <${PageHeader} title="Settings" sub="How this gateway runs. A value saved here applies to every replica within the refresh interval and wins over the configuration file; Reset goes back to the file's value or the default.">
-      <button class="secondary" onClick=${() => setSignOut(true)}>Sign out everyone else</button>
-    <//>
-    ${signedOut !== null && html`<p class="notice">Signed out ${num(signedOut)} other ${signedOut === 1 ? 'session' : 'sessions'}.</p>`}
-    ${signOut && html`<${Confirm} title="Sign out everyone else" action="Sign out everyone"
-      message="Every other admin UI session ends now, on every replica; people sign in again. Use it when someone leaves or a session may be stolen. Your session stays."
-      onClose=${() => setSignOut(false)}
-      onConfirm=${async () => { const r = await api('DELETE', '/admin/v1/sessions'); setSignedOut(r.deleted); setSignOut(false); }} />`}
-    <${Loading} state=${state}>${(d) => {
-      const fields = Object.fromEntries(d.fields.map((f) => [f.path, f]));
-      return html`
-        ${sections.map((s) => html`<${Section} key=${s.title} section=${s} fields=${fields} stored=${d.stored} detectors=${d.detectors} permissions=${d.permissions || []} onSaved=${state.reload} />`)}
-        <${Startup} d=${d} />`;
-    }}<//>`;
+    <${PageHeader} title="Settings" sub="How this gateway runs. A value saved here applies to every replica within the refresh interval and wins over the configuration file; Reset goes back to the file's value or the default." />
+    <div class="subnav-layout">
+      <nav class="subnav" aria-label="Settings">
+        <ul role="list">${pages.map((p) => html`<li key=${p.slug}><a href=${`#/settings/${p.slug}`} class=${p === page ? 'active' : ''} aria-current=${p === page ? 'page' : undefined}>${p.title}</a></li>`)}</ul>
+      </nav>
+      <div class="subnav-body">
+        <h2 class="subnav-heading">${page.title}</h2>
+        ${page.sessions && html`<section class="panel">
+          <div class="panel-header"><div><h2>Sessions</h2><p class="muted small">End every other admin UI session now, on every replica, when someone leaves or a session may be stolen. Your session stays.</p></div>
+          <button class="secondary" onClick=${() => setSignOut(true)}>Sign out everyone else</button></div>
+          ${signedOut !== null && html`<p class="notice" role="status">Signed out ${num(signedOut)} other ${signedOut === 1 ? 'session' : 'sessions'}.</p>`}
+        </section>`}
+        ${signOut && html`<${Confirm} title="Sign out everyone else" action="Sign out everyone"
+          message="Every other admin UI session ends now, on every replica; people sign in again. Use it when someone leaves or a session may be stolen. Your session stays."
+          onClose=${() => setSignOut(false)}
+          onConfirm=${async () => { const r = await api('DELETE', '/admin/v1/sessions'); setSignedOut(r.deleted); setSignOut(false); }} />`}
+        <${Loading} state=${state}>${(d) => {
+          const fields = Object.fromEntries(d.fields.map((f) => [f.path, f]));
+          return html`
+            ${sections.filter((x) => page.sections.includes(x.title)).map((x) => html`<${Section} key=${x.title} section=${x} fields=${fields} stored=${d.stored} detectors=${d.detectors} permissions=${d.permissions || []} onSaved=${state.reload} />`)}
+            ${page.streams && html`<p class="muted small">Alert webhooks are on the <a href="#/alerts?tab=webhooks">Alerts</a> page.</p>
+              <section class="panel"><h2>Streams</h2><p class="muted small">Send usage, audit, MCP call and guardrail records to a webhook or a file as they happen (docs/streams.md).</p><${ConfigKind} kind="streams" params=${params} /></section>`}
+            ${page.startup && html`<${Startup} d=${d} />`}`;
+        }}<//>
+      </div>
+    </div>`;
 }
 
 function Section({ section, fields, stored, detectors, permissions, onSaved }) {
@@ -269,10 +296,11 @@ function Section({ section, fields, stored, detectors, permissions, onSaved }) {
         value=${f.path in draft ? draft[f.path] : input(f, fields[f.path]?.value)}
         onChange=${(v) => setDraft({ ...draft, [f.path]: v })}
         onReset=${() => write((spec) => deletePath(spec, f.path))} />`)}
-      <footer>
-        ${changed && html`<button type="button" class="secondary" onClick=${() => setDraft({})}>Discard</button>`}
-        <button type="submit" disabled=${busy || !changed}>${busy ? 'Saving…' : 'Save'}</button>
-      </footer>
+      ${changed && html`<footer class="savebar" role="region" aria-label=${`Unsaved changes in ${section.title}`}>
+        <span class="muted small">Unsaved changes</span>
+        <button type="button" class="secondary" onClick=${() => setDraft({})}>Discard</button>
+        <button type="submit" disabled=${busy}>${busy ? 'Saving…' : 'Save'}</button>
+      </footer>`}
     </form>
   </section>`;
 }
@@ -280,28 +308,34 @@ function Section({ section, fields, stored, detectors, permissions, onSaved }) {
 function Setting({ f, info, value, detectors, permissions, customRoles, onChange, onReset }) {
   const { catalog } = useSession();
   const set = (e) => onChange(e.target.value);
+  const lid = 'setting-' + f.path.replace(/\./g, '-');
+  const hid = lid + '-hint';
+  const aria = { 'aria-labelledby': lid, 'aria-describedby': hid };
   let control;
   switch (f.type) {
     case 'bool':
-      control = html`<select value=${value} onChange=${set}><option value="true">${f.on}</option><option value="false">${f.off}</option></select>`;
+      control = html`<select ...${aria} value=${value} onChange=${set}><option value="true">${f.on}</option><option value="false">${f.off}</option></select>`;
       break;
-    case 'bytes': case 'int':
-      control = html`<input type="number" min="1" step="1" value=${value} onInput=${set} />`;
+    case 'bytes':
+      control = html`<${BytesInput} value=${value} onChange=${onChange} label=${f.label} />`;
+      break;
+    case 'int':
+      control = html`<input ...${aria} type="number" min="1" step="1" value=${value} onInput=${set} />`;
       break;
     case 'number':
-      control = html`<input type="number" min=${f.min} max=${f.max} step=${f.step} value=${value} onInput=${set} />`;
+      control = html`<input ...${aria} type="number" min=${f.min} max=${f.max} step=${f.step} value=${value} onInput=${set} />`;
       break;
     case 'list':
-      control = html`<textarea rows="3" value=${value} onInput=${set}></textarea>`;
+      control = html`<textarea ...${aria} rows="3" value=${value} onInput=${set}></textarea>`;
       break;
     case 'textarea':
-      control = html`<textarea rows="6" class="mono" value=${value} onInput=${set}></textarea>`;
+      control = html`<textarea ...${aria} rows="6" class="mono" value=${value} onInput=${set}></textarea>`;
       break;
     case 'secret':
-      control = html`<input type="password" autocomplete="off" value=${value} placeholder=${info.value ? '•••••••• (stored; type to replace)' : ''} onInput=${set} />`;
+      control = html`<input ...${aria} type="password" autocomplete="off" value=${value} placeholder=${info.value ? '•••••••• (stored; type to replace)' : ''} onInput=${set} />`;
       break;
     case 'model':
-      control = html`<select value=${value} onChange=${set}>
+      control = html`<select ...${aria} value=${value} onChange=${set}>
         <option value="">None</option>
         ${catalog.models.map((m) => html`<option key=${m.name} value=${m.name}>${m.name}</option>`)}
       </select>`;
@@ -318,17 +352,35 @@ function Setting({ f, info, value, detectors, permissions, customRoles, onChange
       control = html`<${CustomRolesEditor} roles=${value} permissions=${permissions} onChange=${onChange} />`;
       break;
     default:
-      control = html`<input value=${value} placeholder=${f.type === 'duration' ? (f.zero ? `Empty: ${f.zero.toLowerCase()}` : 'For example 30s, 5m, 24h or 7d') : ''} onInput=${set} />`;
+      control = html`<input ...${aria} value=${value} placeholder=${f.type === 'duration' ? (f.zero ? `Empty: ${f.zero.toLowerCase()}` : 'For example 30s, 5m, 24h or 7d') : ''} onInput=${set} />`;
   }
-  return html`<div class="field setting" data-setting=${f.path}>
-    <span>${f.label} ${sourceBadge[info.source] || ''}</span>
+  return html`<div class="field setting" data-setting=${f.path} role="group" aria-labelledby=${lid}>
+    <span><span id=${lid}>${f.label}</span> ${sourceBadge[info.source] || ''}</span>
     ${control}
-    <small class="muted">
+    <small class="muted" id=${hid}>
       Default: ${show(f, info.default)}${f.hint ? ` · ${f.hint}` : ''}
       ${info.source === 'stored' && html` · <button type="button" class="link" onClick=${onReset}>Reset</button>`}
     </small>
   </div>`;
 }
+
+// BytesInput edits a size in bytes as an amount and a unit, keeping the
+// value in bytes.
+function BytesInput({ value, onChange, label }) {
+  const n = value === '' || value === undefined || value === null ? null : Number(value);
+  const fit = n ? sizeUnits.find(([size]) => n % size === 0) : sizeUnits[1];
+  const [unit, setUnit] = useState(fit ? fit[0] : 1);
+  const amount = n === null ? '' : +(n / unit).toFixed(3);
+  const emit = (a, u) => onChange(a === '' ? '' : String(Math.round(Number(a) * u)));
+  return html`<div class="inline-row">
+    <input type="number" min="0" step="any" value=${amount} aria-label=${label} onInput=${(e) => emit(e.target.value, unit)} />
+    <select value=${unit} aria-label=${`${label} unit`} onChange=${(e) => { const u = Number(e.target.value); setUnit(u); if (amount !== '') emit(amount, u); }}>
+      ${sizeUnits.map(([size, name]) => html`<option key=${name} value=${size}>${name}</option>`)}
+    </select>
+  </div>`;
+}
+
+const sizeUnits = [[1 << 30, 'GiB'], [1 << 20, 'MiB'], [1 << 10, 'KiB'], [1, 'bytes']];
 
 function RolesEditor({ roles, customRoles, onChange }) {
   const set = (i, k, v) => onChange(roles.map((r, n) => (n === i ? { ...r, [k]: v } : r)));

@@ -1,11 +1,12 @@
-import { html, useState, useEffect, api, qs, useSession, useLoad, Loading, PageHeader, OrgPicker, defaultOrg, Table, ErrorBox, Tabs, when, num } from '../lib.js';
+import { html, useState, useEffect, api, qs, useSession, useLoad, Loading, PageHeader, OrgPicker, defaultOrg, Table, ErrorBox, Tabs, num, Ago } from '../lib.js';
+import { useConfigObjects, DeletedObjects } from './config.js';
 
 const actionBadge = { block: 'bad', redact: 'warn', log: '' };
 
 // guardrailColumns describe events; matched text is never stored, only
 // what kind of thing matched and how often.
 export const guardrailColumns = [
-  { label: 'Time', render: (e) => when(e.ts) },
+  { label: 'Time', render: (e) => html`<${Ago} t=${e.ts} />` },
   { label: 'Guardrail', render: (e) => html`<code>${e.guardrail}</code>` },
   { label: 'Stage', render: (e) => e.stage.replace('_', ' ') },
   { label: 'Action', render: (e) => html`<span class=${'badge ' + (actionBadge[e.action] ?? '')}>${e.action}</span>${e.failed ? html` <span class="badge warn" title="The check itself failed; on_error chose the action">check failed</span>` : ''}` },
@@ -16,11 +17,11 @@ export const guardrailColumns = [
 // Guardrails shows what guardrails did and how they are defined
 // (docs/guardrails.md).
 export function Guardrails({ params }) {
-  const [tab, setTab] = useState(params.get('tab') === 'definitions' ? 'definitions' : 'events');
+  const [tab, setTab] = useState(params.get('tab') === 'definitions' || params.get('edit') ? 'definitions' : 'events');
   return html`
     <${PageHeader} title="Guardrails" sub="Checks on model and MCP calls. Matched text is never stored." />
     <${Tabs} tabs=${{ events: 'Events', definitions: 'Definitions' }} value=${tab} onChange=${setTab} />
-    ${tab === 'events' ? html`<${Events} params=${params} />` : html`<${Definitions} />`}`;
+    ${tab === 'events' ? html`<${Events} params=${params} />` : html`<${Definitions} params=${params} />`}`;
 }
 
 const stageNames = { input: 'Input', output: 'Output', tool_input: 'Tool input', tool_output: 'Tool output' };
@@ -41,18 +42,22 @@ function check(g) {
   }
 }
 
-function Definitions() {
+function Definitions({ params }) {
   const state = useLoad(() => api('GET', '/admin/v1/guardrails'));
+  const cfg = useConfigObjects('guardrails', { params, onChange: state.reload });
   return html`<${Loading} state=${state}>${(d) => html`
-    <p class="muted small">Guardrails are defined in <code>guardrails</code> in the gateway's configuration. They run where an organization, team or key policy names them, and on the virtual MCP servers listed here.</p>
+    <div class="panel-header"><p class="muted small">A guardrail runs where an organization, team or key policy names it, and on the virtual MCP servers listed here.</p>${cfg.newButton}</div>
     <${Table} rows=${d.data} rowKey=${(g) => g.name} empty="No guardrails are configured." columns=${[
-      { label: 'Guardrail', render: (g) => html`<code>${g.name}</code>` },
+      { label: 'Guardrail', render: (g) => html`<code>${g.name}</code> ${cfg.source(g.name)}` },
       { label: 'Checks', render: (g) => check(g) },
       { label: 'Action', render: (g) => html`<span class=${'badge ' + (actionBadge[g.action] ?? '')}>${g.action}</span>` },
       { label: 'Stages', render: (g) => g.stages.map((st) => stageNames[st] || st).join(', ') },
       { label: 'If the check fails', render: (g) => (g.on_error ? `${g.on_error === 'allow' ? 'Allow' : 'Block'}${g.timeout ? `; timeout ${g.timeout}` : ''}` : html`<span class="muted small">Runs in the gateway</span>`) },
       { label: 'Virtual MCP servers', render: (g) => g.virtual_servers.join(', ') },
-    ]} />`}<//>`;
+      ...(cfg.owner ? [{ label: html`<span class="sr-only">Actions</span>`, render: (g) => cfg.actions(g.name) }] : []),
+    ]} />
+    <${DeletedObjects} cfg=${cfg} />
+    ${cfg.dialogs}`}<//>`;
 }
 
 function Events({ params }) {

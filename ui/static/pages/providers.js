@@ -1,4 +1,5 @@
-import { html, api, useSession, useLoad, Loading, Table, PageHeader, Health, providerTypes } from '../lib.js';
+import { html, api, useLoad, Loading, Table, PageHeader, Health, providerTypes } from '../lib.js';
+import { useConfigObjects, DeletedObjects } from './config.js';
 
 const authNames = {
   api_key: 'API key',
@@ -16,26 +17,29 @@ const where = (p) =>
       ? p.region + (p.base_url ? ` · ${p.base_url}` : '')
       : p.base_url;
 
-// Providers lists the upstreams from the gateway's configuration with
-// their health over the last hour (docs/admin-ui-config.md).
-export function Providers() {
-  const s = useSession();
+// Providers lists the upstreams with their health over the last hour, and
+// lets owners add, change and delete them here (docs/admin-ui.md).
+export function Providers({ params }) {
   const state = useLoad(() => api('GET', '/admin/v1/providers'));
+  const cfg = useConfigObjects('providers', { params, onChange: state.reload });
   return html`
-    <${PageHeader} title="Providers" sub="Upstreams from the gateway's configuration. Health covers the last hour across every replica. Credentials are never shown.">
-      ${s.owner && html`<a class="button" href="#/setup">Add a provider</a> <a class="button secondary" href="#/config?kind=providers">Manage in Configuration</a>`}
+    <${PageHeader} title="Providers" sub="The upstream services models call. Health covers the last hour across every replica. Credentials are never shown.">
+      ${cfg.owner && html`<a class="button secondary" href="#/setup">Add from a preset</a>`}
+      ${cfg.newButton}
     <//>
     <${Loading} state=${state}>${(d) => html`<${Table}
       rowKey=${(p) => p.name}
       rows=${d.data}
-      empty=${s.owner ? html`No providers are configured. The <a href="#/setup">setup wizard</a> adds one from a list of presets.` : 'No providers are configured.'}
+      empty=${cfg.owner ? html`No providers yet. <a href="#/setup">Add one from a preset</a>: the endpoint, models and prices are filled in for you.` : 'No providers are configured.'}
       columns=${[
-        { label: 'Provider', render: (p) => html`<strong>${p.name}</strong><div class="muted small">${providerTypes[p.type] || p.type}${p.residency ? html` · <span class="badge" title="Data residency">${p.residency}</span>` : ''}</div>` },
+        { label: 'Provider', render: (p) => html`<strong>${p.name}</strong> ${cfg.source(p.name)}<div class="muted small">${providerTypes[p.type] || p.type}${p.residency ? html` · <span class="badge" title="Data residency">${p.residency}</span>` : ''}</div>` },
         { label: 'Endpoint', render: (p) => html`<code class="small">${where(p)}</code>` },
         { label: 'Auth', render: (p) => html`${authNames[p.auth] || p.auth}${p.header_names?.length ? html`<div class="muted small">Headers: ${p.header_names.join(', ')}</div>` : ''}` },
-        { label: 'Models', render: (p) => (p.models.length ? html`<span class="chips">${p.models.map((m) => html`<a class="badge" href="#/models" key=${m}>${m}</a>`)}</span>` : html`<span class="muted small">Not used by any model</span>`) },
+        { label: 'Models', render: (p) => (p.models.length ? html`<span class="chips">${p.models.map((m) => html`<a class="badge" href=${`#/models?edit=${encodeURIComponent(m)}`} key=${m}>${m}</a>`)}</span>` : html`<span class="muted small">Not used by any model</span>`) },
         { label: 'Last hour', render: (p) => html`<${Health} h=${p.health} />` },
-        ...(s.owner ? [{ label: '', render: (p) => html`<a class="button secondary" href=${`#/config?kind=providers&edit=${encodeURIComponent(p.name)}`}>Edit</a>` }] : []),
+        ...(cfg.owner ? [{ label: html`<span class="sr-only">Actions</span>`, render: (p) => cfg.actions(p.name) }] : []),
       ]}
-    />`}<//>`;
+    />`}<//>
+    <${DeletedObjects} cfg=${cfg} />
+    ${cfg.dialogs}`;
 }

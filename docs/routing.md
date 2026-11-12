@@ -16,7 +16,7 @@ models:
       - {provider: anthropic, model: claude-haiku-4-5, weight: 1}
 ```
 
-Every field here can also be set in the admin UI. Model fields are on the model's form on the **Configuration** page, and the circuit breaker is on the **Settings** page. Changes apply on every replica within `store.refresh_interval`.
+Every field here can also be set in the admin UI. Model fields are on the model's form on the **Models** page, and the circuit breaker is under **Settings → Limits**. Changes apply on every replica within `store.refresh_interval`.
 
 ## Strategies
 

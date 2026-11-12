@@ -41,7 +41,7 @@ Open the Admin UI, sign in with the token, and follow **Set up your gateway** on
 4. **Test.** Sends a chat completion as the team, through the same path as an application.
 5. **Use it.** Shows the key once, with snippets for curl, the OpenAI Python and Node SDKs, and MCP clients.
 
-Everything the wizard creates is ordinary configuration: providers and models on the Configuration page, the organization, team and key on the Organizations and Virtual keys pages.
+Everything the wizard creates is ordinary configuration: providers and models on the Providers and Models pages, the organization, team and key on the Organizations and Keys pages.
 
 CI runs this whole flow in a browser on every pull request (`test/e2e/quickstart.sh`).
 

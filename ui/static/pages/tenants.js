@@ -1,6 +1,6 @@
 import {
   html, useState, api, useLoad, useSession, Loading, Table, Modal, PolicyForm, Confirm, PageHeader, Card, CopyButton,
-  usageQuery, totals, policySummary, usd, num, day, when, Field, ErrorBox, none,
+  usageQuery, totals, policySummary, usd, num, day, when, Field, ErrorBox, none, Ago
 } from '../lib.js';
 import { keyStatus, KeyActions, KeyModals } from './keys.js';
 
@@ -135,7 +135,7 @@ function CedarPanel({ org, canWrite, teams }) {
       ${versions.data.length > 1 && html`<details><summary>History (${versions.data.length} versions)</summary>
         <${Table} rowKey=${(v) => v.version} rows=${versions.data} columns=${[
           { label: 'Version', render: (v) => v.version },
-          { label: 'Saved', render: (v) => when(v.created_at) },
+          { label: 'Saved', render: (v) => html`<${Ago} t=${v.created_at} />` },
           { label: 'By', render: (v) => v.created_by },
         ]} />
       </details>`}`}<//>
@@ -273,7 +273,7 @@ export function Team({ args: [id] }) {
             { label: 'Status', render: keyStatus },
             { label: 'Policy', render: (k) => html`<span class="muted">${policySummary(k)}</span>` },
             { label: 'Spend this month', num: true, render: (k) => usd(byKey[k.id]?.cost_usd) },
-            { label: 'Last used', render: (k) => (k.last_used_at ? when(k.last_used_at) : html`<span class="muted">Never</span>`) },
+            { label: 'Last used', render: (k) => (k.last_used_at ? html`<${Ago} t=${k.last_used_at} />` : html`<span class="muted">Never</span>`) },
             { label: 'Expires', render: (k) => (k.expires_at ? day(k.expires_at) : html`<span class="muted">Never</span>`) },
             {
               label: '',
@@ -321,7 +321,7 @@ function Credentials({ team, canWrite }) {
       empty="No providers are configured."
       columns=${[
         { label: 'Provider', render: (c) => html`<code>${c.provider}</code><div class="muted small">${c.type}</div>` },
-        { label: 'Credential', render: (c) => (c.set ? html`<span class="badge good">Team's own key</span><div class="muted small">${when(c.updated_at)} · ${c.updated_by}</div>` : c.supported ? html`<span class="muted">Shared key</span>` : html`<span class="muted">Shared credential (not settable per team)</span>`) },
+        { label: 'Credential', render: (c) => (c.set ? html`<span class="badge good">Team's own key</span><div class="muted small"><${Ago} t=${c.updated_at} /> · ${c.updated_by}</div>` : c.supported ? html`<span class="muted">Shared key</span>` : html`<span class="muted">Shared credential (not settable per team)</span>`) },
         {
           label: '',
           render: (c) => canWrite && c.supported && html`<div class="row-actions">

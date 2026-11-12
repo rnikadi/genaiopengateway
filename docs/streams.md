@@ -25,7 +25,7 @@ streams:
     flush_interval: 10s                        # default 5s
 ```
 
-Owners can also add streams in the admin UI, on the **Streams** tab of the Configuration page. They can also use the admin API at `PUT /admin/v1/config/streams/{name}`. The URL, secret and header values are encrypted in the database. Every replica applies a change within `store.refresh_interval`.
+Owners can also add streams in the admin UI, under **Settings → Notifications**. They can also use the admin API at `PUT /admin/v1/config/streams/{name}`. The URL, secret and header values are encrypted in the database. Every replica applies a change within `store.refresh_interval`.
 
 ## Format
 

@@ -19,6 +19,8 @@ import { Config } from './pages/config.js';
 import { Jobs } from './pages/jobs.js';
 import { Setup } from './pages/setup.js';
 import { Directory } from './pages/directory.js';
+import { Agents } from './pages/agents.js';
+import { Search, useSearchShortcut } from './search.js';
 
 const routes = [
   [/^\/$/, Overview, 'overview'],
@@ -34,33 +36,41 @@ const routes = [
   [/^\/mcp$/, MCP, 'mcp'],
   [/^\/models$/, Models, 'models'],
   [/^\/providers$/, Providers, 'providers'],
+  [/^\/agents$/, Agents, 'agents'],
   [/^\/alerts$/, Alerts, 'alerts'],
-  [/^\/settings$/, Settings, 'settings', 'owner'],
-  [/^\/playground$/, Playground, 'playground'],
-  [/^\/config$/, Config, 'config', 'owner'],
+  [/^\/settings(?:\/([a-z-]+))?$/, Settings, 'settings', 'owner'],
+  [/^\/playground$/, Playground, 'playground', 'playground.use'],
+  [/^\/config$/, Config, 'settings', 'owner'],
   [/^\/audit$/, Audit, 'audit'],
-  [/^\/setup$/, Setup, 'setup', 'owner'],
+  [/^\/setup$/, Setup, 'overview', 'owner'],
   [/^\/directory$/, Directory, 'directory', 'owner'],
 ];
 
+// The menu groups pages by the job people come to do (docs/admin-ui.md).
+// Each entry is [section, href, label, permission]; a group with nothing
+// the operator may open is left out.
 const nav = [
-  ['overview', '#/', 'Overview'],
-  ['orgs', '#/orgs', 'Organizations'],
-  ['keys', '#/keys', 'Virtual keys'],
-  ['usage', '#/usage', 'Usage'],
-  ['requests', '#/requests', 'Requests'],
-  ['jobs', '#/jobs', 'Jobs'],
-  ['guardrails', '#/guardrails', 'Guardrails'],
-  ['mcp', '#/mcp', 'MCP'],
-  ['models', '#/models', 'Models'],
-  ['playground', '#/playground', 'Playground', 'playground.use'],
-  ['providers', '#/providers', 'Providers'],
-  ['alerts', '#/alerts', 'Alerts'],
-  ['audit', '#/audit', 'Audit log'],
-  ['config', '#/config', 'Configuration', 'owner'],
-  ['directory', '#/directory', 'Directory', 'owner'],
-  ['settings', '#/settings', 'Settings', 'owner'],
-  ['setup', '#/setup', 'Setup wizard', 'owner'],
+  ['', [['overview', '#/', 'Home']]],
+  ['Access', [
+    ['orgs', '#/orgs', 'Organizations'],
+    ['keys', '#/keys', 'Keys'],
+    ['directory', '#/directory', 'People', 'owner'],
+  ]],
+  ['AI services', [
+    ['models', '#/models', 'Models'],
+    ['providers', '#/providers', 'Providers'],
+    ['mcp', '#/mcp', 'MCP'],
+    ['agents', '#/agents', 'Agents', 'agents'],
+    ['guardrails', '#/guardrails', 'Guardrails'],
+  ]],
+  ['Monitor', [
+    ['usage', '#/usage', 'Usage and cost'],
+    ['requests', '#/requests', 'Requests'],
+    ['jobs', '#/jobs', 'Jobs'],
+    ['alerts', '#/alerts', 'Alerts'],
+    ['audit', '#/audit', 'Audit log'],
+  ]],
+  ['', [['settings', '#/settings', 'Settings', 'owner']]],
 ];
 
 function parseHash() {
@@ -121,6 +131,9 @@ function SignIn({ onSignedIn, expired }) {
 
 function Shell({ session, onSignOut }) {
   const route = useRoute();
+  const [searching, setSearching] = useState(false);
+  const [menu, setMenu] = useState(false);
+  useSearchShortcut(() => setSearching(true));
   let Page = null;
   let section = '';
   let args = [];
@@ -131,33 +144,65 @@ function Shell({ session, onSignOut }) {
       Page = component;
       section = sec;
       needs = role;
-      args = m.slice(1).map(decodeURIComponent);
+      args = m.slice(1).filter((a) => a !== undefined).map(decodeURIComponent);
       break;
     }
   }
   const op = session.me.operator;
   const owner = op.grants.some((g) => g.role === 'owner');
   // owner pages need the owner role; others, a grant with that permission.
-  const may = (need) => !need || owner || (need !== 'owner' && op.grants.some((g) => (g.permissions || []).includes(need)));
+  const may = (need) =>
+    !need || owner || (need === 'agents' ? (session.me.agents || []).length > 0 : need !== 'owner' && op.grants.some((g) => (g.permissions || []).includes(need)));
+  const groups = nav.map(([title, items]) => [title, items.filter(([, , , role]) => may(role))]).filter(([, items]) => items.length);
+  const pages = groups.flatMap(([, items]) => items.map(([, href, label]) => [label, href]));
+  if (may('playground.use')) pages.push(['Playground', '#/playground']);
+  if (owner) pages.push(['Setup wizard', '#/setup']);
+  // Move focus to the page's heading after navigating, so screen readers
+  // announce the new page and keyboard users start at its top.
+  useEffect(() => {
+    const h = document.querySelector('main h1');
+    if (h && document.activeElement?.tagName !== 'INPUT') {
+      h.setAttribute('tabindex', '-1');
+      h.focus({ preventScroll: true });
+    }
+    document.title = (h?.textContent ? h.textContent + ' · ' : '') + 'GenAIOpenGateway';
+    setMenu(false);
+  }, [route.path]);
   return html`<${Session.Provider} value=${session}>
+    <a class="skip" href="#main" onClick=${(e) => { e.preventDefault(); document.getElementById('main')?.focus(); }}>Skip to content</a>
     <div class="layout">
       <aside class="sidebar">
-        <a class="brand" href="#/"><span class="logo" aria-hidden="true"></span>GenAIOpenGateway</a>
-        <nav>${nav.filter(([, , , role]) => may(role)).map(([key, href, label]) => html`<a href=${href} class=${key === section ? 'active' : ''} aria-current=${key === section ? 'page' : undefined}>${label}</a>`)}</nav>
+        <div class="brand-row">
+          <a class="brand" href="#/"><span class="logo" aria-hidden="true"></span>GenAIOpenGateway</a>
+          <button type="button" class="secondary menu-toggle" aria-expanded=${menu} aria-controls="main-nav" onClick=${() => setMenu(!menu)}>Menu</button>
+        </div>
+        <nav aria-label="Main" id="main-nav" class=${menu ? 'open' : ''}>${groups.map(([title, items]) => html`<div class="nav-group" key=${title || items[0][0]}>
+          ${title && html`<span class="nav-title" aria-hidden="true">${title}</span>`}
+          <ul role="list" aria-label=${title || undefined}>${items.map(([key, href, label]) => html`<li key=${key}><a href=${href} class=${key === section ? 'active' : ''} aria-current=${key === section ? 'page' : undefined}>${label}</a></li>`)}</ul>
+        </div>`)}</nav>
         <div class="who">
           <span class="who-name" title=${op.email || op.subject}>${op.name || op.email || op.subject}</span>
           <span class="muted small">${roleLabel(op.grants, session.orgNames)}</span>
           <button class="link" onClick=${onSignOut}>Sign out</button>
         </div>
       </aside>
-      <main class="content">
-        ${!Page
-          ? html`<h1>Not found</h1><p><a href="#/">Go to the overview</a></p>`
-          : !may(needs)
-            ? html`<h1>Owners only</h1><p class="muted">This page needs the owner role. <a href="#/">Go to the overview</a></p>`
-            : html`<${Page} key=${location.hash} args=${args} params=${route.params} />`}
-      </main>
+      <div class="main-col">
+        <header class="topbar">
+          <button type="button" class="search-button secondary" onClick=${() => setSearching(true)} aria-keyshortcuts="Control+K">
+            <span aria-hidden="true">⌕</span> Search <kbd>Ctrl K</kbd>
+          </button>
+          ${may('playground.use') && html`<a class="button secondary" href="#/playground">Playground</a>`}
+        </header>
+        <main class="content" id="main" tabindex="-1">
+          ${!Page
+            ? html`<h1>Not found</h1><p><a href="#/">Go home</a></p>`
+            : !may(needs)
+              ? html`<h1>${needs === 'owner' ? 'Owners only' : 'Not available'}</h1><p class="muted">${needs === 'owner' ? 'This page needs the owner role.' : 'Your role does not include this page.'} <a href="#/">Go home</a></p>`
+              : html`<${Page} key=${location.hash} args=${args} params=${route.params} />`}
+        </main>
+      </div>
     </div>
+    ${searching && html`<${Search} pages=${pages} onClose=${() => setSearching(false)} />`}
   <//>`;
 }
 

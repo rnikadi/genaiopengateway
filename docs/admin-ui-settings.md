@@ -50,17 +50,17 @@ A startup field in the spec is refused with `400`. `sso.oidc.client_secret` is a
 
 ## The Settings page
 
-The page becomes editable for owners, in the sections above, each with its own Save button. Every field:
+The page is editable for owners. Since v1.1 it is split into sub-pages with their own menu: **Sign-in and SSO** (OIDC, SAML, SCIM, roles and signing everyone out), **Limits**, **Logging and data**, **Cache**, **Notifications** (budget thresholds and streams), **MCP and agents**, and **Startup values** (read-only). Each section shows a Save bar only once something in it has changed. Every field:
 
 - shows its current value, and its default beside it ("Default: 30 days");
-- shows where the value comes from: **default**, **config file** or **set here**;
+- carries a badge only when its value is not the default: **Config file** or **Set here**;
 - has **Reset**, which goes back to the file's value or the default.
 
-Sizes are entered in KiB or MiB, durations as `30m` or `24h`, and lists one item per line. Role mappings are edited as a table of group or email, role and organization. Secrets show as set or not set, as elsewhere.
+Sizes are entered as an amount and a unit (bytes, KiB, MiB or GiB), durations as `30m` or `24h`, and lists one item per line. Role mappings are edited as a table of group or email, role and organization. Secrets show as set or not set, as elsewhere.
 
 ## Forms for every object
 
-The Configuration page gets forms in place of raw JSON for the four kinds that lack one. The JSON editor stays as an alternative.
+Every object kind has a form, on the page that lists those objects ([admin-ui.md](admin-ui.md#pages)). The JSON editor stays as an alternative.
 
 - **Guardrails:** type, action, stages, and the type's fields: detectors for `pii`, patterns for `regex`, model, prompt and `unsafe_if` for `model`, and URL, secret, timeout and `on_error` for `webhook`.
 - **MCP servers:** URL, headers (secret values), timeout, tool pinning, and per-user sign-in (`user_auth`).

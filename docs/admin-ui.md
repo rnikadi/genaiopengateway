@@ -21,24 +21,34 @@ v0.3 adds a web UI for operators, sign-in through the company's identity provide
 
 | Page | Contents | Admin API used |
 | --- | --- | --- |
-| Overview | Spend and requests this month, top teams and models, MCP calls, tools awaiting approval, providers with errors in the last hour | `usage`, `mcp/servers`, `mcp/tools`, `providers` |
+| Home | **Needs attention**: MCP tools to review, access requests, providers failing in the last hour, budgets past 80% and keys expiring this week, each with its action; spend, requests and tokens this month; daily spend and spend by model; recent alerts. Owners also see a setup checklist (provider, key, first request, single sign-on, roles) until it is done | `usage`, `mcp/tools`, `mcp/requests`, `alerts`, `providers` |
 | Organizations | List, create, edit policy (allowed models and MCP servers, RPM, TPM, budget, response cache), delete | `orgs` |
-| Virtual keys | Every key across organizations and teams: search, filter by status, create with an owner, edit, rotate with a grace period, revoke, and each key's access by level | `keys` |
 | Organization | Its teams, usage by team, edit, clear the response cache, Cedar policies with their history and a request check | `orgs/{id}`, `orgs/{id}/teams`, `usage`, `cache`, `orgs/{id}/cedar` |
 | Team | Its keys (edit, rotate, revoke), usage by key and model, edit policy, its own provider credentials, clear the response cache | `teams/{id}`, `teams/{id}/keys`, `teams/{id}/credentials`, `usage`, `cache` |
-| Key | Limits, expiry, revoke; the secret is shown once, on create | `keys/{id}`, `keys/{id}/revoke` |
-| Usage | Filter by organization, team, key and dates; group by model, team, key, day, provider or endpoint; chart, table and CSV download; cache hits and money saved when the cache answered | `usage` |
-| MCP | The catalog of virtual servers with a team's access and access requests to approve or deny ([mcp-catalog.md](mcp-catalog.md)); upstream servers and their status, virtual servers, tools with pin status; review a tool's definition and approve it; users' connections to per-user servers, with revoke (owners); call records | `mcp/*` |
-| Jobs | Batches and video jobs of an organization: team, model, target, status, request counts and cost; cancelling a running batch (owners and organization admins; audited). Metadata only, never file contents ([batch.md](batch.md)) | `jobs` |
+| Keys | Every key across organizations and teams: search, filter by status, create with an owner, edit, rotate with a grace period, revoke, and each key's access by level. The secret is shown once, on create | `keys` |
+| People | Users and groups provisioned over SCIM (owners, [scim.md](scim.md)) | `directory` |
+| Models | Virtual models, the endpoints they serve, and their targets with provider type, price and last-hour health ([admin-ui-config.md](admin-ui-config.md)); owners add, edit, delete and reset models here | `models`, `config` |
+| Providers | Upstream providers with type, endpoint, auth, the models using them and last-hour health; owners add one from a preset or a blank form, and edit, delete and reset them here | `providers`, `config` |
+| MCP | Tabs: **To review** (tool definitions awaiting approval and access requests to decide, first); **Catalog** of virtual servers with a team's access ([mcp-catalog.md](mcp-catalog.md)); **Servers** with their status and users' connections to per-user servers; **Virtual servers**; **Tools** with pin status; **Calls**. Owners edit servers and virtual servers on their tabs | `mcp/*`, `config` |
+| Agents | A2A agents served through the gateway ([a2a.md](a2a.md)); owners add and edit them here | `config` |
+| Guardrails | Events: what guardrails blocked, redacted or logged, by organization and action, never the matched text ([guardrails.md](guardrails.md)). Definitions: each guardrail's checks, action, stages and error handling; owners add and edit them here | `guardrail-events`, `guardrails`, `config` |
+| Usage and cost | Filter by organization, team, key and dates; group by model, team, key, day, provider or endpoint; chart, table and CSV download; cache hits and money saved when the cache answered | `usage` |
 | Requests | Recent model requests; for those with a logged body, the redacted request and response (owners and organization admins; each view is audited); deleting an organization's bodies before a date (owners) | `requests` |
-| Guardrails | Events: what guardrails blocked, redacted or logged, by organization and action, never the matched text ([guardrails.md](guardrails.md)). Definitions: each guardrail's checks, action, stages and error handling | `guardrail-events`, `guardrails` |
+| Jobs | Batches and video jobs of an organization: team, model, target, status, request counts and cost; cancelling a running batch (owners and organization admins; audited). Metadata only, never file contents ([batch.md](batch.md)) | `jobs` |
+| Alerts | Alerts raised, filterable; for owners, a **Webhooks** tab to add, edit and test webhooks | `alerts`, `alerts/webhooks`, `alerts/test`, `config` |
 | Audit log | Who changed what, filterable | `audit` |
-| Models | Virtual models, the endpoints they serve, and their targets with provider type, price and last-hour health, read-only ([admin-ui-config.md](admin-ui-config.md)) | `models` |
-| Playground | Call a model as a team with the team's policies; metered and audited (owners and organization admins, [playground.md](playground.md)) | `playground/chat/completions` |
-| Providers | Upstream providers with type, endpoint, auth, the models using them and last-hour health | `providers` |
-| Alerts | Alerts raised, filterable; webhooks with a test button (owners) | `alerts`, `alerts/webhooks`, `alerts/test` |
-| Configuration | Add, change and delete providers, models, guardrails, MCP servers and alert webhooks stored in the database; objects from the file are read-only (owners, [admin-ui-config-editing.md](admin-ui-config-editing.md)) | `config` |
-| Settings | Every runtime setting with its default and where its value comes from, editable by owners; startup settings read-only; secrets shown only as set | `settings` |
+| Settings | Sub-pages for sign-in and SSO, limits, logging and data, cache, notifications (with streams), MCP and agents, and startup values: every runtime setting with its default and where its value comes from, editable by owners; secrets shown only as set ([admin-ui-settings.md](admin-ui-settings.md)) | `settings`, `config` |
+| Playground | Call a model as a team with the team's policies; metered and audited (owners and organization admins, [playground.md](playground.md)). Opened from the top bar or a model's page | `playground/chat/completions` |
+| Setup wizard | A provider from a preset, a first team and key, a test request and a code snippet (owners, [quickstart.md](quickstart.md)). Opened from the Home checklist or **Add from a preset** on Providers | `catalog`, `config`, `orgs`, `teams/{id}/keys`, `playground/chat/completions` |
+
+### Layout (v1.1)
+
+The menu groups pages by the job people come to do: **Home**; **Access** (Organizations, Keys, People); **AI services** (Models, Providers, MCP, Agents, Guardrails); **Monitor** (Usage and cost, Requests, Jobs, Alerts, Audit log); and **Settings**. Each object is listed and edited in one place, so there is no separate Configuration page; old links to `#/config` open the object on its new page. The menu only offers pages the operator's role can open.
+
+- **Search** (the top bar, Ctrl K or /) finds pages, organizations, models, virtual MCP servers and keys by name, prefix or owner, and opens a request by its id for those who may read bodies.
+- Times show as "5 minutes ago", with the exact time on hover and for screen readers.
+- On a phone, the menu folds behind a **Menu** button.
+- Accessibility: the UI aims at WCAG 2.2 AA. There is a skip link, the page heading takes focus after each navigation, every control has a label, and links in text are underlined. CI runs axe-core over every page in the light and dark themes and fails on any violation (`test/e2e/a11y.mjs`).
 
 Forms for allowed models and MCP servers offer the configured names, so a typo cannot create a policy that silently allows nothing.
 

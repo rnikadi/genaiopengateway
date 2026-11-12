@@ -84,6 +84,8 @@ export function useSession() {
     owner,
     can,
     readsAll: can('org.read'),
+    // has says whether any grant carries a permission, in any scope.
+    has: (perm) => owner || grants.some((g) => (g.permissions || []).includes(perm)),
     orgIDs: [...new Set(grants.filter((g) => g.org_id).map((g) => g.org_id))],
   };
 }
@@ -100,6 +102,28 @@ export const num = (n) => numFmt.format(n || 0);
 export const compact = (n) => compactFmt.format(n || 0);
 export const when = (t) => (t ? new Date(t).toLocaleString() : '');
 export const day = (t) => (t ? new Date(t).toLocaleDateString() : '');
+
+const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+const steps = [[60, 'second'], [60, 'minute'], [24, 'hour'], [7, 'day'], [4.35, 'week'], [12, 'month'], [Infinity, 'year']];
+
+// ago says how long ago or how far ahead a time is, such as "5 minutes ago".
+export function ago(t, now = Date.now()) {
+  if (!t) return '';
+  let v = (new Date(t).getTime() - now) / 1000;
+  for (const [size, unit] of steps) {
+    if (Math.abs(v) < size) return rtf.format(Math.round(v), unit);
+    v /= size;
+  }
+  return '';
+}
+
+// Ago shows a time as "5 minutes ago", with the exact time on hover and
+// for screen readers.
+export function Ago({ t }) {
+  if (!t) return '';
+  const exact = when(t);
+  return html`<time datetime=${new Date(t).toISOString()} title=${exact} aria-label=${exact}>${ago(t)}</time>`;
+}
 
 export function policySummary(p) {
   const parts = [];

@@ -1,4 +1,4 @@
-import { html, useState, useEffect, api, qs, useSession, PageHeader, OrgPicker, defaultOrg, Table, ErrorBox, Tabs, Confirm, when, usd, num } from '../lib.js';
+import { html, useState, useEffect, api, qs, useSession, PageHeader, OrgPicker, defaultOrg, Table, ErrorBox, Tabs, Confirm, when, usd, num, Ago } from '../lib.js';
 
 const batchStatuses = ['validating', 'in_progress', 'finalizing', 'cancelling', 'completed', 'failed', 'expired', 'cancelled'];
 const done = (status) => ['completed', 'failed', 'expired', 'cancelled'].includes(status);
@@ -38,7 +38,7 @@ export function Jobs({ params }) {
   };
 
   const common = [
-    { label: 'Created', render: (j) => when(j.created_at) },
+    { label: 'Created', render: (j) => html`<${Ago} t=${j.created_at} />` },
     { label: 'Team', render: (j) => (j.team_id === 'team_static' ? html`<span class="muted small">Config file key</span>` : html`<a href=${`#/teams/${encodeURIComponent(j.team_id)}`}><code>${j.team_id}</code></a>`) },
     { label: 'Model', render: (j) => j.model },
     { label: 'Target', render: (j) => html`<code>${j.provider}/${j.upstream_model}</code>` },
@@ -57,7 +57,7 @@ export function Jobs({ params }) {
     ...common,
     { label: 'Status', render: (v) => html`<span class=${'badge ' + statusClass(v.object?.status)}>${v.object?.status || 'unknown'}</span>` },
     { label: 'Seconds', num: true, render: (v) => v.object?.seconds ?? '' },
-    { label: 'Updated', render: (v) => when(v.updated_at) },
+    { label: 'Updated', render: (v) => html`<${Ago} t=${v.updated_at} />` },
   ];
 
   return html`

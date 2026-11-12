@@ -30,7 +30,7 @@ export function Usage({ params }) {
     );
 
   return html`
-    <${PageHeader} title="Usage" sub="Requests, tokens and spend, in UTC. Spend uses the prices configured on each model." />
+    <${PageHeader} title="Usage and cost" sub="Requests, tokens and spend, in UTC. Spend uses the prices configured on each model." />
     <div class="filters">
       <${OrgPicker} value=${f.org} onChange=${set('org')} />
       ${f.org && html`<label class="inline"><span>Team</span>

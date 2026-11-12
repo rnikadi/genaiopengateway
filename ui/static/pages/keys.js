@@ -1,6 +1,6 @@
 import {
   html, useState, api, qs, useLoad, useSession, Loading, Table, Modal, PolicyForm, Confirm, PageHeader, CopyButton, Field, ErrorBox,
-  OrgPicker, defaultOrg, policySummary, usd, num, compact, day, when,
+  OrgPicker, defaultOrg, policySummary, usd, num, compact, day, when, Ago
 } from '../lib.js';
 
 // Virtual keys across every team the operator can read: search, create,
@@ -27,12 +27,12 @@ async function teamsOf(orgNames) {
   return out;
 }
 
-export function Keys() {
+export function Keys({ params }) {
   const s = useSession();
   const [org, setOrg] = useState(defaultOrg(s));
   const [status, setStatus] = useState('active');
-  const [search, setSearch] = useState('');
-  const [query, setQuery] = useState('');
+  const [search, setSearch] = useState(params?.get('q') || '');
+  const [query, setQuery] = useState(params?.get('q') || '');
   const [modal, setModal] = useState(null);
   const teams = useLoad(() => teamsOf(s.orgNames), [Object.keys(s.orgNames).join()]);
   const state = useLoad(() => api('GET', '/admin/v1/keys' + qs({ org_id: org, status, q: query, limit: 500 })), [org, status, query]);
@@ -44,7 +44,7 @@ export function Keys() {
   const writable = Object.values(teams.data || {}).filter((t) => s.can('keys.write', t.org_id, t.id));
 
   return html`
-    <${PageHeader} title="Virtual keys" sub="Applications use these keys instead of provider credentials, which stay in the gateway. Each key belongs to a team and can narrow its access and limits.">
+    <${PageHeader} title="Keys" sub="Applications use these keys instead of provider credentials, which stay in the gateway. Each key belongs to a team and can narrow its access and limits.">
       ${writable.length > 0 && html`<button onClick=${() => setModal({ kind: 'create' })}>New key</button>`}
     <//>
     <form class="filters" onSubmit=${(e) => { e.preventDefault(); setQuery(search.trim()); }}>
@@ -72,7 +72,7 @@ export function Keys() {
           },
         },
         { label: 'Status', render: keyStatus },
-        { label: 'Last used', render: (k) => (k.last_used_at ? when(k.last_used_at) : html`<span class="muted">Never</span>`) },
+        { label: 'Last used', render: (k) => (k.last_used_at ? html`<${Ago} t=${k.last_used_at} />` : html`<span class="muted">Never</span>`) },
         { label: 'Expires', render: (k) => (k.expires_at ? day(k.expires_at) : html`<span class="muted">Never</span>`) },
         { label: '', render: (k) => html`<${KeyActions} k=${k} canWrite=${s.can('keys.write', k.org_id, k.team_id)} setModal=${setModal} />` },
       ]}

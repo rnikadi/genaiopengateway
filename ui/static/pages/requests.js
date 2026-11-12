@@ -1,5 +1,5 @@
 import { guardrailColumns } from './guardrails.js';
-import { html, useState, useEffect, api, qs, useLoad, useSession, PageHeader, OrgPicker, defaultOrg, Table, Loading, ErrorBox, JSONView, Modal, Field, when, usd, num } from '../lib.js';
+import { html, useState, useEffect, api, qs, useLoad, useSession, PageHeader, OrgPicker, defaultOrg, Table, Loading, ErrorBox, JSONView, Modal, Field, when, usd, num, Ago } from '../lib.js';
 
 // Requests lists recent model requests; those with a logged body link to
 // it (docs/body-logging.md).
@@ -43,7 +43,7 @@ export function Requests({ params }) {
       rowKey=${(r) => r.org_id + r.request_id}
       empty="No requests yet."
       columns=${[
-        { label: 'Time', render: (r) => when(r.ts) },
+        { label: 'Time', render: (r) => html`<${Ago} t=${r.ts} />` },
         { label: 'Model', render: (r) => r.model },
         { label: 'Status', render: (r) => html`<span class=${'badge ' + (r.status === 200 ? 'good' : 'bad')}>${r.status}</span>${r.cache_hit && html` <span class="badge" title="Answered from the response cache">Cached</span>`}` },
         { label: 'Tokens', num: true, render: (r) => `${num(r.input_tokens)} / ${num(r.output_tokens)}` },

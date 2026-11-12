@@ -1,4 +1,5 @@
-import { html, useState, useEffect, api, qs, useSession, useLoad, Loading, PageHeader, OrgPicker, defaultOrg, Table, ErrorBox, when } from '../lib.js';
+import { html, useState, useEffect, api, qs, useSession, useLoad, Loading, PageHeader, OrgPicker, defaultOrg, Table, ErrorBox, Tabs, Ago } from '../lib.js';
+import { useConfigObjects, DeletedObjects } from './config.js';
 import { alertText } from './overview.js';
 
 const events = { 'budget.threshold': 'Budget threshold', 'mcp.tool_pending': 'MCP tool awaiting approval', 'key.expiring': 'Key expiring' };
@@ -6,6 +7,15 @@ const events = { 'budget.threshold': 'Budget threshold', 'mcp.tool_pending': 'MC
 // Alerts lists alerts raised and, for owners, the webhooks they go to
 // (docs/alerts.md).
 export function Alerts({ params }) {
+  const s = useSession();
+  const [tab, setTab] = useState(s.owner && (params.get('tab') === 'webhooks' || params.get('edit')) ? 'webhooks' : 'alerts');
+  return html`
+    <${PageHeader} title="Alerts" sub="Budget thresholds, MCP tools awaiting approval and expiring keys, and where they are sent." />
+    ${s.owner && html`<${Tabs} tabs=${{ alerts: 'Alerts', webhooks: 'Webhooks' }} value=${tab} onChange=${setTab} />`}
+    ${tab === 'webhooks' ? html`<${Webhooks} params=${params} />` : html`<${AlertList} params=${params} />`}`;
+}
+
+function AlertList({ params }) {
   const s = useSession();
   const [org, setOrg] = useState(params.get('org') ?? defaultOrg(s));
   const [event, setEvent] = useState('');
@@ -28,7 +38,6 @@ export function Alerts({ params }) {
   }, [org, event]);
 
   return html`
-    <${PageHeader} title="Alerts" sub="Budget thresholds, MCP tools awaiting approval and expiring keys, newest first." />
     <div class="filters">
       <${OrgPicker} value=${org} onChange=${setOrg} />
       <label class="inline"><span>Event</span>
@@ -41,17 +50,17 @@ export function Alerts({ params }) {
     ${list.loading
       ? html`<p class="muted">Loading…</p>`
       : html`<${Table} rows=${list.items} rowKey=${(a) => a.id} empty="No alerts yet." columns=${[
-          { label: 'Time', render: (a) => when(a.ts) },
+          { label: 'Time', render: (a) => html`<${Ago} t=${a.ts} />` },
           { label: 'Event', render: (a) => events[a.event] || a.event },
           { label: 'Organization', render: (a) => s.orgNames[a.org_id] || a.org_id || '' },
           { label: 'Detail', render: (a) => alertText(a) },
         ]} />`}
-    ${list.more && html`<p class="center"><button class="secondary" onClick=${() => load(list.items[list.items.length - 1].id)}>Load more</button></p>`}
-    ${s.owner && html`<${Webhooks} />`}`;
+    ${list.more && html`<p class="center"><button class="secondary" onClick=${() => load(list.items[list.items.length - 1].id)}>Load more</button></p>`}`;
 }
 
-function Webhooks() {
+function Webhooks({ params }) {
   const state = useLoad(() => api('GET', '/admin/v1/alerts/webhooks'));
+  const cfg = useConfigObjects('alert_webhooks', { params, onChange: state.reload });
   const [results, setResults] = useState({});
   const test = async (name) => {
     setResults((r) => ({ ...r, [name]: { sending: true } }));
@@ -65,15 +74,16 @@ function Webhooks() {
   const result = (r) =>
     !r ? '' : r.sending ? html`<span class="muted small">Sending…</span>` : r.ok ? html`<span class="badge good">Delivered (${r.status})</span>` : html`<span class="badge bad" title=${r.error}>Failed${r.status ? ` (${r.status})` : ''}</span>`;
   return html`<section class="panel">
-    <h2>Webhooks</h2>
     <${Loading} state=${state}>${(d) => html`
-      <p class="muted small">Budget alerts fire at ${(d.budget_thresholds?.length ? d.budget_thresholds : [0.5, 0.8, 1]).map((t) => `${Math.round(t * 100)}%`).join(', ')} of a budget unless a policy sets its own. Webhooks are configured in <code>alerts.webhooks</code>; addresses are shown without their path, which often holds a token.</p>
+      <div class="panel-header"><p class="muted small">Budget alerts fire at ${(d.budget_thresholds?.length ? d.budget_thresholds : [0.5, 0.8, 1]).map((t) => `${Math.round(t * 100)}%`).join(', ')} of a budget unless a policy sets its own (<a href="#/settings/notifications">change</a>). Addresses are shown without their path, which often holds a token.</p>${cfg.newButton}</div>
       <${Table} rows=${d.data} rowKey=${(h) => h.name} empty="No webhooks are configured: alerts are only listed here." columns=${[
-        { label: 'Webhook', render: (h) => html`<strong>${h.name}</strong><div class="muted small">${h.format === 'slack' ? 'Slack' : 'JSON'}${h.signed ? ', signed' : ''}</div>` },
+        { label: 'Webhook', render: (h) => html`<strong>${h.name}</strong> ${cfg.source(h.name)}<div class="muted small">${h.format === 'slack' ? 'Slack' : 'JSON'}${h.signed ? ', signed' : ''}</div>` },
         { label: 'Address', render: (h) => html`<code class="small">${h.host}</code>` },
         { label: 'Events', render: (h) => (h.events?.length ? h.events.map((e) => events[e] || e).join(', ') : 'All') },
         { label: 'Organization', render: (h) => h.org || 'All' },
-        { label: '', render: (h) => html`<button class="secondary" onClick=${() => test(h.name)}>Send test</button> ${result(results[h.name])}` },
-      ]} />`}<//>
+        { label: html`<span class="sr-only">Actions</span>`, render: (h) => html`<span class="row-actions"><button class="secondary" onClick=${() => test(h.name)}>Send test</button>${cfg.actions(h.name)} ${result(results[h.name])}</span>` },
+      ]} />
+      <${DeletedObjects} cfg=${cfg} />
+      ${cfg.dialogs}`}<//>
   </section>`;
 }
