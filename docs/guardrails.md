@@ -81,6 +81,7 @@ guardrails:
 | --- | --- | --- |
 | `pii` | Emails, phone numbers, card numbers with Luhn, IBANs with mod-97, US SSNs, well-known secrets | The detectors of [body logging](body-logging.md), already tested and fuzzed. |
 | `regex` | RE2 patterns | Linear time, so a pattern cannot stall the gateway. |
+| `injection` | Built-in checks for prompt injection wording and markers: `override`, `role`, `prompt_leak`, `fake_turn`, `hidden_text`, `exfiltration` | Added in v1.3, see [prompt-injection.md](prompt-injection.md). `detect` selects checks and `patterns` adds RE2 expressions. Cannot `redact`. |
 | `model` | Sends the texts, joined, as one user message to a virtual model, with `prompt` as the system message when set, and matches `unsafe_if` against the reply | Uses the gateway's own routing, limits and metering, so the classifier's cost is recorded under the requesting key. Slower; meant for `tool_output` and selected keys. Cannot `redact`. |
 | `webhook` | `POST` of a JSON document to the operator's service, which answers `allow`, `block` or `redact` with replacements | The way to plug in Presidio, a DLP product, Azure AI Content Safety, Lakera or an in-house service. |
 
@@ -120,7 +121,7 @@ A config `guardrails` entry that no policy or virtual server names does nothing.
 
 ## Order and cost
 
-Guardrails at one stage run in a fixed order, by name within each group: `pii` and `regex` first (in-process, a few milliseconds at most), then `model` guardrails and webhooks that cannot redact in parallel, then webhooks that may redact one after another, each on the texts the previous one returned. The first `block` stops the stage; external checks run only when the in-process ones did not already block.
+Guardrails at one stage run in a fixed order, by name within each group: `pii`, `regex` and `injection` first (in-process, a few milliseconds at most), then `model` guardrails and webhooks that cannot redact in parallel, then webhooks that may redact one after another, each on the texts the previous one returned. The first `block` stops the stage; external checks run only when the in-process ones did not already block.
 
 The gate for v0.5 is that the built-ins add under 10 ms at p50, measured on a 32 KiB chat request with every built-in on (about 2.5 ms on a CI runner). The detectors run their regular expressions only around the characters a match must contain, such as digits or `@`, which keeps long prose cheap. External checks are bounded by their `timeout` (default 2 s, at most 30 s) and their result follows `on_error` when they fail or time out.
 

@@ -33,6 +33,8 @@ function check(g) {
       return g.detect?.length ? `PII: ${g.detect.join(', ')}` : 'PII: every detector';
     case 'regex':
       return html`Regex: ${g.patterns.map((p) => html`<code class="small" key=${p}>${p}</code> `)}`;
+    case 'injection':
+      return `Prompt injection: ${g.detect?.length ? g.detect.join(', ') : 'every check'}${g.patterns?.length ? `, ${g.patterns.length} extra pattern${g.patterns.length === 1 ? '' : 's'}` : ''}`;
     case 'model':
       return html`Classifier model <code>${g.model}</code>${g.unsafe_if ? html`, unsafe if <code>${g.unsafe_if}</code>` : ''}`;
     case 'webhook':

@@ -57,6 +57,9 @@ mcp:
 	}
 	ctx := context.Background()
 	for _, c := range [][2]string{{"gh", "alice-sub"}, {"gh", "bob-sub"}} {
+		// The upstream knows the tokens, so a catalog refresh with one of
+		// them does not end the connection.
+		up.set(func(u *userUpstream) { u.access["at-"+c[1]], u.refresh["rt-"+c[1]] = c[1], c[1] })
 		if err := e.srv.conns.save(ctx, c[0], c[1], []string{"repo"}, &oauth2.Token{AccessToken: "at-" + c[1], RefreshToken: "rt-" + c[1], Expiry: time.Now().Add(time.Hour)}); err != nil {
 			t.Fatal(err)
 		}

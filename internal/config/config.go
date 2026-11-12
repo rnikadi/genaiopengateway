@@ -226,9 +226,11 @@ type Guardrail struct {
 	Type   string   `yaml:"type"`
 	Action string   `yaml:"action"`
 	Stages []string `yaml:"stages"`
-	// Detect names the pii detectors; nil means all of them.
+	// Detect names the pii detectors, or the checks of an injection
+	// guardrail; nil means all of them.
 	Detect []string `yaml:"detect"`
-	// Patterns are the RE2 expressions of a regex guardrail.
+	// Patterns are the RE2 expressions of a regex guardrail, or extra
+	// ones for an injection guardrail.
 	Patterns []string `yaml:"patterns"`
 	// Model, Prompt and UnsafeIf configure a model guardrail.
 	Model    string `yaml:"model"`
@@ -247,6 +249,9 @@ const (
 	GuardrailRegex   = "regex"
 	GuardrailModel   = "model"
 	GuardrailWebhook = "webhook"
+	// GuardrailInjection is the built-in prompt injection check
+	// (docs/prompt-injection.md).
+	GuardrailInjection = "injection"
 
 	ActionBlock  = "block"
 	ActionRedact = "redact"
@@ -260,6 +265,19 @@ const (
 	OnErrorAllow = "allow"
 	OnErrorBlock = "block"
 )
+
+// The checks of an injection guardrail, which detect selects.
+const (
+	InjectionOverride     = "override"
+	InjectionRole         = "role"
+	InjectionPromptLeak   = "prompt_leak"
+	InjectionFakeTurn     = "fake_turn"
+	InjectionHiddenText   = "hidden_text"
+	InjectionExfiltration = "exfiltration"
+)
+
+// InjectionChecks lists the injection checks in the order they run.
+var InjectionChecks = []string{InjectionOverride, InjectionRole, InjectionPromptLeak, InjectionFakeTurn, InjectionHiddenText, InjectionExfiltration}
 
 // Guardrail defaults and bounds.
 const (
@@ -1261,6 +1279,17 @@ func (c *Config) validateGuardrails(add func(string, ...any)) {
 			if _, err := redact.New(redact.Config{Builtin: []string{}, Patterns: g.Patterns}); err != nil {
 				add("%v", err)
 			}
+		case GuardrailInjection:
+			for _, d := range g.Detect {
+				if !slices.Contains(InjectionChecks, d) {
+					add("unknown injection check %q; the checks are %s", d, strings.Join(InjectionChecks, ", "))
+				}
+			}
+			for _, p := range g.Patterns {
+				if _, err := regexp.Compile(p); err != nil {
+					add("pattern %q: %v", p, err)
+				}
+			}
 		case GuardrailModel:
 			if _, ok := c.Models[g.Model]; !ok {
 				add("model %q is not configured", g.Model)
@@ -1276,7 +1305,7 @@ func (c *Config) validateGuardrails(add func(string, ...any)) {
 				add("url must be https, or http to localhost")
 			}
 		default:
-			add("type must be pii, regex, model or webhook, got %q", g.Type)
+			add("type must be pii, regex, injection, model or webhook, got %q", g.Type)
 		}
 		if g.Type == GuardrailWebhook && g.Action == "" {
 			g.Action = ActionBlock // the webhook's reply decides: block or redact
@@ -1286,6 +1315,9 @@ func (c *Config) validateGuardrails(add func(string, ...any)) {
 		case ActionRedact:
 			if g.Type == GuardrailModel {
 				add("a model guardrail cannot redact; use block or log")
+			}
+			if g.Type == GuardrailInjection {
+				add("an injection guardrail cannot redact; use block or log")
 			}
 		default:
 			add("action must be block, redact or log, got %q", g.Action)

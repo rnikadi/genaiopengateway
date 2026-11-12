@@ -68,6 +68,7 @@ nav:
       - Virtual keys: virtual-keys.md
       - Team provider credentials: team-credentials.md
       - Guardrails: guardrails.md
+      - Prompt injection presets: prompt-injection.md
       - Body logging: body-logging.md
       - Alerts: alerts.md
       - Streams: streams.md

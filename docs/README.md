@@ -44,6 +44,7 @@
 | [Streams](streams.md) | Usage, audit, MCP call and guardrail records sent to a webhook or a file as they are written |
 | [Alerts](alerts.md) | Budget thresholds and other events, webhooks and Slack |
 | [Guardrails](guardrails.md) | PII, pattern, classifier and webhook checks on model and MCP calls |
+| [Prompt injection presets](prompt-injection.md) | The built-in injection checks, a ready classifier prompt, and where to attach them |
 | [Gemini, Vertex AI and Bedrock](cloud-providers.md) | Cloud adapters, credentials and translation rules |
 | [Deploying to Kubernetes](deploy-kubernetes.md) | Installing and running the Helm chart |
 | [Helm chart](helm.md) | Kubernetes deployment design |
