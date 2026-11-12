@@ -278,7 +278,17 @@ func (g *Guardrail) External() bool {
 type Alerts struct {
 	// BudgetThresholds are shares of a budget at which to alert.
 	BudgetThresholds []float64 `yaml:"budget_thresholds"`
-	Webhooks         []Webhook `yaml:"webhooks"`
+	// SpendAnomaly tunes the spend.anomaly alert (docs/forecast.md).
+	SpendAnomaly SpendAnomaly `yaml:"spend_anomaly"`
+	Webhooks     []Webhook    `yaml:"webhooks"`
+}
+
+// SpendAnomaly says when a day's spend counts as unusual: at least
+// Factor times the daily average of the two weeks before, and at least
+// MinUSD. A Factor of 0 turns the alert off.
+type SpendAnomaly struct {
+	Factor float64 `yaml:"factor"`
+	MinUSD float64 `yaml:"min_usd"`
 }
 
 // Alert events.
@@ -286,6 +296,8 @@ const (
 	EventBudgetThreshold = "budget.threshold"
 	EventMCPToolPending  = "mcp.tool_pending"
 	EventKeyExpiring     = "key.expiring"
+	EventBudgetForecast  = "budget.forecast"
+	EventSpendAnomaly    = "spend.anomaly"
 )
 
 // Webhook formats.
@@ -961,7 +973,7 @@ func decode(root *yaml.Node) (*Config, error) {
 		Store:       Store{RefreshInterval: Duration(DefaultRefreshInterval)},
 		MCP:         MCP{RefreshInterval: Duration(DefaultMCPRefresh), MaxUserSessions: DefaultMaxUserSessions},
 		SSO:         SSO{SessionTTL: Duration(DefaultSessionTTL), Portal: Portal{MaxKeysPerUser: DefaultPortalMaxKeys, MaxKeyTTL: Duration(DefaultPortalKeyTTL)}},
-		Alerts:      Alerts{BudgetThresholds: DefaultBudgetThresholds},
+		Alerts:      Alerts{BudgetThresholds: DefaultBudgetThresholds, SpendAnomaly: SpendAnomaly{Factor: 3, MinUSD: 5}},
 		BodyLogging: BodyLogging{Retention: Duration(DefaultBodyRetention), MaxBodyBytes: DefaultMaxBodyBytes},
 		Routing:     Routing{CircuitBreaker: CircuitBreaker{Failures: DefaultBreakerFailures, Cooldown: Duration(DefaultBreakerCooldown)}},
 	}
@@ -1329,6 +1341,12 @@ func (c *Config) validateAlerts(add func(string, ...any)) {
 			add("alerts.budget_thresholds values must be above 0 and at most 1, got %v", t)
 		}
 	}
+	if f := a.SpendAnomaly.Factor; f != 0 && f < 1.5 {
+		add("alerts.spend_anomaly.factor must be 0 (off) or at least 1.5, got %v", f)
+	}
+	if a.SpendAnomaly.MinUSD < 0 {
+		add("alerts.spend_anomaly.min_usd must not be negative")
+	}
 	names := map[string]bool{}
 	for i := range a.Webhooks {
 		w := &a.Webhooks[i]
@@ -1353,7 +1371,7 @@ func (c *Config) validateAlerts(add func(string, ...any)) {
 		}
 		for _, e := range w.Events {
 			switch e {
-			case EventBudgetThreshold, EventMCPToolPending, EventKeyExpiring:
+			case EventBudgetThreshold, EventMCPToolPending, EventKeyExpiring, EventBudgetForecast, EventSpendAnomaly:
 			default:
 				add("alerts webhook %q: unknown event %q", w.Name, e)
 			}

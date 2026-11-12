@@ -60,6 +60,7 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	h("GET /admin/v1/keys", s.listAllKeys)
 	h("GET /admin/v1/usage", s.queryUsage)
 	h("GET /admin/v1/usage/export", s.exportUsage)
+	h("GET /admin/v1/usage/forecast", s.listForecasts)
 	h("GET /admin/v1/audit", s.listAudit)
 	h("GET /admin/v1/mcp/servers", s.listMCPServers)
 	h("GET /admin/v1/mcp/tools", s.listMCPTools)

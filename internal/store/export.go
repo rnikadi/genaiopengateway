@@ -62,3 +62,30 @@ func (s *Store) UsageExport(ctx context.Context, uq UsageQuery) ([]UsageExportRo
 	}
 	return out, rows.Err()
 }
+
+// ScopeSpend is what one team of an organization spent. Usage of keys
+// without a team has an empty TeamID.
+type ScopeSpend struct {
+	OrgID, TeamID string
+	CostUSD       float64
+}
+
+// SpendBetween sums cost per organization and team between from
+// (inclusive) and to (exclusive), for forecasts (docs/forecast.md).
+func (s *Store) SpendBetween(ctx context.Context, from, to time.Time) ([]ScopeSpend, error) {
+	rows, err := s.db.QueryContext(ctx, s.q(`SELECT org_id, team_id, COALESCE(SUM(cost_usd), 0) FROM usage
+		WHERE ts >= ? AND ts < ? GROUP BY org_id, team_id`), from.UnixMilli(), to.UnixMilli())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ScopeSpend
+	for rows.Next() {
+		var sp ScopeSpend
+		if err := rows.Scan(&sp.OrgID, &sp.TeamID, &sp.CostUSD); err != nil {
+			return nil, err
+		}
+		out = append(out, sp)
+	}
+	return out, rows.Err()
+}

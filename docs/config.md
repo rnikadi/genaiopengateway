@@ -50,11 +50,12 @@ ui:
 
 alerts:                              # see alerts.md; needs a store
   budget_thresholds: [0.5, 0.8, 1.0] # default; shares of each budget
+  spend_anomaly: {factor: 3, min_usd: 5} # default; see forecast.md. factor 0 turns it off
   webhooks:
     - name: finance
       url: https://hooks.example.com/genai   # https, or http to localhost
       secret: ${ALERT_WEBHOOK_SECRET}        # signs each body (X-GOG-Signature)
-      events: [budget.threshold]             # budget.threshold, mcp.tool_pending, key.expiring
+      events: [budget.threshold]             # also budget.forecast, spend.anomaly, mcp.tool_pending, key.expiring
     - name: platform
       url: ${SLACK_WEBHOOK_URL}
       format: slack                          # json (default) or slack

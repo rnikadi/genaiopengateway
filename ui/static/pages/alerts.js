@@ -2,7 +2,7 @@ import { html, useState, useEffect, api, qs, useSession, useLoad, Loading, PageH
 import { useConfigObjects, DeletedObjects } from './config.js';
 import { alertText } from './overview.js';
 
-const events = { 'budget.threshold': 'Budget threshold', 'mcp.tool_pending': 'MCP tool awaiting approval', 'key.expiring': 'Key expiring' };
+const events = { 'budget.threshold': 'Budget threshold', 'mcp.tool_pending': 'MCP tool awaiting approval', 'key.expiring': 'Key expiring', 'budget.forecast': 'Budget forecast', 'spend.anomaly': 'Unusual spend' };
 
 // Alerts lists alerts raised and, for owners, the webhooks they go to
 // (docs/alerts.md).
@@ -10,7 +10,7 @@ export function Alerts({ params }) {
   const s = useSession();
   const [tab, setTab] = useState(s.owner && (params.get('tab') === 'webhooks' || params.get('edit')) ? 'webhooks' : 'alerts');
   return html`
-    <${PageHeader} title="Alerts" sub="Budget thresholds, MCP tools awaiting approval and expiring keys, and where they are sent." />
+    <${PageHeader} title="Alerts" sub="Budget thresholds and forecasts, unusual spend, MCP tools awaiting approval and expiring keys, and where they are sent." />
     ${s.owner && html`<${Tabs} tabs=${{ alerts: 'Alerts', webhooks: 'Webhooks' }} value=${tab} onChange=${setTab} />`}
     ${tab === 'webhooks' ? html`<${Webhooks} params=${params} />` : html`<${AlertList} params=${params} />`}`;
 }

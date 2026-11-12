@@ -24,6 +24,7 @@
 | [Identity providers](identity-providers.md) | Setup for Keycloak, Okta, Entra ID, Google and PingOne, and how each is tested |
 | [Developer portal](developer-portal.md) | Developers creating and rotating their own keys, and requesting MCP access |
 | [Why was this denied?](why-denied.md) | Which policy, limit, Cedar rule or guardrail refused a request, and what would change it |
+| [Forecasts and unusual spend](forecast.md) | Where each monthly budget is heading, and alerts for a budget set to run out early or a day that cost far more than usual |
 | [Chargeback and FOCUS exports](chargeback.md) | CSV statements of spend per team, and the same usage in FinOps FOCUS columns for cost tools |
 | [SCIM provisioning](scim.md) | Users and groups from Okta, Entra ID and others, deprovisioning |
 | [Cedar policies](cedar.md) | Attribute-based rules per organization for models and MCP tools |

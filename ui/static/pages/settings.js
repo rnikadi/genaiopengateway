@@ -61,7 +61,12 @@ const sections = [
   },
   {
     title: 'Budget alerts',
-    fields: [{ path: 'alerts.budget_thresholds', label: 'Alert at (% of budget)', type: 'percents', hint: 'For example 50, 80, 100. A budget can set its own.' }],
+    note: 'A forecast alert is raised when a monthly budget is set to run out before the month ends, and an unusual spend alert when a team\'s last 24 hours cost several times its usual day (docs/forecast.md).',
+    fields: [
+      { path: 'alerts.budget_thresholds', label: 'Alert at (% of budget)', type: 'percents', hint: 'For example 50, 80, 100. A budget can set its own.' },
+      { path: 'alerts.spend_anomaly.factor', label: 'Unusual spend: times the usual day', type: 'number', min: '0', step: '0.5', hint: '0 turns the alert off; otherwise at least 1.5.' },
+      { path: 'alerts.spend_anomaly.min_usd', label: 'Unusual spend: smallest day to alert on (USD)', type: 'number', min: '0', step: '1' },
+    ],
   },
   {
     title: 'Single sign-on',

@@ -551,7 +551,7 @@ function VirtualServerForm({ spec, names, onChange }) {
     <button type="button" class="secondary" onClick=${() => onChange({ ...spec, servers: [...servers, { server: '' }] })}>Add an upstream server</button>`;
 }
 
-const alertEvents = ['budget.threshold', 'mcp.tool_pending', 'key.expiring'];
+const alertEvents = ['budget.threshold', 'budget.forecast', 'spend.anomaly', 'mcp.tool_pending', 'key.expiring'];
 
 function WebhookForm({ spec, onChange }) {
   const p = { spec, onChange };

@@ -123,6 +123,7 @@ Every route the gateway serves, generated from the handlers in `internal/server`
 | `POST` | `/admin/v1/teams/{team_id}/keys` | `s.createKey` | createKey creates a key in a team and returns its secret once. |
 | `GET` | `/admin/v1/usage` | `s.queryUsage` | queryUsage sums usage and cost over a time range, grouped by model, team, key, provider, endpoint or day. |
 | `GET` | `/admin/v1/usage/export` | `s.exportUsage` | exportUsage streams usage as CSV: format=chargeback (the default) or format=focus. |
+| `GET` | `/admin/v1/usage/forecast` | `s.listForecasts` | listForecasts returns the forecast of each monthly budget the caller may see usage of. |
 | `GET` | `/admin/v1/videos` | `s.listAdminVideos` | listAdminVideos lists video jobs for operators, newest first. |
 
 ## Admin UI and sign-in

@@ -264,6 +264,7 @@ func (s *Server) Start(ctx context.Context) {
 	go s.sessionPruneLoop(ctx)
 	go s.notifier.Run(ctx)
 	go s.keyExpiryLoop(ctx)
+	go s.forecastLoop(ctx)
 	go s.bodyPruneLoop(ctx)
 	go s.connectionsLoop(ctx)
 	go s.batchPollLoop(ctx)

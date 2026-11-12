@@ -10,6 +10,10 @@ export function alertText(a) {
       return `MCP tool ${d.server}/${d.tool} ${d.changed ? 'changed its definition' : 'is new'} and awaits approval.`;
     case 'key.expiring':
       return `A key expires on ${when(d.expires_at)}.`;
+    case 'budget.forecast':
+      return `A ${d.scope} budget of ${usd(d.budget_usd)} is set to run out on ${when(d.exhausts_at)}, at ${usd(d.daily_usd)} a day.`;
+    case 'spend.anomaly':
+      return `Spend was ${usd(d.spend_24h_usd)} in 24 hours, ${d.factor} times the usual ${usd(d.usual_daily_usd)} a day.`;
     default:
       return a.event;
   }

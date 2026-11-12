@@ -22,6 +22,7 @@ export function Usage({ params }) {
 
   const teams = useLoad(async () => (f.org ? (await api('GET', `/admin/v1/orgs/${encodeURIComponent(f.org)}/teams?limit=500`)).data : []), [f.org]);
   const state = useLoad(() => api('GET', usageQuery(f)), [f.org, f.team, f.group_by, f.period]);
+  const forecast = useLoad(() => api('GET', '/admin/v1/usage/forecast' + qs({ org_id: f.org })).catch(() => ({ data: [] })), [f.org]);
 
   // Rows grouped by team or key show names where this page knows them.
   const names = { ...s.orgNames, ...Object.fromEntries((teams.data || []).map((t) => [t.id, t.name])) };
@@ -68,6 +69,7 @@ export function Usage({ params }) {
           <h2>Spend by ${groups[f.group_by].toLowerCase()}</h2>
           ${f.group_by === 'day' ? html`<${Columns} items=${items} format=${usd} />` : html`<${Bars} items=${[...items].sort((a, b) => b.value - a.value).slice(0, 15)} format=${usd} />`}
         </section>
+        <${Forecasts} rows=${(forecast.data?.data || []).filter((x) => !f.team || x.team_id === f.team)} />
         <section class="panel">
           <div class="panel-header"><div><h2>Exports for finance</h2>
             <p class="muted small">The whole period as CSV, for ${f.team ? 'this team' : f.org ? 'this organization' : 'every organization'}. The chargeback statement has one line per team with its share of the total. FOCUS has one line per day, team and model in the FinOps FOCUS columns that cost tools import.</p></div>
@@ -98,3 +100,24 @@ export function Usage({ params }) {
     }}<//>`;
 }
 
+
+// Forecasts shows where each monthly budget is heading (docs/forecast.md).
+function Forecasts({ rows }) {
+  if (!rows.length) return null;
+  const outlook = (r) => (r.exhausted ? html`<span class="badge bad">Budget used up</span>`
+    : r.exhausts_at ? html`<span class="badge warn">Runs out ${new Date(r.exhausts_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' })}</span>`
+    : html`<span class="badge good">Lasts the month</span>`);
+  return html`<section class="panel">
+    <h2>Budget forecast</h2>
+    <p class="muted small">Each monthly budget, projected to the end of the month at the last 7 days' average spend per day.</p>
+    <${Table} rowKey=${(r) => r.org_id + (r.team_id || '')} rows=${rows} empty="No monthly budgets."
+      columns=${[
+        { label: 'Budget of', render: (r) => (r.team_id ? html`<a href=${`#/teams/${encodeURIComponent(r.team_id)}`}>${r.team_name}</a>` : html`${r.org_name} <span class="muted small">(organization)</span>`) },
+        { label: 'Spent', num: true, render: (r) => usd(r.spent_usd) },
+        { label: 'Per day', num: true, render: (r) => usd(r.daily_usd) },
+        { label: 'Projected', num: true, render: (r) => usd(r.projected_usd) },
+        { label: 'Budget', num: true, render: (r) => usd(r.budget_usd) },
+        { label: 'Outlook', render: outlook },
+      ]} />
+  </section>`;
+}

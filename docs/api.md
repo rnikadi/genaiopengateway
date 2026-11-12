@@ -101,6 +101,7 @@ Base path `/admin/v1`. JSON in and out. Authenticate with `Authorization: Bearer
 | `POST /admin/v1/keys/{key_id}/revoke` | Revoke; takes effect on every replica within the refresh interval |
 | `POST /admin/v1/keys/{key_id}/rotate` | New secret, returned once; the previous one works for `grace` (default `24h`, `0` to `30d`). Audited as `key.rotate` |
 | `GET /admin/v1/usage` | Aggregated usage and cost |
+| `GET /admin/v1/usage/forecast?org_id=` | Where each monthly budget is heading ([forecast.md](forecast.md)) |
 | `GET /admin/v1/usage/export?format=chargeback\|focus` | Spend per team, or usage in FOCUS columns, as CSV ([chargeback.md](chargeback.md)) |
 | `GET /admin/v1/audit` | Admin audit log |
 | `GET /admin/v1/alerts` | Alerts raised, newest first; filter with `org_id` and `event` ([alerts.md](alerts.md)) |

@@ -30,7 +30,7 @@ limiter:      {fail_open_rate_limits, fail_open_budgets}
 limits:       {max_request_bytes, max_realtime_session, max_batch_file_bytes}
 body_logging: {enabled, retention, max_body_bytes, redact: {builtin, patterns}}
 cache:        {max_entry_bytes, max_memory_bytes, semantic: {model, threshold, max_entries}}
-alerts:       {budget_thresholds}
+alerts:       {budget_thresholds, spend_anomaly: {factor, min_usd}}
 routing:      {circuit_breaker: {failures, cooldown}}
 sso:          {session_ttl, roles, oidc: {issuer, client_id, client_secret, redirect_url, groups_claim, scopes}}
 mcp:          {public_url, refresh_interval, max_user_sessions, oauth: {issuer, jwks_url, audience, organization, team_claim, scopes}}

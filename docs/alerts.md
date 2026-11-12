@@ -9,8 +9,10 @@ Budgets in v0.1 stop requests once spent, which is the first moment anyone hears
 | `budget.threshold` | An organization's, team's or key's spend in a budget period first reaches a configured share of its budget, including 100% (requests are now refused). |
 | `mcp.tool_pending` | A pinned MCP tool is new or its definition changed, so it is hidden until an owner approves it. |
 | `key.expiring` | A key expires within 7 days. Sent once per key. |
+| `budget.forecast` | An organization's or team's monthly budget is set to run out before the month ends, at the last week's rate of spend. Sent once per budget and month ([forecast.md](forecast.md)). |
+| `spend.anomaly` | A team's last 24 hours cost several times its usual day. Sent once per team and day ([forecast.md](forecast.md)). |
 
-That is all for v0.3. Each event is something a person must act on, which keeps alerts from becoming noise. Error rates and latency belong in Prometheus alerting, which already has the metrics.
+The last two were added in v1.3. Each event is something a person must act on, which keeps alerts from becoming noise. Error rates and latency belong in Prometheus alerting, which already has the metrics.
 
 ## Config
 
