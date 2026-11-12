@@ -122,6 +122,20 @@ jobs:
         working-directory: deploy/compose
         run: docker compose -f compose.yaml -f compose.sso.yaml logs
 
+  upgrade:
+    # The previous release's database upgraded by this build, then backed
+    # up and restored (docs/backup.md).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          check-latest: true
+      - run: scripts/upgrade-test.sh
+
   quickstart:
     # Zero-config start and the setup wizard, driven by a browser.
     runs-on: ubuntu-latest

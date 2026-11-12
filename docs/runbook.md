@@ -8,6 +8,10 @@ What to do when the gateway alerts. The rules are in [`deploy/helm/genaiopengate
 - **Docker Compose**: `docker compose --profile observability up -d` starts Prometheus with the rules and Grafana with the dashboard at `localhost:3000`.
 - **Anything else**: add `alerts.yaml` to Prometheus `rule_files`, and import `dashboard.json` into Grafana. The dashboard asks for a Prometheus data source.
 
+## Backups and upgrades
+
+Back up before every upgrade, and restore to recover from a bad change or a lost database: see [backup.md](backup.md).
+
 ## First steps for any alert
 
 1. Open the dashboard and narrow it to the time of the alert.

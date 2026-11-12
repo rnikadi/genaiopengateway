@@ -4,6 +4,11 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Added
+
+- `genaiopengateway backup` and `restore` ([docs/backup.md](docs/backup.md)): a consistent snapshot of the database taken while the gateway serves, restored all or nothing into SQLite or Postgres, whichever the backup came from. The restore checks the schema version, the row counts and that the target has the encryption key the stored secrets need. This is also the way to move a zero-config SQLite install to Postgres.
+- An upgrade and restore drill in CI (`scripts/upgrade-test.sh`): the previous release's database is upgraded by this build, backed up and restored, and must keep serving the same organizations, keys and configuration.
+
 ## [1.0.0] - 2026-11-12
 
 The 1.0 release: every modality, A2A agents, hosted stdio MCP servers, a control plane for data planes without a database, and a Kubernetes operator. From this release the APIs, config format, CLI, Terraform provider, Helm values and CRDs are stable under the [support policy](docs/releasing.md#support), and 1.0 is a long-term support release.

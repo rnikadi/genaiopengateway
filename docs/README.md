@@ -44,5 +44,6 @@
 | [Helm chart](helm.md) | Kubernetes deployment design |
 | [Observability](observability.md) | Logs, metrics, traces, usage records |
 | [Runbook](runbook.md) | Dashboard, alert rules, and what to do for each alert |
+| [Backup and upgrades](backup.md) | Backing up and restoring the database, moving between SQLite and Postgres, upgrading |
 | [Releases](releasing.md) | Versioning, artifacts, support |
 | [Roadmap](roadmap.md) | Phases and gates |

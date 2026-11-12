@@ -92,6 +92,7 @@ nav:
       - Kubernetes operator: operator.md
       - Observability: observability.md
       - Runbook: runbook.md
+      - Backup and upgrades: backup.md
       - Releases: releasing.md
       - Roadmap: roadmap.md
   - Decisions: adr/README.md
