@@ -9,7 +9,7 @@ For a plain YAML file in Git instead, see [`gogctl config import`](gogctl.md#con
 Until the provider is on the Terraform Registry, install it from a release archive into a filesystem mirror:
 
 ```sh
-VERSION=0.11.0 OS_ARCH=linux_amd64
+VERSION=1.0.0 OS_ARCH=linux_amd64
 dir=~/.terraform.d/plugins/registry.terraform.io/rnikadi/genaiopengateway/$VERSION/$OS_ARCH
 mkdir -p "$dir"
 cp terraform-provider-genaiopengateway "$dir/terraform-provider-genaiopengateway_v$VERSION"
