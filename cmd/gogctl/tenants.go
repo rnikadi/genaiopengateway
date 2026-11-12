@@ -210,48 +210,59 @@ func (a *applier) importTenants(want map[string]orgDoc, prune bool) error {
 		byName[strings.ToLower(o["name"].(string))] = o
 	}
 	for _, name := range slices.Sorted(maps.Keys(want)) {
-		d := want[name]
 		cur := byName[strings.ToLower(name)]
 		delete(byName, strings.ToLower(name))
-		var orgID string
-		if cur == nil {
-			body := fullPolicy(d.policy)
-			body["name"] = name
-			out, err := a.do("create", "org "+name, http.MethodPost, "/admin/v1/orgs", body)
-			if err != nil {
-				return err
-			}
-			if out != nil {
-				orgID, _ = out["id"].(string)
-			}
-		} else {
-			orgID = cur["id"].(string)
-			if !reflect.DeepEqual(policyOf(cur), d.policy) {
-				if _, err := a.do("update", "org "+name, http.MethodPatch, "/admin/v1/orgs/"+url.PathEscape(orgID), fullPolicy(d.policy)); err != nil {
-					return err
-				}
-			}
-		}
-		if err := a.importTeams(name, orgID, d.teams, prune); err != nil {
-			return err
-		}
-		if err := a.importCedar(name, orgID, d.cedar, prune); err != nil {
+		if err := a.applyOrg(name, want[name], cur, prune); err != nil {
 			return err
 		}
 	}
 	if prune {
 		for _, key := range slices.Sorted(maps.Keys(byName)) {
-			o := byName[key]
-			id := o["id"].(string)
-			if err := a.importTeams(o["name"].(string), id, nil, true); err != nil {
-				return err
-			}
-			if _, err := a.do("delete", "org "+o["name"].(string), http.MethodDelete, "/admin/v1/orgs/"+url.PathEscape(id), nil); err != nil {
+			if err := a.deleteOrg(byName[key]); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// applyOrg makes one organization match its document: cur is the
+// organization as the API lists it, or nil to create it. With
+// pruneTeams, teams the document leaves out are deleted.
+func (a *applier) applyOrg(name string, d orgDoc, cur map[string]any, pruneTeams bool) error {
+	var orgID string
+	if cur == nil {
+		body := fullPolicy(d.policy)
+		body["name"] = name
+		out, err := a.do("create", "org "+name, http.MethodPost, "/admin/v1/orgs", body)
+		if err != nil {
+			return err
+		}
+		if out != nil {
+			orgID, _ = out["id"].(string)
+		}
+	} else {
+		orgID = cur["id"].(string)
+		if !reflect.DeepEqual(policyOf(cur), d.policy) {
+			if _, err := a.do("update", "org "+name, http.MethodPatch, "/admin/v1/orgs/"+url.PathEscape(orgID), fullPolicy(d.policy)); err != nil {
+				return err
+			}
+		}
+	}
+	if err := a.importTeams(name, orgID, d.teams, pruneTeams); err != nil {
+		return err
+	}
+	return a.importCedar(name, orgID, d.cedar, pruneTeams)
+}
+
+// deleteOrg deletes an organization and its teams.
+func (a *applier) deleteOrg(o map[string]any) error {
+	id := o["id"].(string)
+	if err := a.importTeams(o["name"].(string), id, nil, true); err != nil {
+		return err
+	}
+	_, err := a.do("delete", "org "+o["name"].(string), http.MethodDelete, "/admin/v1/orgs/"+url.PathEscape(id), nil)
+	return err
 }
 
 func (a *applier) importTeams(org, orgID string, want map[string]map[string]any, prune bool) error {

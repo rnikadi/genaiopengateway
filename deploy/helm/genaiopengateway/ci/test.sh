@@ -29,4 +29,24 @@ grep -q 'image: "\?ghcr.io/rnikadi/genaiopengateway@sha256:0' <(render -f ci/all
 all=$(render -f ci/all-values.yaml)
 grep -q 'alert: GatewayHighErrorRate' <<<"$all" || { echo "PrometheusRule has no alerts"; exit 1; }
 grep -q '"uid": "genaiopengateway"' <<<"$all" || { echo "dashboard ConfigMap is empty"; exit 1; }
+# The operator: cluster-wide by default, one namespace when asked.
+grep -q 'kind: ClusterRole$' <<<"$all" || { echo "operator ClusterRole missing"; exit 1; }
+grep -q 'command: \[/gogctl, operator' <<<"$all" || { echo "operator Deployment missing"; exit 1; }
+scoped=$(render -f ci/operator-values.yaml)
+grep -q 'kind: Role$' <<<"$scoped" && grep -q 'GOG_WATCH_NAMESPACE' <<<"$scoped" || { echo "namespaced operator not rendered"; exit 1; }
+render -f ci/operator-values.yaml | schemas
+# The gateway's Service and Deployment must not select the operator's pod.
+python3 -c '
+import sys, yaml
+docs = [d for d in yaml.safe_load_all(sys.stdin) if d]
+op = next(d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"].endswith("-operator"))
+labels = op["spec"]["template"]["metadata"]["labels"]
+for d in docs:
+    sel = (d.get("spec") or {}).get("selector") or {}
+    sel = sel.get("matchLabels", sel) if d["kind"] != "Service" else sel
+    if d is not op and sel and all(labels.get(k) == v for k, v in sel.items()):
+        sys.exit(d["kind"] + " " + d["metadata"]["name"] + " selects the operator pod")
+' <<<"$all"
+# The CRDs parse; kind.sh installs them into a real API server.
+for f in crds/*.yaml; do python3 -c 'import sys, yaml; yaml.safe_load(open(sys.argv[1]))' "$f"; done
 echo "chart checks passed"

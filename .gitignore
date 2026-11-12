@@ -7,3 +7,4 @@ dump.rdb
 deploy/compose/.env
 !deploy/compose/config.yaml
 /site/
+/gogctl

@@ -88,7 +88,7 @@ Two small changes make it safe to run several replicas from the first install:
 ## Testing
 
 - CI runs `helm lint` and renders the chart with the default values and with every optional object on, then checks the output with `kubeconform`.
-- A CI job starts a kind cluster with Postgres and Valkey, installs the chart with 2 replicas, waits for both pods to be ready, and sends a chat request through a fake provider and an admin API call. This also exercises the migration lock.
+- A CI job starts a kind cluster with Postgres and Valkey, installs the chart with 2 replicas, waits for both pods to be ready, and sends a chat request through a fake provider and an admin API call. This also exercises the migration lock. It then runs the [operator](operator.md), applies a GatewayOrganization and a GatewayConfigObject, and checks that both reach the gateway and that deleting the organization removes it.
 - Template tests check that the replica guard fails as intended.
 
 ## Not in scope
@@ -96,6 +96,6 @@ Two small changes make it safe to run several replicas from the first install:
 | Feature | Why |
 | --- | --- |
 | Bundled Postgres and Valkey subcharts | See above; the deploy guide links to the usual operators instead. |
-| An operator, CRDs for organizations, keys or MCP servers | v1.0, with the separate control plane. |
+| CRDs for keys | Key secrets are shown once, so they do not fit a declarative resource. The [operator](operator.md) manages organizations, teams and configuration objects. |
 | Secrets management | External Secrets, sealed secrets or the cloud's secret store, referenced through `envFrom`. |
 | Running migrations as a Job or hook | The lock makes startup migration safe; a Job adds ordering problems with Argo CD and Flux. |

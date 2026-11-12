@@ -13,3 +13,4 @@ networkPolicy:
 serviceAccount:
   annotations: {iam.gke.io/gcp-service-account: gateway@project.iam.gserviceaccount.com}
 image: {digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"}
+operator: {enabled: true}

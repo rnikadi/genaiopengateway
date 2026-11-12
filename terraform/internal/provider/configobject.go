@@ -18,7 +18,7 @@ import (
 )
 
 // configKinds are the kinds of stored configuration objects.
-var configKinds = []string{"providers", "models", "guardrails", "mcp_servers", "mcp_virtual_servers", "alert_webhooks", "streams"}
+var configKinds = []string{"providers", "models", "guardrails", "mcp_servers", "mcp_virtual_servers", "a2a_agents", "alert_webhooks", "streams"}
 
 type configObjectModel struct {
 	ID   types.String `tfsdk:"id"`

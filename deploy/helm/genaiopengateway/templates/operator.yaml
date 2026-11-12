@@ -1,0 +1,107 @@
+{{- if .Values.operator.enabled }}
+{{- $name := printf "%s-operator" (include "gog.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- $ns := .Values.operator.watchNamespace }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "gog.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: {{ if $ns }}Role{{ else }}ClusterRole{{ end }}
+metadata:
+  name: {{ $name }}
+  {{- if $ns }}
+  namespace: {{ $ns }}
+  {{- end }}
+  labels:
+    {{- include "gog.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [genaiopengateway.io]
+    resources: [gatewayorganizations, gatewayconfigobjects]
+    verbs: [get, list, watch, patch]
+  - apiGroups: [genaiopengateway.io]
+    resources: [gatewayorganizations/status, gatewayconfigobjects/status]
+    verbs: [get, patch]
+  # Secrets named by secretRefs in GatewayConfigObjects.
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: {{ if $ns }}RoleBinding{{ else }}ClusterRoleBinding{{ end }}
+metadata:
+  name: {{ $name }}
+  {{- if $ns }}
+  namespace: {{ $ns }}
+  {{- end }}
+  labels:
+    {{- include "gog.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: {{ if $ns }}Role{{ else }}ClusterRole{{ end }}
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "gog.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+spec:
+  # One reconciler at a time.
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "gog.name" . }}-operator
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        # Not the gateway's selector labels, so the Service, the PDB
+        # and the gateway's Deployment never select the operator.
+        app.kubernetes.io/name: {{ include "gog.name" . }}-operator
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: operator
+    spec:
+      serviceAccountName: {{ $name }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: operator
+          image: {{ include "gog.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [/gogctl, operator, -interval, {{ .Values.operator.interval | quote }}]
+          env:
+            - name: GOG_URL
+              value: http://{{ include "gog.fullname" . }}:{{ .Values.service.port }}
+            - name: GOG_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.operator.adminTokenSecret.name }}
+                  key: {{ .Values.operator.adminTokenSecret.key }}
+            {{- if $ns }}
+            - name: GOG_WATCH_NAMESPACE
+              value: {{ $ns }}
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            {{- toYaml .Values.operator.resources | nindent 12 }}
+{{- end }}

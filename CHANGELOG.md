@@ -16,6 +16,11 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - A2A agents ([docs/a2a.md](docs/a2a.md), ADR 0033): agents speaking the Agent2Agent protocol are served at `/a2a/{name}` with gateway keys, `allowed_agents` policies, rate limits, guardrails and metrics, and their cards rewritten to point at the gateway. Task and context ids are recorded with their caller, so no team can read or continue another's task. Agents are configured in the file, the UI, `gogctl` and Terraform policies.
 
 - Control and data planes ([docs/control-plane.md](docs/control-plane.md), ADR 0034): a replica with `control_plane` and no store reads versioned snapshots of keys, tenants, stored configuration, team credentials and Cedar policies from a replica with `data_planes`, caches the last one on disk to serve through outages and restarts, and sends its usage, MCP call and guardrail records back. Data planes hold no database credentials and serve no admin API.
+- A Kubernetes operator ([docs/operator.md](docs/operator.md)): `gogctl operator` reconciles `GatewayOrganization` and `GatewayConfigObject` resources into the gateway through the admin API, reading credentials from Secrets, reverting changes made elsewhere, and cleaning up with a finalizer. The Helm chart installs the CRDs and runs it with `operator.enabled`, and the image now includes `gogctl`.
+
+### Fixed
+
+- `gogctl config import` and the Terraform `genaiopengateway_config_object` resource accept `a2a_agents`.
 
 ## [0.11.0] - 2026-11-11
 

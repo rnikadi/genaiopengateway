@@ -88,6 +88,7 @@ nav:
       - Deploying to Kubernetes: deploy-kubernetes.md
       - Control and data planes: control-plane.md
       - Helm chart: helm.md
+      - Kubernetes operator: operator.md
       - Observability: observability.md
       - Runbook: runbook.md
       - Releases: releasing.md
