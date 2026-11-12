@@ -53,7 +53,10 @@ type Server struct {
 	draining atomic.Bool
 	log      *slog.Logger
 	client   *http.Client
-	routing  *router.Health
+	// rtc are the realtime calls over WebRTC this replica watches, by
+	// call id.
+	rtc     sync.Map
+	routing *router.Health
 	// a2aCards caches agent cards by agent name.
 	a2aCards sync.Map
 	// pushClient delivers A2A push notifications to public addresses
@@ -278,6 +281,8 @@ func (s *Server) Start(ctx context.Context) {
 
 // Close flushes queued usage records and releases background resources.
 func (s *Server) Close(ctx context.Context) {
+	// First, so the calls' last charges and request lines are kept.
+	s.endRealtimeCalls(ctx)
 	if s.usage != nil {
 		s.usage.Close(ctx)
 		s.calls.Close(ctx)
@@ -549,6 +554,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/batches/{id}", s.batchCall(http.MethodGet, ""))
 	mux.HandleFunc("POST /v1/batches/{id}/cancel", s.batchCall(http.MethodPost, "/cancel"))
 	mux.HandleFunc("GET /v1/realtime", s.realtime)
+	mux.HandleFunc("POST /v1/realtime/calls", s.realtimeCall)
+	mux.HandleFunc("POST /v1/realtime/calls/{call_id}/hangup", s.realtimeHangup)
+	mux.HandleFunc("OPTIONS /v1/realtime/calls", realtimeCallCORS)
+	mux.HandleFunc("OPTIONS /v1/realtime/calls/{call_id}/hangup", realtimeCallCORS)
 	mux.HandleFunc("GET /ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent", s.live)
 	mux.HandleFunc("GET /bedrock/model/{model}/invoke-with-bidirectional-stream", s.bidi)
 	if s.store != nil {

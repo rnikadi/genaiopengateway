@@ -16,6 +16,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- Realtime over WebRTC ([docs/modalities.md](docs/modalities.md#realtime-over-webrtc)): `POST /v1/realtime/calls` makes an OpenAI realtime call with a gateway key and returns the SDP answer. Audio runs between the client and the provider; the gateway watches the call's events at the provider, charges each response, and hangs up when a budget is spent or the session is too long.
 - The operator watches its resources ([docs/operator.md](docs/operator.md#how-it-works)), so a change is applied within a second instead of at the next pass; `operator.interval` is now only the time between full passes. A new kind, `GatewayCedarPolicySet`, holds Cedar policies shared by several organizations. Run `kubectl apply -f crds/` from the chart to install it; without it the operator works as before.
 
 - A2A push notifications ([docs/a2a.md](docs/a2a.md#push-notifications)), off by default. With `a2a.push.enabled`, a caller's push configuration reaches the agent with a URL at the gateway; the gateway delivers what the agent posts there to the caller's webhook, after the agent's output guardrails, and only to public HTTPS addresses or the hosts in `a2a.push.allowed_hosts`.

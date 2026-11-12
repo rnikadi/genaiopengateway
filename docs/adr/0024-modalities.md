@@ -13,7 +13,7 @@ Clients use more than chat and embeddings: image generation, text to speech, tra
 - Implement them first on the `openai` provider type, which covers OpenAI, Azure OpenAI and the self-hosted servers that copy its API. Native Vertex AI, Bedrock and Gemini translations follow one by one.
 - Meter what each modality is billed by: images, characters, audio seconds, video seconds and requests, alongside tokens. Prices on a target gain one field per count.
 - Track video jobs in the store so that only the team that created a job can read, download or delete it, and so that it goes back to the provider that created it.
-- Relay OpenAI's realtime WebSocket, charging each response as it finishes and closing the session when a budget runs out. WebRTC is left out because its media would not pass through the gateway.
+- Relay OpenAI's realtime WebSocket, charging each response as it finishes and closing the session when a budget runs out. WebRTC was left out at first because its media does not pass through the gateway; it was added once the provider offered a WebSocket beside each call, through which the gateway meters and ends it ([modalities.md](../modalities.md#realtime-over-webrtc)).
 
 ## Consequences
 

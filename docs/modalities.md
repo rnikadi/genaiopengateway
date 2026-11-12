@@ -140,7 +140,6 @@ models:
         price: {input_per_mtok: 0.06, output_per_mtok: 0.24, audio_input_per_mtok: 3.4, audio_output_per_mtok: 13.6}
 ```
 
-WebRTC is not in this design: its media goes from the client straight to the provider, so the gateway could neither meter nor guard it.
 
 ## Request handling
 
@@ -222,6 +221,42 @@ A caller owns a job when it is in the same organization and team. Static keys fr
 - **Guardrails**: realtime audio cannot be checked, so a key with any guardrail is refused realtime with `400 invalid_request`, as streamed transcripts are. Bodies are not logged.
 - **Log**: one request log line per session (endpoint `realtime`, status 101), written when it closes, with its duration and its responses' tokens and cost.
 
+### Realtime over WebRTC
+
+Browsers and phones usually reach OpenAI's realtime API over WebRTC, which handles microphones, echo and packet loss better than a WebSocket. `POST /v1/realtime/calls` makes such a call through the gateway:
+
+```js
+const pc = new RTCPeerConnection();
+pc.addTrack((await navigator.mediaDevices.getUserMedia({audio: true})).getTracks()[0]);
+const events = pc.createDataChannel("oai-events");
+await pc.setLocalDescription(await pc.createOffer());
+const resp = await fetch("https://gateway.example.com/v1/realtime/calls?model=voice", {
+  method: "POST",
+  headers: {Authorization: `Bearer ${GATEWAY_KEY}`, "Content-Type": "application/sdp"},
+  body: pc.localDescription.sdp,
+});
+await pc.setRemoteDescription({type: "answer", sdp: await resp.text()});
+```
+
+1. The client sends its SDP offer with a gateway key: as `application/sdp` with the virtual model in the `model` query parameter, or as `multipart/form-data` with an `sdp` part and a `session` part, a JSON session configuration whose `model` is the virtual model. This is the request OpenAI's own endpoint takes.
+2. The gateway checks the key, the model allow list, policies, request limits and budgets as for a WebSocket session, and makes the call at the first target that accepts it, with the provider's key and the target's model. The client gets the provider's SDP answer and a `Location` header, `/v1/realtime/calls/{call_id}`.
+3. **Audio and events then run between the client and the provider**, not through the gateway. The client's network must reach the provider's media servers, and the provider's key never reaches the client.
+4. The gateway stays on the call through the provider's WebSocket for it (`/v1/realtime?call_id=`), which carries the call's events. It charges each `response.done` as on a WebSocket session, and hangs up the call at the provider when a charge spends a budget, when the call reaches `limits.max_realtime_session`, when the session's model changes, or when the gateway shuts down.
+5. `POST /v1/realtime/calls/{call_id}/hangup`, with the key that made the call, ends it. So does closing the peer connection.
+
+What differs from the WebSocket:
+
+- A call the gateway cannot watch is not handed over: if the provider names no call id or refuses the events WebSocket, the gateway hangs up and answers `502`.
+- The gateway cannot send the client an `error` event before it hangs up; the client sees the peer connection close. The request log line says why in `error_code`: `budget_exceeded`, `session_expired`, `model_changed` or `gateway_shutdown`.
+- The gateway cannot rewrite a `session.update`, since it does not carry it. It ends a call whose session reports another model than the one it started with.
+- Each replica watches the calls made through it, so a rolling restart ends them, as it ends WebSocket sessions. The hangup endpoint answers `404` on another replica.
+- Only the `openai` provider type makes calls, at `{base_url}/realtime/calls`. Fallback applies to making the call, as to dialing.
+- One request log line per call (endpoint `realtime`, status 201), written when it ends. Keys with guardrails are refused.
+
+Pages of any origin may make calls, as they may open the WebSocket: the two endpoints answer CORS preflights and send `Access-Control-Allow-Origin: *`, since a key and not a cookie authenticates them.
+
+A browser that holds a gateway key shows it to its user, as with the `openai-insecure-api-key` subprotocol. Give such clients a short-lived key with a small budget, made by your backend through the [admin API](api.md).
+
 ## Admin UI
 
 - **Models page**: the new endpoints show as badges beside chat and embeddings.
@@ -256,4 +291,4 @@ Each step is one pull request with its tests, docs and conformance cases. The or
 
 ## Not in this design
 
-- Batch (`/v1/batches`, `/v1/files`) has its own design in [batch.md](batch.md). The semantic cache is designed in [cache.md](cache.md). WebRTC stays in issue #35 for later.
+- Batch (`/v1/batches`, `/v1/files`) has its own design in [batch.md](batch.md). The semantic cache is designed in [cache.md](cache.md).

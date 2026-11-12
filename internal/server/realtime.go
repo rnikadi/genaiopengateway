@@ -312,8 +312,23 @@ type realtimeUsage struct {
 // observe charges response.done events as they pass to the client. It
 // returns nil once a charge spends a budget, after passing nothing on.
 func (rs *realtimeSession) observe(data []byte) []byte {
-	if !bytes.Contains(data, []byte(`"response.done"`)) {
+	tok, ok := responseDoneUsage(data)
+	if !ok {
 		return data
+	}
+	if rs.charge(tok) {
+		// The client still gets the response it paid for.
+		_ = rs.writeClient(data)
+		return nil
+	}
+	return data
+}
+
+// responseDoneUsage returns the usage of a response.done event, and
+// false for any other message.
+func responseDoneUsage(data []byte) (usage.Tokens, bool) {
+	if !bytes.Contains(data, []byte(`"response.done"`)) {
+		return usage.Tokens{}, false
 	}
 	var ev struct {
 		Type     string `json:"type"`
@@ -322,19 +337,13 @@ func (rs *realtimeSession) observe(data []byte) []byte {
 		} `json:"response"`
 	}
 	if json.Unmarshal(data, &ev) != nil || ev.Type != "response.done" || ev.Response.Usage == nil {
-		return data
+		return usage.Tokens{}, false
 	}
 	u := ev.Response.Usage
-	tok := usage.Tokens{
+	return usage.Tokens{
 		InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, CachedInputTokens: u.InputTokenDetails.CachedTokens,
 		AudioInputTokens: u.InputTokenDetails.AudioTokens, AudioOutputTokens: u.OutputTokenDetails.AudioTokens, Reported: true,
-	}
-	if rs.charge(tok) {
-		// The client still gets the response it paid for.
-		_ = rs.writeClient(data)
-		return nil
-	}
-	return data
+	}, true
 }
 
 // charge records and charges one response of the session, and reports

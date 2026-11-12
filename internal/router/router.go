@@ -515,6 +515,13 @@ func (r *Router) Dialer(ctx context.Context, providerName string) (provider.Dial
 	return d, ok
 }
 
+// RealtimeCaller returns a provider's adapter for realtime calls over
+// WebRTC, or false when the provider is gone or does not serve them.
+func (r *Router) RealtimeCaller(ctx context.Context, providerName string) (provider.RealtimeCaller, bool) {
+	c, ok := r.adapter(ctx, providerName).(provider.RealtimeCaller)
+	return c, ok
+}
+
 // LiveDialer returns a provider's adapter for Gemini Live sessions, or
 // false when the provider is gone or does not serve them.
 func (r *Router) LiveDialer(ctx context.Context, providerName string) (provider.LiveDialer, bool) {

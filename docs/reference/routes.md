@@ -28,6 +28,10 @@ Every route the gateway serves, generated from the handlers in `internal/server`
 | `GET` | `/v1/models` | `s.listModels` | listModels lists the virtual models the caller's key may use, in OpenAI's shape. |
 | `POST` | `/v1/moderations` | `s.model(provider.Moderations)` | model serves one model endpoint: authenticate, check policy, route, stream the answer back and record usage. |
 | `GET` | `/v1/realtime` | `s.realtime` | realtime relays an OpenAI realtime session to one target, charging each response as it finishes (docs/modalities.md). |
+| `OPTIONS` | `/v1/realtime/calls` | `realtimeCallCORS` | realtimeCallCORS answers a browser's preflight for a call. |
+| `POST` | `/v1/realtime/calls` | `s.realtimeCall` | realtimeCall makes a realtime call over WebRTC at one target and watches it until it ends. |
+| `OPTIONS` | `/v1/realtime/calls/{call_id}/hangup` | `realtimeCallCORS` | realtimeCallCORS answers a browser's preflight for a call. |
+| `POST` | `/v1/realtime/calls/{call_id}/hangup` | `s.realtimeHangup` | realtimeHangup ends a call for the key that made it. |
 | `POST` | `/v1/rerank` | `s.model(provider.Rerank)` | model serves one model endpoint: authenticate, check policy, route, stream the answer back and record usage. |
 | `POST` | `/v1/responses` | `s.model(provider.Responses)` | model serves one model endpoint: authenticate, check policy, route, stream the answer back and record usage. |
 | `GET` | `/v1/videos` | `s.listVideos` | listVideos lists the caller's jobs, newest first, as last stored. |
