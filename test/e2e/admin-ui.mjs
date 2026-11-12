@@ -97,7 +97,7 @@ await step('owner creates, rotates and revokes a virtual key', async () => {
   const team = await adminAPI('POST', `/admin/v1/orgs/${org.id}/teams`, { name: 'apps' });
   const owner = `svc-${run}@example.com`;
   const { ctx, page } = await signIn('owner@example.com');
-  await page.click('nav >> text=Keys');
+  await page.click('nav >> text="Keys"');
   await page.click('button:has-text("New key")');
   await page.selectOption('.modal select', team.id);
   await page.fill('.modal label:has-text("Name") input', 'billing');

@@ -159,11 +159,16 @@ function Shell({ session, onSignOut }) {
   // Developers hold only portal permissions; everything else in the
   // menu is for people who run the gateway (docs/developer-portal.md).
   const portalOnly = !owner && op.grants.every((g) => (g.permissions || []).every((p) => p === 'keys.self' || p === 'playground.use'));
-  const may = (need) =>
-    !need || owner || (need === 'admin' ? !portalOnly
-      : need === 'agents' ? !portalOnly && (session.me.agents || []).length > 0
-      : need === 'explain' ? op.grants.some((g) => (g.permissions || []).some((p) => p === 'keys.read' || p === 'keys.self'))
-      : need !== 'owner' && op.grants.some((g) => (g.permissions || []).includes(need)));
+  // Portal keys belong to a person's email, which the admin token has not.
+  const may = (need) => {
+    if (!need) return true;
+    if (need === 'keys.self' && !op.email) return false;
+    if (owner) return true;
+    if (need === 'admin') return !portalOnly;
+    if (need === 'agents') return !portalOnly && (session.me.agents || []).length > 0;
+    if (need === 'explain') return op.grants.some((g) => (g.permissions || []).some((p) => p === 'keys.read' || p === 'keys.self'));
+    return need !== 'owner' && op.grants.some((g) => (g.permissions || []).includes(need));
+  };
   if (portalOnly && route.path === '/') {
     Page = Portal;
     section = 'portal';
