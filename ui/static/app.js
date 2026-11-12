@@ -20,6 +20,7 @@ import { Jobs } from './pages/jobs.js';
 import { Setup } from './pages/setup.js';
 import { Directory } from './pages/directory.js';
 import { Agents } from './pages/agents.js';
+import { Portal } from './pages/portal.js';
 import { Search, useSearchShortcut } from './search.js';
 
 const routes = [
@@ -37,6 +38,7 @@ const routes = [
   [/^\/models$/, Models, 'models'],
   [/^\/providers$/, Providers, 'providers'],
   [/^\/agents$/, Agents, 'agents'],
+  [/^\/portal$/, Portal, 'portal', 'keys.self'],
   [/^\/alerts$/, Alerts, 'alerts'],
   [/^\/settings(?:\/([a-z-]+))?$/, Settings, 'settings', 'owner'],
   [/^\/playground$/, Playground, 'playground', 'playground.use'],
@@ -50,7 +52,7 @@ const routes = [
 // Each entry is [section, href, label, permission]; a group with nothing
 // the operator may open is left out.
 const nav = [
-  ['', [['overview', '#/', 'Home']]],
+  ['', [['overview', '#/', 'Home', 'admin'], ['portal', '#/portal', 'My keys and access', 'keys.self']]],
   ['Access', [
     ['orgs', '#/orgs', 'Organizations'],
     ['keys', '#/keys', 'Keys'],
@@ -151,9 +153,21 @@ function Shell({ session, onSignOut }) {
   const op = session.me.operator;
   const owner = op.grants.some((g) => g.role === 'owner');
   // owner pages need the owner role; others, a grant with that permission.
+  // Developers hold only portal permissions; everything else in the
+  // menu is for people who run the gateway (docs/developer-portal.md).
+  const portalOnly = !owner && op.grants.every((g) => (g.permissions || []).every((p) => p === 'keys.self' || p === 'playground.use'));
   const may = (need) =>
-    !need || owner || (need === 'agents' ? (session.me.agents || []).length > 0 : need !== 'owner' && op.grants.some((g) => (g.permissions || []).includes(need)));
-  const groups = nav.map(([title, items]) => [title, items.filter(([, , , role]) => may(role))]).filter(([, items]) => items.length);
+    !need || owner || (need === 'admin' ? !portalOnly
+      : need === 'agents' ? !portalOnly && (session.me.agents || []).length > 0
+      : need !== 'owner' && op.grants.some((g) => (g.permissions || []).includes(need)));
+  if (portalOnly && route.path === '/') {
+    Page = Portal;
+    section = 'portal';
+    needs = 'keys.self';
+  } else if (portalOnly && !needs) {
+    needs = 'admin';
+  }
+  const groups = nav.map(([title, items]) => [title, items.filter(([, , , role]) => may(role) && (!portalOnly || role === 'keys.self'))]).filter(([, items]) => items.length);
   const pages = groups.flatMap(([, items]) => items.map(([, href, label]) => [label, href]));
   if (may('playground.use')) pages.push(['Playground', '#/playground']);
   if (owner) pages.push(['Setup wizard', '#/setup']);

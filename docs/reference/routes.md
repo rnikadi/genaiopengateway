@@ -100,6 +100,11 @@ Every route the gateway serves, generated from the handlers in `internal/server`
 | `POST` | `/admin/v1/playground/audio/transcriptions` | `s.playground(provider.Transcriptions)` | playground lets an operator call a model as a team, with the team's policies, through the same handler that serves API keys (docs/playground.md). |
 | `POST` | `/admin/v1/playground/chat/completions` | `s.playground(provider.ChatCompletions)` | playground lets an operator call a model as a team, with the team's policies, through the same handler that serves API keys (docs/playground.md). |
 | `POST` | `/admin/v1/playground/images/generations` | `s.playground(provider.ImageGenerations)` | playground lets an operator call a model as a team, with the team's policies, through the same handler that serves API keys (docs/playground.md). |
+| `GET` | `/admin/v1/portal` | `s.portal` | portal returns, for each of the person's teams, what it may use, the person's keys and their use this month. |
+| `POST` | `/admin/v1/portal/keys/{key_id}/revoke` | `s.portalRevokeKey` | portalRevokeKey revokes one of the person's keys at once. |
+| `POST` | `/admin/v1/portal/keys/{key_id}/rotate` | `s.portalRotateKey` | portalRotateKey gives one of the person's keys a new secret; the old one works for the grace period, at most portalMaxGrace. |
+| `POST` | `/admin/v1/portal/teams/{team_id}/keys` | `s.portalCreateKey` | portalCreateKey creates a key the person owns, with no policy of its own and an expiry within sso.portal.max_key_ttl. |
+| `POST` | `/admin/v1/portal/teams/{team_id}/requests` | `s.portalRequestAccess` | portalRequestAccess asks the team's admins for a virtual MCP server, as the MCP catalog does. |
 | `GET` | `/admin/v1/providers` | `s.listProviders` | listProviders lists configured providers with type, endpoint, auth kind and last-hour health; secrets are never returned. |
 | `DELETE` | `/admin/v1/requests` | `s.deleteRequestBodies` | deleteRequestBodies deletes an organization's bodies before a time. |
 | `GET` | `/admin/v1/requests` | `s.listRequests` | listRequests lists logged request bodies' metadata, newest first. |

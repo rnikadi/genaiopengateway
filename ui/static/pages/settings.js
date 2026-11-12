@@ -96,6 +96,14 @@ const sections = [
     ],
   },
   {
+    title: 'Developer portal',
+    note: 'People with the developer role create and rotate their own keys under My keys and access (docs/developer-portal.md).',
+    fields: [
+      { path: 'sso.portal.max_keys_per_user', label: 'Active keys per person', type: 'number', min: '1', max: '100', step: '1' },
+      { path: 'sso.portal.max_key_ttl', label: 'Longest a key may last', type: 'duration', hint: 'Between 1h and 366d.' },
+    ],
+  },
+  {
     title: 'MCP',
     fields: [
       { path: 'mcp.public_url', label: 'Public URL of the gateway', type: 'text', hint: 'Names each virtual server for OAuth clients.' },
@@ -120,7 +128,7 @@ const sections = [
 // Settings are split into pages by subject; each page holds sections from
 // above, by title (docs/admin-ui.md).
 const pages = [
-  { slug: 'sign-in', title: 'Sign-in and SSO', sections: ['Single sign-on', 'SAML sign-in'], sessions: true },
+  { slug: 'sign-in', title: 'Sign-in and SSO', sections: ['Single sign-on', 'SAML sign-in', 'Developer portal'], sessions: true },
   { slug: 'limits', title: 'Limits', sections: ['Request limits', 'If the limiter is unreachable', 'Circuit breaker'] },
   { slug: 'data', title: 'Logging and data', sections: ['Data and refresh', 'Body logging'] },
   { slug: 'cache', title: 'Cache', sections: ['Response cache'] },
@@ -394,8 +402,8 @@ function RolesEditor({ roles, customRoles, onChange }) {
         <td data-setting="sso.roles.group"><input value=${r.group || ''} onInput=${(e) => set(i, 'group', e.target.value)} /></td>
         <td data-setting="sso.roles.email"><input value=${r.email || ''} onInput=${(e) => set(i, 'email', e.target.value)} /></td>
         <td data-setting="sso.roles.role"><select value=${r.role || 'viewer'} onChange=${(e) => set(i, 'role', e.target.value)}>
-          <option value="owner">Owner</option><option value="admin">Admin</option><option value="viewer">Viewer</option>
-          ${[...new Set([...customRoles, ...(r.role && !['owner', 'admin', 'viewer'].includes(r.role) ? [r.role] : [])])].map((n) => html`<option key=${n} value=${n}>${n}</option>`)}
+          <option value="owner">Owner</option><option value="admin">Admin</option><option value="viewer">Viewer</option><option value="developer">Developer</option>
+          ${[...new Set([...customRoles, ...(r.role && !['owner', 'admin', 'viewer', 'developer'].includes(r.role) ? [r.role] : [])])].map((n) => html`<option key=${n} value=${n}>${n}</option>`)}
         </select></td>
         <td data-setting="sso.roles.org"><input value=${r.org || ''} placeholder="All" onInput=${(e) => set(i, 'org', e.target.value)} /></td>
         <td data-setting="sso.roles.team"><input value=${r.team || ''} placeholder="All" disabled=${!r.org} onInput=${(e) => set(i, 'team', e.target.value)} /></td>

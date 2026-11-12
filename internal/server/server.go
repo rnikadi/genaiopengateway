@@ -498,6 +498,7 @@ func (s *Server) Handler() http.Handler {
 	}
 	mux.HandleFunc("/.well-known/oauth-protected-resource/mcp/{name}", s.mcpResourceMetadata)
 	s.adminRoutes(mux)
+	s.portalRoutes(mux)
 	s.uiRoutes(mux)
 	return s.recoverer(withRequestID(withSecurityHeaders(mux)))
 }

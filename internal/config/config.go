@@ -367,6 +367,17 @@ type SSO struct {
 	// SCIM lets the identity provider provision users and groups
 	// (docs/scim.md).
 	SCIM SCIM `yaml:"scim"`
+	// Portal limits what developers do for themselves in the developer
+	// portal (docs/developer-portal.md).
+	Portal Portal `yaml:"portal"`
+}
+
+// Portal limits developers' own keys.
+type Portal struct {
+	// MaxKeysPerUser is how many unrevoked keys one person may own.
+	MaxKeysPerUser int `yaml:"max_keys_per_user"`
+	// MaxKeyTTL is the longest expiry a developer may give a key.
+	MaxKeyTTL Duration `yaml:"max_key_ttl"`
 }
 
 // Enabled reports whether operators sign in with an identity provider.
@@ -472,6 +483,9 @@ const (
 	RoleOwner  = "owner"
 	RoleAdmin  = "admin"
 	RoleViewer = "viewer"
+	// RoleDeveloper uses the developer portal: own keys within the
+	// team's policy, and the playground (docs/developer-portal.md).
+	RoleDeveloper = "developer"
 )
 
 // Permissions an operator role can hold, each over the organizations or
@@ -491,13 +505,17 @@ const (
 	PermBatchesWrite     = "batches.write"
 	PermCacheClear       = "cache.clear"
 	PermPlayground       = "playground.use"
+	PermKeysSelf         = "keys.self"
 )
 
 // Permissions lists every permission, in the order the docs give them.
 var Permissions = []string{
 	PermOrgRead, PermTeamsRead, PermTeamsWrite, PermKeysRead, PermKeysWrite, PermCredentialsWrite,
-	PermUsageRead, PermAuditRead, PermAlertsRead, PermBodiesRead, PermBatchesWrite, PermCacheClear, PermPlayground,
+	PermUsageRead, PermAuditRead, PermAlertsRead, PermBodiesRead, PermBatchesWrite, PermCacheClear, PermPlayground, PermKeysSelf,
 }
+
+// developerPermissions are what the developer role holds.
+var developerPermissions = []string{PermKeysSelf, PermPlayground}
 
 // viewerPermissions are what the viewer role holds: everything an
 // organization's admin reads, except logged bodies.
@@ -510,6 +528,8 @@ func (s *SSO) RolePermissions(role string) []string {
 		return Permissions
 	case RoleViewer:
 		return viewerPermissions
+	case RoleDeveloper:
+		return developerPermissions
 	}
 	if r, ok := s.CustomRoles[role]; ok {
 		return r.Permissions
@@ -906,6 +926,8 @@ const (
 	DefaultMCPTimeout         = time.Minute
 	DefaultMaxUserSessions    = 1000
 	DefaultSessionTTL         = 8 * time.Hour
+	DefaultPortalMaxKeys      = 5
+	DefaultPortalKeyTTL       = 90 * 24 * time.Hour
 	MinAdminTokenLength       = 32
 	MinStaticKeyLength        = 16
 )
@@ -937,7 +959,7 @@ func decode(root *yaml.Node) (*Config, error) {
 			Semantic: SemanticCache{Threshold: DefaultCacheThreshold, MaxEntries: DefaultCacheVectors}},
 		Store:       Store{RefreshInterval: Duration(DefaultRefreshInterval)},
 		MCP:         MCP{RefreshInterval: Duration(DefaultMCPRefresh), MaxUserSessions: DefaultMaxUserSessions},
-		SSO:         SSO{SessionTTL: Duration(DefaultSessionTTL)},
+		SSO:         SSO{SessionTTL: Duration(DefaultSessionTTL), Portal: Portal{MaxKeysPerUser: DefaultPortalMaxKeys, MaxKeyTTL: Duration(DefaultPortalKeyTTL)}},
 		Alerts:      Alerts{BudgetThresholds: DefaultBudgetThresholds},
 		BodyLogging: BodyLogging{Retention: Duration(DefaultBodyRetention), MaxBodyBytes: DefaultMaxBodyBytes},
 		Routing:     Routing{CircuitBreaker: CircuitBreaker{Failures: DefaultBreakerFailures, Cooldown: Duration(DefaultBreakerCooldown)}},
@@ -1414,6 +1436,11 @@ func (c *Config) validateSSO(add func(string, ...any)) {
 			add("sso.saml needs a store, where sessions are kept")
 		}
 	}
+	if p := s.Portal; p.MaxKeysPerUser < 1 || p.MaxKeysPerUser > 100 {
+		add("sso.portal.max_keys_per_user must be between 1 and 100")
+	} else if p.MaxKeyTTL < Duration(time.Hour) || p.MaxKeyTTL > Duration(366*24*time.Hour) {
+		add("sso.portal.max_key_ttl must be between 1h and 366d")
+	}
 	if s.SessionTTL < Duration(time.Minute) {
 		add("sso.session_ttl must be at least 1m")
 	}
@@ -1432,18 +1459,18 @@ func (c *Config) validateSSO(add func(string, ...any)) {
 		switch {
 		case r.Role == RoleOwner && r.Org != "":
 			add("sso.roles[%d]: owner is gateway-wide and takes no org", i)
-		case r.Role == RoleAdmin && r.Org == "":
-			add("sso.roles[%d]: admin needs an org", i)
+		case (r.Role == RoleAdmin || r.Role == RoleDeveloper) && r.Org == "":
+			add("sso.roles[%d]: %s needs an org", i, r.Role)
 		case r.Team != "" && r.Org == "":
 			add("sso.roles[%d]: team needs an org", i)
 		case s.RolePermissions(r.Role) == nil:
-			add("sso.roles[%d]: role must be owner, admin, viewer or one of sso.custom_roles, got %q", i, r.Role)
+			add("sso.roles[%d]: role must be owner, admin, viewer, developer or one of sso.custom_roles, got %q", i, r.Role)
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(s.CustomRoles)) {
 		r := s.CustomRoles[name]
 		switch {
-		case name == RoleOwner || name == RoleAdmin || name == RoleViewer:
+		case name == RoleOwner || name == RoleAdmin || name == RoleViewer || name == RoleDeveloper:
 			add("sso.custom_roles.%s: the name is a built-in role", name)
 		case !mcpName.MatchString(name):
 			add("sso.custom_roles.%s: names are lowercase letters, digits, - and _", name)

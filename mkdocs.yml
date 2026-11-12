@@ -81,6 +81,7 @@ nav:
       - SCIM provisioning: scim.md
       - SAML sign-in: saml.md
       - Identity providers: identity-providers.md
+      - Developer portal: developer-portal.md
       - Cedar policies: cedar.md
       - Configuration views: admin-ui-config.md
       - Editing configuration: admin-ui-config-editing.md

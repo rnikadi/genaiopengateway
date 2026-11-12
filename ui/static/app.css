@@ -147,6 +147,7 @@ tbody tr:last-child td { border-bottom: none; }
 ol.targets, ul.plain { margin: 0; padding-left: 18px; }
 ul.plain { list-style: none; padding: 0; }
 details summary { cursor: pointer; color: var(--accent); }
+pre.code { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px; overflow: auto; white-space: pre; margin: 8px 0; font-size: 13px; }
 pre.json { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px; overflow: auto; max-height: 420px; white-space: pre-wrap; word-break: break-word; margin: 8px 0; }
 
 /* badges */

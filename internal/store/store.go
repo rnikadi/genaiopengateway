@@ -497,6 +497,8 @@ type KeyFilter struct {
 	TeamID  string
 	// Query matches the name, prefix or owner, ignoring case.
 	Query string
+	// Owner matches the owner exactly, ignoring case.
+	Owner string
 	// Status is active, expiring (within 7 days), expired, revoked or
 	// rotating (a previous secret still works).
 	Status string
@@ -533,6 +535,9 @@ func (s *Store) ListAllKeys(ctx context.Context, f KeyFilter, p Page) ([]*Key, b
 	}
 	if f.TeamID != "" {
 		where, args = append(where, "team_id = ?"), append(args, f.TeamID)
+	}
+	if f.Owner != "" {
+		where, args = append(where, "LOWER(owner) = ?"), append(args, strings.ToLower(f.Owner))
 	}
 	if f.Query != "" {
 		q := "%" + strings.ToLower(f.Query) + "%"
