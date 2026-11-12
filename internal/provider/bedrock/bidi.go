@@ -87,9 +87,10 @@ func (p *Provider) OpenBidi(ctx context.Context, model string, first []byte) (pr
 		return nil, 0, res.err
 	}
 	if res.resp.StatusCode != http.StatusOK {
+		// Read the error before cancelling, which would cut the body short.
+		e := readError(&provider.Response{StatusCode: res.resp.StatusCode, Header: res.resp.Header, Body: res.resp.Body})
 		cancel()
 		_ = pw.Close()
-		e := readError(&provider.Response{StatusCode: res.resp.StatusCode, Header: res.resp.Header, Body: res.resp.Body})
 		return nil, e.status, fmt.Errorf("%s: %s", e.typ, e.message)
 	}
 	b.resp = res.resp.Body

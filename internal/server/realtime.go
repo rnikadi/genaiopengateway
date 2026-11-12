@@ -225,18 +225,21 @@ func (s *Server) dialRealtime(ctx context.Context, rt *runtime, rec *requestLog,
 }
 
 // relay copies messages from src to dst until either side fails. edit
-// may change or inspect each text message; a nil result ends the relay
-// with errBudgetSpent.
+// may change or inspect each message; a nil result ends the relay with
+// errBudgetSpent, and an empty one drops the message.
 func relay(ctx context.Context, src, dst *websocket.Conn, edit func([]byte) []byte) error {
 	for {
 		typ, data, err := src.Read(ctx)
 		if err != nil {
 			return err
 		}
-		if typ == websocket.MessageText {
-			if data = edit(data); data == nil {
-				return errBudgetSpent
-			}
+		// Binary messages are edited too: an upstream may parse JSON in
+		// either kind of frame.
+		if data = edit(data); data == nil {
+			return errBudgetSpent
+		}
+		if len(data) == 0 {
+			continue
 		}
 		if err := dst.Write(ctx, typ, data); err != nil {
 			return err
@@ -247,11 +250,20 @@ func relay(ctx context.Context, src, dst *websocket.Conn, edit func([]byte) []by
 // withSessionModel replaces a model named in a session.update event with
 // the target's, so a client cannot leave the virtual model.
 func withSessionModel(data []byte, model string) []byte {
-	if !bytes.Contains(data, []byte(`"session.update"`)) {
+	// A message that names session.update says so in plain text, unless
+	// it uses \u escapes; anything else passes as it is.
+	if !bytes.Contains(data, []byte("session.update")) && !bytes.Contains(data, []byte(`\u`)) {
 		return data
 	}
 	var ev map[string]json.RawMessage
-	if json.Unmarshal(data, &ev) != nil || string(ev["type"]) != `"session.update"` {
+	if json.Unmarshal(data, &ev) != nil {
+		return data // not a JSON object: the upstream refuses it too
+	}
+	if hasDuplicateKeys(data) {
+		return []byte{} // parsers disagree on which value wins: drop it
+	}
+	var typ string
+	if json.Unmarshal(ev["type"], &typ) != nil || typ != "session.update" {
 		return data
 	}
 	var sess map[string]json.RawMessage
@@ -262,7 +274,7 @@ func withSessionModel(data []byte, model string) []byte {
 	ev["session"], _ = json.Marshal(sess)
 	out, err := json.Marshal(ev)
 	if err != nil {
-		return data
+		return []byte{}
 	}
 	return out
 }

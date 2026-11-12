@@ -37,6 +37,10 @@ jobs:
           unformatted=$(gofmt -l .)
           if [ -n "$unformatted" ]; then echo "$unformatted"; exit 1; fi
       - run: go vet ./...
+      - name: fuzz targets
+        # Each target's seed corpus runs with the tests; this checks that
+        # continuous fuzzing builds every target.
+        run: scripts/check-fuzz-targets.sh
       - name: staticcheck
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
       - name: govulncheck
