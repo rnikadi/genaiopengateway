@@ -240,7 +240,7 @@ await step('owner sees everything the gateway is configured with', async () => {
   await page.click('[role=tab]:has-text("Webhooks")');
   await page.waitForSelector('text=Budget alerts fire at');
   await page.click('nav >> text=Settings');
-  await page.waitForSelector('label:has-text("Identity provider")');
+  await page.waitForSelector('[data-setting="sso.oidc.issuer"]');
   const signInPage = await page.content();
   await page.click('.subnav >> text=Startup values');
   await page.waitForSelector('dt:has-text("Version")');
