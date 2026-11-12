@@ -548,6 +548,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /a2a/{name}", s.serveA2A)
 	mux.HandleFunc("GET /a2a/{name}/.well-known/agent-card.json", s.a2aCard)
 	mux.HandleFunc("GET /a2a/{name}/.well-known/agent.json", s.a2aCard)
+	mux.HandleFunc("/a2a/{name}/{path...}", s.serveA2AREST)
 	mux.HandleFunc("/mcp/{name}", s.serveMCP)
 	if s.store != nil {
 		mux.HandleFunc("GET /mcp/connect/callback", s.connectCallback)

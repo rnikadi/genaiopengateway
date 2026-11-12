@@ -16,6 +16,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- A2A 1.0 and the HTTP+JSON binding ([docs/a2a.md](docs/a2a.md#calling-an-agent)). Agents are relayed over JSON-RPC with the method names of A2A 0.3 or 1.0, and, with `rest_url`, over HTTP+JSON at `/a2a/{name}/message:send` and the other paths of the binding. Ownership of tasks, guardrails, limits and telemetry apply to every form, and cards of A2A 1.0 are rewritten to name the gateway's interfaces.
 - MCP servers can ask the client for input ([docs/mcp.md](docs/mcp.md#requests-for-input)). Elicitation and sampling requests of servers whose `client_requests` allows them reach clients on MCP 2026-07-28 as `input_required` results, and the answers reach the server, whether the server speaks 2026-07-28 or asks in the middle of a call as older servers do. Each request passed on is audited. Nothing is passed on by default.
 - MCP change notifications ([docs/mcp.md](docs/mcp.md#change-notifications)): clients that open a `subscriptions/listen` stream are told when the tools, prompts or resources of their virtual server change.
 - The MCP connect flow and connections page work with SAML sign-in ([docs/mcp-user-credentials.md](docs/mcp-user-credentials.md#with-saml-sign-in)): `sso.saml.mcp_subject_attribute` names the attribute that carries the subject of a person's MCP tokens.

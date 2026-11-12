@@ -811,6 +811,9 @@ type A2A struct {
 type A2AAgent struct {
 	// URL is the agent's JSON-RPC endpoint.
 	URL string `yaml:"url"`
+	// RESTURL is the base of the agent's HTTP+JSON (REST) binding, when
+	// it offers one. At least one of URL and RESTURL is set.
+	RESTURL string `yaml:"rest_url"`
 	// CardURL is where the agent's card is. Default: the URL's origin
 	// with /.well-known/agent-card.json.
 	CardURL     string            `yaml:"card_url"`
@@ -1792,8 +1795,15 @@ func (c *Config) validateA2A(add func(string, ...any)) {
 		if !mcpName.MatchString(name) {
 			add("a2a agent %q: names use lowercase letters, digits, - and _", name)
 		}
-		if !httpURL(ag.URL) {
+		ag.RESTURL = strings.TrimRight(ag.RESTURL, "/")
+		a.Agents[name] = ag
+		switch {
+		case ag.URL == "" && ag.RESTURL == "":
+			add("a2a agent %q: set url (JSON-RPC), rest_url (HTTP+JSON) or both", name)
+		case ag.URL != "" && !httpURL(ag.URL):
 			add("a2a agent %q: url must be an http or https URL", name)
+		case ag.RESTURL != "" && !httpURL(ag.RESTURL):
+			add("a2a agent %q: rest_url must be an http or https URL", name)
 		}
 		if ag.CardURL != "" && !httpURL(ag.CardURL) {
 			add("a2a agent %q: card_url must be an http or https URL", name)

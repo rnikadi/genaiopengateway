@@ -45,14 +45,45 @@ const (
 	maxA2AResponse = 64 << 20
 )
 
-// a2aMethods are the methods relayed to agents (ADR 0033); whether each
-// streams its answer.
-var a2aMethods = map[string]bool{
-	"message/send":      false,
-	"message/stream":    true,
-	"tasks/get":         false,
-	"tasks/cancel":      false,
-	"tasks/resubscribe": true,
+// a2aOp is one A2A operation the gateway relays (ADR 0033).
+type a2aOp struct {
+	// label names the operation in metrics and logs, whatever the
+	// binding and protocol version of the request.
+	label string
+	// message is true when the request carries a message; otherwise it
+	// names a task.
+	message bool
+	streams bool
+}
+
+var (
+	opSend      = a2aOp{label: "message/send", message: true}
+	opStream    = a2aOp{label: "message/stream", message: true, streams: true}
+	opGet       = a2aOp{label: "tasks/get"}
+	opCancel    = a2aOp{label: "tasks/cancel"}
+	opSubscribe = a2aOp{label: "tasks/resubscribe", streams: true}
+)
+
+// a2aMethods are the JSON-RPC methods relayed to agents: the names of
+// A2A 0.3, and those of A2A 1.0.
+var a2aMethods = map[string]a2aOp{
+	"message/send":      opSend,
+	"message/stream":    opStream,
+	"tasks/get":         opGet,
+	"tasks/cancel":      opCancel,
+	"tasks/resubscribe": opSubscribe,
+
+	"SendMessage":          opSend,
+	"SendStreamingMessage": opStream,
+	"GetTask":              opGet,
+	"CancelTask":           opCancel,
+	"SubscribeToTask":      opSubscribe,
+}
+
+// a2aPushMethod reports whether a JSON-RPC method manages push
+// notification configurations.
+func a2aPushMethod(method string) bool {
+	return strings.HasPrefix(method, "tasks/pushNotificationConfig/") || strings.HasSuffix(method, "TaskPushNotificationConfig") || method == "ListTaskPushNotificationConfigs"
 }
 
 type rpcRequest struct {
@@ -76,12 +107,47 @@ type a2aCall struct {
 	status string
 	// seen are the ids already recorded in this call.
 	seen map[string]bool
+	// rest is true for a request over the HTTP+JSON binding, whose
+	// errors are HTTP errors and whose results have no envelope.
+	rest bool
 }
 
-// rpcError writes a JSON-RPC error. JSON-RPC errors travel with HTTP
-// 200, as A2A clients expect.
+// restErrors maps a JSON-RPC or A2A error code to the HTTP status, the
+// google.rpc code name and the A2A reason of the HTTP+JSON binding.
+var restErrors = map[int]struct {
+	status       int
+	name, reason string
+}{
+	rpcParseError:       {http.StatusBadRequest, "INVALID_ARGUMENT", ""},
+	rpcInvalidRequest:   {http.StatusBadRequest, "INVALID_ARGUMENT", ""},
+	rpcInvalidParams:    {http.StatusBadRequest, "INVALID_ARGUMENT", ""},
+	rpcMethodNotFound:   {http.StatusNotFound, "NOT_FOUND", ""},
+	rpcInternalError:    {http.StatusInternalServerError, "INTERNAL", ""},
+	a2aTaskNotFound:     {http.StatusNotFound, "NOT_FOUND", "TASK_NOT_FOUND"},
+	a2aPushNotSupported: {http.StatusBadRequest, "FAILED_PRECONDITION", "PUSH_NOTIFICATION_NOT_SUPPORTED"},
+	a2aUnsupported:      {http.StatusBadRequest, "FAILED_PRECONDITION", "UNSUPPORTED_OPERATION"},
+	a2aInvalidResponse:  {http.StatusInternalServerError, "INTERNAL", "INVALID_AGENT_RESPONSE"},
+}
+
+// rpcError writes an error in the request's binding. JSON-RPC errors
+// travel with HTTP 200, as A2A clients expect; the HTTP+JSON binding
+// answers with an HTTP status and a google.rpc.Status body.
 func (c *a2aCall) rpcError(w http.ResponseWriter, code int, status, msg string) {
 	c.status = status
+	if c.rest {
+		e := restErrors[code]
+		if e.status == 0 {
+			e = restErrors[rpcInternalError]
+		}
+		body := map[string]any{"code": e.status, "status": e.name, "message": msg}
+		if e.reason != "" {
+			body["details"] = []any{map[string]any{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": e.reason, "domain": "a2a-protocol.org"}}
+		}
+		w.Header().Set("Content-Type", "application/a2a+json")
+		w.WriteHeader(e.status)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": body})
+		return
+	}
 	id := c.id
 	if len(id) == 0 {
 		id = json.RawMessage("null")
@@ -89,40 +155,60 @@ func (c *a2aCall) rpcError(w http.ResponseWriter, code int, status, msg string) 
 	writeJSON(w, http.StatusOK, map[string]any{"jsonrpc": "2.0", "id": id, "error": map[string]any{"code": code, "message": msg}})
 }
 
-// serveA2A relays a JSON-RPC request to an A2A agent: the caller must
-// be allowed the agent, a task or context it names must be its own,
-// and guardrails check the message (docs/a2a.md).
-func (s *Server) serveA2A(w http.ResponseWriter, r *http.Request) {
+// begin authenticates the caller, finds the agent and applies policy
+// and rate limits. It returns the call, the request with the caller in
+// its context and a function to defer, or false after writing an error
+// in the gateway's own shape.
+func (s *Server) beginA2A(w http.ResponseWriter, r *http.Request, rest bool) (*a2aCall, *http.Request, func(), bool) {
 	start := time.Now()
 	rt := s.rt.Load()
-	c := &a2aCall{s: s, rt: rt, name: r.PathValue("name"), rid: r.Header.Get("X-Request-Id"), method: "other", status: "ok", seen: map[string]bool{}}
+	c := &a2aCall{s: s, rt: rt, name: r.PathValue("name"), rid: r.Header.Get("X-Request-Id"), method: "other", status: "ok", seen: map[string]bool{}, rest: rest}
 	p, ok := s.authenticate(r)
 	if !ok {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="genaiopengateway"`)
 		writeError(w, provider.ChatCompletions, http.StatusUnauthorized, codeInvalidKey, "missing or invalid API key")
-		return
+		return nil, nil, nil, false
 	}
 	agent, ok := rt.cfg.A2A.Agents[c.name]
 	if !ok {
 		writeError(w, provider.ChatCompletions, http.StatusNotFound, codeAgentNotFound, "agent "+c.name+" is not configured")
-		return
+		return nil, nil, nil, false
 	}
 	c.p, c.agent = p, agent
-	defer func() {
+	done := func() {
 		d := time.Since(start)
 		s.metrics.ObserveA2ARequest(c.name, c.method, c.status, d)
 		s.log.Info("a2a request", "request_id", c.rid, "agent", c.name, "method", c.method, "status", c.status,
 			"org_id", p.OrgID, "team_id", p.TeamID, "key_id", p.KeyID, "duration_ms", d.Milliseconds())
-	}()
+	}
 	if !p.AllowsAgent(c.name) {
 		c.status = "denied"
 		writeError(w, provider.ChatCompletions, http.StatusForbidden, codeAgentNotAllowed, "you may not use agent "+c.name)
-		return
+		done()
+		return nil, nil, nil, false
 	}
 	r = r.WithContext(s.callerContext(r.Context(), p))
 	if status, code, msg, ok := s.admit(w, r, p, c.rid); !ok {
 		c.status = "rate_limited"
 		writeError(w, provider.ChatCompletions, status, code, msg)
+		done()
+		return nil, nil, nil, false
+	}
+	return c, r, done, true
+}
+
+// serveA2A relays a JSON-RPC request to an A2A agent: the caller must
+// be allowed the agent, a task or context it names must be its own,
+// and guardrails check the message (docs/a2a.md).
+func (s *Server) serveA2A(w http.ResponseWriter, r *http.Request) {
+	c, r, done, ok := s.beginA2A(w, r, false)
+	if !ok {
+		return
+	}
+	defer done()
+	rt, agent := c.rt, c.agent
+	if agent.URL == "" {
+		c.rpcError(w, a2aUnsupported, "invalid", "this agent is not offered over JSON-RPC; use the HTTP+JSON binding")
 		return
 	}
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, rt.cfg.Limits.MaxRequestBytes))
@@ -140,69 +226,173 @@ func (s *Server) serveA2A(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.id = req.ID
-	streams, known := a2aMethods[req.Method]
+	op, known := a2aMethods[req.Method]
 	switch {
 	case req.JSONRPC != "2.0" || req.Method == "":
 		c.rpcError(w, rpcInvalidRequest, "invalid", "not a JSON-RPC 2.0 request")
 		return
-	case strings.HasPrefix(req.Method, "tasks/pushNotificationConfig/"):
+	case a2aPushMethod(req.Method):
 		c.rpcError(w, a2aPushNotSupported, "invalid", "push notifications are not available through the gateway")
+		return
+	case req.Method == "tasks/list" || req.Method == "ListTasks":
+		c.rpcError(w, a2aUnsupported, "invalid", listTasksRefused)
 		return
 	case !known:
 		c.rpcError(w, rpcMethodNotFound, "invalid", "method "+req.Method+" is not available through the gateway")
 		return
 	}
-	c.method = req.Method
-	if streams && rt.guards.Applies(config.StageOutput, agent.Guardrails) {
+	c.method = op.label
+	if op.streams && rt.guards.Applies(config.StageOutput, agent.Guardrails) {
 		c.rpcError(w, a2aUnsupported, "invalid", "streaming is not available for this agent, since its output guardrails check whole results")
 		return
 	}
-	body, ok := c.checkParams(w, r.Context(), raw, req)
-	if !ok {
-		return
-	}
-	c.forward(w, r, body, streams)
-}
-
-// checkParams checks the task and context a request names, and runs
-// input guardrails on a message. It returns the request to send, or
-// false after writing an error.
-func (c *a2aCall) checkParams(w http.ResponseWriter, ctx context.Context, raw []byte, req rpcRequest) ([]byte, bool) {
 	var params map[string]any
 	dec := json.NewDecoder(bytes.NewReader(req.Params))
 	dec.UseNumber()
 	if len(req.Params) == 0 || dec.Decode(&params) != nil || params == nil {
 		c.rpcError(w, rpcInvalidParams, "invalid", "params must be an object")
-		return nil, false
+		return
 	}
-	if !strings.HasPrefix(req.Method, "message/") {
-		id, _ := params["id"].(string)
-		if id == "" {
-			c.rpcError(w, rpcInvalidParams, "invalid", "params.id must name a task")
-			return nil, false
+	taskID, _ := params["id"].(string)
+	changed, ok := c.check(w, r.Context(), op, taskID, params)
+	if !ok {
+		return
+	}
+	if changed {
+		raw, _ = json.Marshal(map[string]any{"jsonrpc": "2.0", "id": req.ID, "method": req.Method, "params": params})
+	}
+	out, err := http.NewRequestWithContext(r.Context(), http.MethodPost, agent.URL, bytes.NewReader(raw))
+	if err != nil {
+		c.rpcError(w, rpcInternalError, "error", "the agent's URL is not valid")
+		return
+	}
+	out.Header.Set("Content-Type", "application/json")
+	c.forward(w, r, out, op.streams)
+}
+
+// listTasksRefused says why tasks cannot be listed through the gateway.
+const listTasksRefused = "listing tasks is not available through the gateway: the agent knows every caller as the gateway, so its list would show other teams' tasks"
+
+// serveA2AREST relays a request of the HTTP+JSON binding, with the same
+// checks as serveA2A. The path after the agent's name is the binding's:
+// that of A2A 1.0, or with /v1 in front that of A2A 0.3.
+func (s *Server) serveA2AREST(w http.ResponseWriter, r *http.Request) {
+	c, r, done, ok := s.beginA2A(w, r, true)
+	if !ok {
+		return
+	}
+	defer done()
+	if c.agent.RESTURL == "" {
+		c.rpcError(w, a2aUnsupported, "invalid", "this agent is not offered over HTTP+JSON; use the JSON-RPC binding")
+		return
+	}
+	path := r.PathValue("path")
+	rest := strings.TrimPrefix(path, "v1/")
+	var op a2aOp
+	var taskID string
+	known := false
+	switch {
+	case rest == "message:send" && r.Method == http.MethodPost:
+		op, known = opSend, true
+	case rest == "message:stream" && r.Method == http.MethodPost:
+		op, known = opStream, true
+	case rest == "tasks" && r.Method == http.MethodGet:
+		c.rpcError(w, a2aUnsupported, "invalid", listTasksRefused)
+		return
+	case strings.Contains(rest, "/pushNotificationConfigs"):
+		c.rpcError(w, a2aPushNotSupported, "invalid", "push notifications are not available through the gateway")
+		return
+	case strings.HasPrefix(rest, "tasks/") && !strings.Contains(rest[len("tasks/"):], "/"):
+		id, verb, _ := strings.Cut(rest[len("tasks/"):], ":")
+		taskID = id
+		switch {
+		case verb == "" && r.Method == http.MethodGet:
+			op, known = opGet, true
+		case verb == "cancel" && r.Method == http.MethodPost:
+			op, known = opCancel, true
+		case verb == "subscribe" && (r.Method == http.MethodPost || r.Method == http.MethodGet):
+			op, known = opSubscribe, true
 		}
-		return raw, c.owns(w, ctx, store.A2ATask, id, true)
+	}
+	if !known {
+		c.rpcError(w, rpcMethodNotFound, "invalid", r.Method+" /"+path+" is not available through the gateway")
+		return
+	}
+	c.method = op.label
+	if op.streams && c.rt.guards.Applies(config.StageOutput, c.agent.Guardrails) {
+		c.rpcError(w, a2aUnsupported, "invalid", "streaming is not available for this agent, since its output guardrails check whole results")
+		return
+	}
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, c.rt.cfg.Limits.MaxRequestBytes))
+	if err != nil {
+		c.rpcError(w, rpcInvalidRequest, "invalid", "the request is too large or could not be read")
+		return
+	}
+	var params map[string]any
+	if op.message {
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.UseNumber()
+		if dec.Decode(&params) != nil || params == nil {
+			c.rpcError(w, rpcParseError, "invalid", "the request body must be a JSON object")
+			return
+		}
+	}
+	changed, ok := c.check(w, r.Context(), op, taskID, params)
+	if !ok {
+		return
+	}
+	if changed {
+		raw, _ = json.Marshal(params)
+	}
+	target := c.agent.RESTURL + "/" + (&url.URL{Path: path}).EscapedPath()
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+	out, err := http.NewRequestWithContext(r.Context(), r.Method, target, bytes.NewReader(raw))
+	if err != nil {
+		c.rpcError(w, rpcInternalError, "error", "the agent's URL is not valid")
+		return
+	}
+	if ct := r.Header.Get("Content-Type"); ct != "" && len(raw) > 0 {
+		out.Header.Set("Content-Type", ct)
+	}
+	c.forward(w, r, out, op.streams)
+}
+
+// check checks the task and context a request names, and runs input
+// guardrails on a message, which may change params. It returns false
+// after writing an error.
+func (c *a2aCall) check(w http.ResponseWriter, ctx context.Context, op a2aOp, taskID string, params map[string]any) (changed, ok bool) {
+	if !op.message {
+		if taskID == "" {
+			c.rpcError(w, rpcInvalidParams, "invalid", "the request must name a task")
+			return false, false
+		}
+		return false, c.owns(w, ctx, store.A2ATask, taskID, true)
 	}
 	msg, _ := params["message"].(map[string]any)
 	if msg == nil {
 		c.rpcError(w, rpcInvalidParams, "invalid", "params.message is required")
-		return nil, false
+		return false, false
 	}
-	if conf, _ := params["configuration"].(map[string]any); conf != nil && conf["pushNotificationConfig"] != nil {
+	// The configuration's field is named differently in A2A 0.3 over
+	// JSON-RPC, 0.3 over HTTP+JSON, and 1.0.
+	conf, _ := params["configuration"].(map[string]any)
+	if conf != nil && (conf["pushNotificationConfig"] != nil || conf["pushNotification"] != nil || conf["taskPushNotificationConfig"] != nil) {
 		c.rpcError(w, a2aPushNotSupported, "invalid", "push notifications are not available through the gateway")
-		return nil, false
+		return false, false
 	}
 	// A task must have come from this caller. A context may be new,
 	// since clients can choose one, but not someone else's.
 	if id, _ := msg["taskId"].(string); id != "" && !c.owns(w, ctx, store.A2ATask, id, true) {
-		return nil, false
+		return false, false
 	}
 	if id, _ := msg["contextId"].(string); id != "" && !c.owns(w, ctx, store.A2AContext, id, false) {
-		return nil, false
+		return false, false
 	}
 	names := c.agent.Guardrails
 	if !c.rt.guards.Applies(config.StageInput, names) {
-		return raw, true
+		return false, true
 	}
 	parts := textParts(msg)
 	texts := make([]string, len(parts))
@@ -214,17 +404,16 @@ func (c *a2aCall) checkParams(w http.ResponseWriter, ctx context.Context, raw []
 	c.s.recordGuardrails(meta, res.Decisions)
 	if res.Blocked != nil {
 		c.rpcError(w, rpcInvalidParams, "guardrail_blocked", blockedMessage(res.Blocked))
-		return nil, false
+		return false, false
 	}
 	if !res.Changed {
-		return raw, true
+		return false, true
 	}
 	for i, p := range parts {
 		p["text"] = res.Texts[i]
 	}
 	params["message"] = msg
-	out, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": req.ID, "method": req.Method, "params": params})
-	return out, true
+	return true, true
 }
 
 // owns checks that a task or context is the caller's. An id the gateway
@@ -253,7 +442,7 @@ func (c *a2aCall) owns(w http.ResponseWriter, ctx context.Context, kind, id stri
 }
 
 // forward sends the request to the agent and relays its answer.
-func (c *a2aCall) forward(w http.ResponseWriter, r *http.Request, body []byte, streams bool) {
+func (c *a2aCall) forward(w http.ResponseWriter, r *http.Request, req *http.Request, streams bool) {
 	timeout := c.agent.Timeout.Std()
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
@@ -261,16 +450,18 @@ func (c *a2aCall) forward(w http.ResponseWriter, r *http.Request, body []byte, s
 	// bounds the wait for it to start.
 	timer := time.AfterFunc(timeout, cancel)
 	defer timer.Stop()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.agent.URL, bytes.NewReader(body))
-	if err != nil {
-		c.rpcError(w, rpcInternalError, "error", "the agent's URL is not valid")
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(ctx)
 	if streams {
 		req.Header.Set("Accept", "text/event-stream")
 	} else {
 		req.Header.Set("Accept", "application/json")
+	}
+	// The protocol version and extensions the caller asked for are the
+	// agent's to honor.
+	for _, h := range []string{"A2A-Version", "A2A-Extensions"} {
+		if v := r.Header.Get(h); v != "" {
+			req.Header.Set(h, v)
+		}
 	}
 	for k, v := range c.agent.Headers {
 		req.Header.Set(k, v.Value())
@@ -287,6 +478,18 @@ func (c *a2aCall) forward(w http.ResponseWriter, r *http.Request, body []byte, s
 	}
 	if resp.StatusCode != http.StatusOK {
 		c.s.log.Warn("a2a agent refused", "request_id", c.rid, "agent", c.name, "status", resp.StatusCode)
+		// Over HTTP+JSON an error is an HTTP status with a body that says
+		// why. One about the gateway's own credentials is not the caller's.
+		if c.rest && resp.StatusCode >= 400 && resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
+			raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			c.status = "agent_error"
+			if ct := resp.Header.Get("Content-Type"); ct != "" {
+				w.Header().Set("Content-Type", ct)
+			}
+			w.WriteHeader(resp.StatusCode)
+			_, _ = w.Write(raw)
+			return
+		}
 		c.rpcError(w, rpcInternalError, "upstream_error", fmt.Sprintf("the agent answered HTTP %d", resp.StatusCode))
 		return
 	}
@@ -302,11 +505,17 @@ func (c *a2aCall) forward(w http.ResponseWriter, r *http.Request, body []byte, s
 	var out map[string]any
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
-	if dec.Decode(&out) != nil {
-		c.rpcError(w, a2aInvalidResponse, "upstream_error", "the agent's answer is not JSON-RPC")
+	if dec.Decode(&out) != nil || out == nil {
+		c.rpcError(w, a2aInvalidResponse, "upstream_error", "the agent's answer is not a JSON object")
 		return
 	}
-	if result, ok := out["result"].(map[string]any); ok {
+	// Over JSON-RPC the result is in an envelope; over HTTP+JSON it is
+	// the body.
+	result := out
+	if !c.rest {
+		result, _ = out["result"].(map[string]any)
+	}
+	if result != nil {
 		c.record(ctx, result)
 		names := c.agent.Guardrails
 		if c.rt.guards.Applies(config.StageOutput, names) {
@@ -332,7 +541,11 @@ func (c *a2aCall) forward(w http.ResponseWriter, r *http.Request, body []byte, s
 	} else if out["error"] != nil {
 		c.status = "agent_error"
 	}
-	w.Header().Set("Content-Type", "application/json")
+	ct := "application/json"
+	if c.rest {
+		ct = "application/a2a+json"
+	}
+	w.Header().Set("Content-Type", ct)
 	_, _ = w.Write(raw)
 }
 
@@ -340,11 +553,15 @@ func (c *a2aCall) forward(w http.ResponseWriter, r *http.Request, body []byte, s
 // read, and records the ids its events carry.
 func (c *a2aCall) relayStream(w http.ResponseWriter, ctx context.Context, body io.ReadCloser) {
 	tap := sse.Tap(body, func(data []byte) {
-		var ev struct {
-			Result map[string]any `json:"result"`
+		var ev map[string]any
+		if json.Unmarshal(data, &ev) != nil || ev == nil {
+			return
 		}
-		if json.Unmarshal(data, &ev) == nil && ev.Result != nil {
-			c.record(ctx, ev.Result)
+		if !c.rest {
+			ev, _ = ev["result"].(map[string]any)
+		}
+		if ev != nil {
+			c.record(ctx, ev)
 		}
 	})
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -389,37 +606,59 @@ func (c *a2aCall) record(ctx context.Context, result map[string]any) {
 			c.s.log.Error("recording an A2A object failed", "request_id", c.rid, "agent", c.name, "err", err)
 		}
 	}
+	// A2A 0.3 over JSON-RPC marks what a result is with kind. The other
+	// forms wrap it: {"task": {...}}, {"statusUpdate": {...}}.
 	if kind, _ := result["kind"].(string); kind == "task" {
 		id, _ := result["id"].(string)
 		add(store.A2ATask, id)
 	}
-	id, _ := result["taskId"].(string)
-	add(store.A2ATask, id)
-	id, _ = result["contextId"].(string)
-	add(store.A2AContext, id)
+	if task, _ := result["task"].(map[string]any); task != nil {
+		id, _ := task["id"].(string)
+		add(store.A2ATask, id)
+	}
+	for _, v := range []any{result, result["task"], result["message"], result["statusUpdate"], result["artifactUpdate"]} {
+		m, _ := v.(map[string]any)
+		if m == nil {
+			continue
+		}
+		id, _ := m["taskId"].(string)
+		add(store.A2ATask, id)
+		id, _ = m["contextId"].(string)
+		add(store.A2AContext, id)
+	}
 }
 
-// textParts finds the text parts in an A2A object: every element of a
-// parts list whose kind is text, at any depth.
+// textParts finds the text parts in an A2A object, at any depth: every
+// element with text of a parts list, or of a message's content list as
+// A2A 0.3 names it over HTTP+JSON. Where parts say their kind (A2A 0.3
+// over JSON-RPC), it must be text.
 func textParts(v any) []map[string]any {
 	var out []map[string]any
 	var walk func(any)
 	walk = func(v any) {
 		switch v := v.(type) {
 		case map[string]any:
-			if parts, ok := v["parts"].([]any); ok {
+			for _, key := range []string{"parts", "content"} {
+				parts, _ := v[key].([]any)
 				for _, p := range parts {
-					if m, ok := p.(map[string]any); ok {
-						if _, isText := m["text"].(string); isText && (m["kind"] == "text" || m["type"] == "text") {
-							out = append(out, m)
-						}
+					m, _ := p.(map[string]any)
+					if _, isText := m["text"].(string); !isText {
+						continue
+					}
+					kind := m["kind"]
+					if kind == nil {
+						kind = m["type"]
+					}
+					if kind == nil || kind == "text" {
+						out = append(out, m)
 					}
 				}
 			}
 			for k, x := range v {
-				if k != "parts" {
-					walk(x)
+				if _, list := x.([]any); list && (k == "parts" || k == "content") {
+					continue
 				}
+				walk(x)
 			}
 		case []any:
 			for _, x := range v {
@@ -474,14 +713,9 @@ func (s *Server) a2aCard(w http.ResponseWriter, r *http.Request) {
 		}
 		base = scheme + "://" + r.Host
 	}
-	card["url"] = base + "/a2a/" + name
-	card["preferredTransport"] = "JSONRPC"
-	delete(card, "additionalInterfaces")
+	self := base + "/a2a/" + name
 	// A signature covers the card as the agent wrote it.
 	delete(card, "signatures")
-	card["securitySchemes"] = map[string]any{"gateway": map[string]any{"type": "http", "scheme": "bearer", "description": "A gateway API key"}}
-	card["security"] = []any{map[string]any{"gateway": []any{}}}
-	card["supportsAuthenticatedExtendedCard"] = false
 	caps, _ := card["capabilities"].(map[string]any)
 	if caps == nil {
 		caps = map[string]any{}
@@ -491,6 +725,48 @@ func (s *Server) a2aCard(w http.ResponseWriter, r *http.Request) {
 		caps["streaming"] = false
 	}
 	card["capabilities"] = caps
+	if theirs, ok := card["supportedInterfaces"].([]any); ok {
+		// A card of A2A 1.0: the gateway offers the bindings it relays,
+		// each at the protocol version the agent offers it.
+		version := func(binding string) string {
+			for _, v := range theirs {
+				m, _ := v.(map[string]any)
+				if pv, _ := m["protocolVersion"].(string); m["protocolBinding"] == binding && pv != "" {
+					return pv
+				}
+			}
+			return "1.0"
+		}
+		var ours []any
+		if agent.URL != "" {
+			ours = append(ours, map[string]any{"url": self, "protocolBinding": "JSONRPC", "protocolVersion": version("JSONRPC")})
+		}
+		if agent.RESTURL != "" {
+			ours = append(ours, map[string]any{"url": self, "protocolBinding": "HTTP+JSON", "protocolVersion": version("HTTP+JSON")})
+		}
+		card["supportedInterfaces"] = ours
+		for _, k := range []string{"url", "preferredTransport", "additionalInterfaces", "security", "supportsAuthenticatedExtendedCard"} {
+			delete(card, k)
+		}
+		card["securitySchemes"] = map[string]any{"gateway": map[string]any{"httpAuthSecurityScheme": map[string]any{"scheme": "Bearer", "description": "A gateway API key"}}}
+		card["securityRequirements"] = []any{map[string]any{"schemes": map[string]any{"gateway": map[string]any{"list": []any{}}}}}
+		caps["extendedAgentCard"] = false
+	} else {
+		// A card of A2A 0.3.
+		card["url"] = self
+		delete(card, "additionalInterfaces")
+		if agent.URL != "" {
+			card["preferredTransport"] = "JSONRPC"
+			if agent.RESTURL != "" {
+				card["additionalInterfaces"] = []any{map[string]any{"url": self, "transport": "HTTP+JSON"}}
+			}
+		} else {
+			card["preferredTransport"] = "HTTP+JSON"
+		}
+		card["securitySchemes"] = map[string]any{"gateway": map[string]any{"type": "http", "scheme": "bearer", "description": "A gateway API key"}}
+		card["security"] = []any{map[string]any{"gateway": []any{}}}
+		card["supportsAuthenticatedExtendedCard"] = false
+	}
 	if agent.Description != "" {
 		card["description"] = agent.Description
 	}
@@ -508,7 +784,11 @@ type cachedCard struct {
 func (s *Server) agentCard(ctx context.Context, name string, agent config.A2AAgent) ([]byte, error) {
 	cardURL := agent.CardURL
 	if cardURL == "" {
-		u, err := url.Parse(agent.URL)
+		at := agent.URL
+		if at == "" {
+			at = agent.RESTURL
+		}
+		u, err := url.Parse(at)
 		if err != nil {
 			return nil, err
 		}
