@@ -47,6 +47,21 @@ A minor or patch release ships on the second Tuesday of each month when `main` h
 
 ## Support
 
-Until 1.0, only the latest minor release receives fixes.
+From 1.0.0, the latest minor release and the one before it receive bug and security fixes as patch releases. Every fourth minor release, starting with 1.0, is a long-term support (LTS) release that receives security fixes for 12 months. Releases before 1.0 receive no more fixes.
 
-From 1.0, the latest minor release and the one before it receive bug and security fixes. Every fourth minor release is a long-term support (LTS) release that receives security fixes for 12 months. The model API, admin API and config format keep the stability promise in [Versioning](#versioning).
+| Release | Released | Fixes until |
+| --- | --- | --- |
+| 1.0 (LTS) | 2026-11-12 | Security fixes until 2027-11-12; bug fixes until 1.2.0 is released |
+
+### What is stable
+
+From 1.0, these keep the promise in [Versioning](#versioning): no breaking change without a major version and two minor releases of deprecation.
+
+- The model API: the OpenAI and Anthropic routes, and the provider relays (Gemini Live, Nova Sonic, Bedrock, realtime).
+- The MCP and A2A endpoints.
+- The admin API under `/admin/v1`, and the control plane API under `/cp/v1`.
+- The config file format, and the stored config kinds.
+- `gogctl` commands and flags, the Terraform provider's resources, the Helm chart's values and the CRDs at `genaiopengateway.io/v1`.
+- Metric names and labels, and the JSON log fields.
+
+Not covered: the admin UI's layout, the catalog's prices and presets (which change with providers'), the store's schema (migrated by the gateway), and anything documented as experimental.

@@ -83,7 +83,7 @@ Two small changes make it safe to run several replicas from the first install:
 
 - The chart lives in `deploy/helm/genaiopengateway`, versioned with the gateway: chart version and `appVersion` both equal the release version.
 - The release workflow packages it, pushes it to `oci://ghcr.io/rnikadi/charts/genaiopengateway`, and signs it with cosign like the images.
-- Install: `helm install gateway oci://ghcr.io/rnikadi/charts/genaiopengateway --version 0.5.0 -f values.yaml`.
+- Install: `helm install gateway oci://ghcr.io/rnikadi/charts/genaiopengateway --version 1.0.0 -f values.yaml`.
 
 ## Testing
 

@@ -6,16 +6,16 @@
 
 | | What you get |
 | --- | --- |
-| **Every model type** | Chat, Responses and embeddings in OpenAI's shape, Anthropic `/v1/messages` and Gemini `generateContent` natively; images, text to speech, speech to text, moderation, rerank, video jobs, batches and realtime audio over WebSocket |
-| **Every provider** | OpenAI and anything OpenAI-compatible (Azure OpenAI, vLLM, Ollama, LocalAI and more), Anthropic, Gemini, Vertex AI and Amazon Bedrock, with virtual models and fallback |
-| **MCP gateway** | Virtual MCP servers with curated tools, tool pinning against silent changes, OAuth 2.1, per-user upstream credentials and a record of every call |
+| **Every model type** | Chat, Responses and embeddings in OpenAI's shape, Anthropic `/v1/messages` and Gemini `generateContent` natively; images, text to speech, speech to text, moderation, rerank, video jobs, batches, and realtime audio over WebSocket with OpenAI Realtime, Gemini Live and Nova Sonic |
+| **Every provider** | OpenAI and anything OpenAI-compatible (Azure OpenAI, vLLM, Ollama, LocalAI and more), Anthropic, Gemini, Vertex AI, Amazon Bedrock, Cohere, Mistral, ElevenLabs, Deepgram, AssemblyAI, Stability and fal, with virtual models, routing strategies and fallback |
+| **MCP and A2A gateway** | Virtual MCP servers with curated tools, tool pinning against silent changes, OAuth 2.1, per-user upstream credentials, hosted stdio servers and a record of every call; A2A agents behind the same keys and policies |
 | **Governance** | Organizations, teams and virtual keys with rotation; model allow lists, RPM, TPM and budgets at every level; guardrails for PII, patterns, classifiers and webhooks; redacted, encrypted body logging; an audit log; alerts |
 | **Cost** | Usage and cost per key, team, model and provider for tokens, images, audio and video; exact and semantic response caching |
-| **Admin UI** | Every setting and object editable in the browser, a playground, OIDC single sign-on with owner, admin and viewer roles |
-| **Operations** | One Go binary, SQLite or Postgres, Valkey for shared limits; Prometheus, OpenTelemetry, a hardened Helm chart, signed releases with SBOMs and SLSA provenance |
+| **Admin UI** | Every setting and object editable in the browser, a playground, OIDC and SAML single sign-on, SCIM provisioning, custom roles and Cedar policies |
+| **Operations** | One Go binary, SQLite or Postgres, Valkey for shared limits; Prometheus, OpenTelemetry, a hardened Helm chart with an operator, data planes without a database, Terraform, signed releases with SBOMs and SLSA provenance |
 | **Fast** | About 2 ms added at p50 and 12,800 requests a second on 4 vCPUs ([benchmarks](docs/benchmarks.md)) |
 
-> **Status:** v0.8. Everything above works today and is covered by tests, an OpenAI SDK conformance run, a browser test of the admin UI and a Kubernetes install in CI. Next on the [roadmap](docs/roadmap.md): a zero-config start with a setup wizard, load balancing and circuit breakers, SAML, SCIM and Cedar policies, and more native media providers on the way to 1.0.
+> **Status:** v1.0, a long-term support release: the APIs, config format, CLI, Terraform provider, Helm values and CRDs are stable under the [support policy](docs/releasing.md#support). Everything above is covered by tests, SDK conformance runs for every modality, a browser test of the admin UI and a Kubernetes install in CI. The planned third-party security audit has not been done yet ([status](docs/security-audit.md)).
 
 ## Quick start
 

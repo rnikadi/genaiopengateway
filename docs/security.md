@@ -1,6 +1,6 @@
 # Security and threat model
 
-This is the threat model as of v0.3. It is reviewed at every minor release.
+This is the threat model as of v1.0. It is reviewed at every minor release. The independent review that the [1.0 roadmap](roadmap.md) calls for is tracked in [Third-party security audit](security-audit.md).
 
 ## Assets
 
@@ -19,6 +19,10 @@ This is the threat model as of v0.3. It is reviewed at every minor release.
 - **Gateway to upstream MCP servers and their authorization servers:** configured by the operator; responses, tool definitions and token endpoint replies are untrusted input.
 - **User's browser in a connect flow:** untrusted. Connect links work once and expire, and the upstream callback must come back to the browser that opened the link.
 - **Gateway to store and Valkey:** trusted network; credentials from environment. Stored user tokens and bodies are encrypted, so a database dump alone does not reveal them.
+- **Gateway to A2A agents:** configured by the operator; agent cards and results are untrusted input. Callers never see the agent's credentials.
+- **Gateway to hosted stdio MCP servers:** the command is from the config file only and runs with the gateway's privileges, so it is as trusted as the gateway's own binary.
+- **Data plane to control plane:** authenticated both ways by a shared token of at least 32 characters over TLS. A data plane holds key hashes and the upstream credentials it serves, but no database credentials, and serves no admin API.
+- **Operator to gateway:** the operator holds an owner admin token and reads Secrets in the namespaces it watches; whoever may create its resources there may change tenants.
 
 ## Threats and mitigations (STRIDE)
 
@@ -42,7 +46,11 @@ This is the threat model as of v0.3. It is reviewed at every minor release.
 | Denial of service | Store outage stops traffic | Request path serves from an in-memory snapshot (ADR 0004) |
 | Elevation of privilege | Model key used against the admin API | Admin API accepts only the admin token or an operator session; model keys are rejected |
 | Elevation of privilege | An organization admin reads another organization's data or stored bodies | Roles are scoped to one organization and checked on every admin request; reading a stored body needs write access to its organization and is audited ([admin-ui.md](admin-ui.md#security)) |
-| Server-side request forgery | Client-controlled URL fetched by the gateway | The gateway only calls URLs from config: provider base URLs, MCP servers, webhooks (`https` only) and identity providers, plus the authorization server an operator-configured MCP server names in its metadata. No endpoint fetches a client-supplied URL |
+| Elevation of privilege | A stored config object runs a command on the gateway host | Only the config file may set an MCP server's `command`, `env` or `dir`; the admin API and the operator refuse them ([mcp.md](mcp.md#hosted-stdio-servers)) |
+| Information disclosure | One team reads or continues another team's A2A task | Task and context ids are recorded with their owner and checked on every call; others get `TaskNotFound` ([a2a.md](a2a.md#what-the-gateway-checks)) |
+| Server-side request forgery | An A2A caller has the agent call a URL of its choosing | Push notification configuration is refused, inline or by method ([a2a.md](a2a.md#what-the-gateway-checks)) |
+| Spoofing | A host poses as the control plane to feed a data plane its own keys | Data planes call a configured URL with a shared secret, and should verify TLS; snapshots are versioned by content hash ([control-plane.md](control-plane.md)) |
+| Server-side request forgery | Client-controlled URL fetched by the gateway | The gateway only calls URLs from config: provider base URLs, MCP servers, webhooks (`https` only) and identity providers, plus the authorization server an operator-configured MCP server names in its metadata. A2A agents and cards come from config too. No endpoint fetches a client-supplied URL |
 
 ## MCP-specific threats
 

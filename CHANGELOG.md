@@ -4,6 +4,19 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-12
+
+The 1.0 release: every modality, A2A agents, hosted stdio MCP servers, a control plane for data planes without a database, and a Kubernetes operator. From this release the APIs, config format, CLI, Terraform provider, Helm values and CRDs are stable under the [support policy](docs/releasing.md#support), and 1.0 is a long-term support release.
+
+The third-party security audit planned for 1.0 has not been performed; [docs/security-audit.md](docs/security-audit.md) gives its scope and status.
+
+### Upgrade notes
+
+- Migration 0021 adds the `a2a_objects` table. It runs at startup, as before.
+- The container image now includes `/gogctl`, which the operator runs.
+- The Helm chart installs two CRDs, `gatewayorganizations` and `gatewayconfigobjects` in `genaiopengateway.io`. They are inert unless `operator.enabled` is set. Helm does not upgrade CRDs, so later upgrades that change them need `kubectl apply -f crds/`.
+- Releases before 1.0 receive no more fixes.
+
 ### Added
 
 - Provider types `elevenlabs`, `deepgram` and `assemblyai` ([docs/modalities.md](docs/modalities.md#speech-providers-with-their-own-apis)): ElevenLabs text to speech and Scribe, Deepgram Aura and pre-recorded transcription, and AssemblyAI transcription, served as OpenAI's `audio.speech` and `audio.transcriptions` with the usual metering, fallback and team credentials. AssemblyAI transcripts are deleted upstream once read. Presets and prices for all three are in the catalog, and the conformance run covers them.
@@ -196,7 +209,8 @@ The first release: an OpenAI-compatible gateway with tenants, keys, limits, budg
 - Config reload on `SIGHUP` and graceful shutdown.
 - Signed binaries and images with SBOMs.
 
-[Unreleased]: https://github.com/rnikadi/genaiopengateway/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/rnikadi/genaiopengateway/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/rnikadi/genaiopengateway/compare/v0.11.0...v1.0.0
 [0.11.0]: https://github.com/rnikadi/genaiopengateway/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/rnikadi/genaiopengateway/compare/v0.8.0...v0.10.0
 [0.8.0]: https://github.com/rnikadi/genaiopengateway/compare/v0.3.0...v0.8.0

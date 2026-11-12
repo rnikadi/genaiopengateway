@@ -72,6 +72,7 @@ nav:
       - Alerts: alerts.md
       - Streams: streams.md
       - Security and threat model: security.md
+      - Third-party security audit: security-audit.md
       - Compliance guide: compliance.md
       - Encryption keys and KMS: secrets.md
   - Admin UI:
