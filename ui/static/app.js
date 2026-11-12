@@ -21,6 +21,7 @@ import { Setup } from './pages/setup.js';
 import { Directory } from './pages/directory.js';
 import { Agents } from './pages/agents.js';
 import { Portal } from './pages/portal.js';
+import { Explain } from './pages/explain.js';
 import { Search, useSearchShortcut } from './search.js';
 
 const routes = [
@@ -39,6 +40,7 @@ const routes = [
   [/^\/providers$/, Providers, 'providers'],
   [/^\/agents$/, Agents, 'agents'],
   [/^\/portal$/, Portal, 'portal', 'keys.self'],
+  [/^\/explain$/, Explain, 'explain', 'explain'],
   [/^\/alerts$/, Alerts, 'alerts'],
   [/^\/settings(?:\/([a-z-]+))?$/, Settings, 'settings', 'owner'],
   [/^\/playground$/, Playground, 'playground', 'playground.use'],
@@ -68,6 +70,7 @@ const nav = [
   ['Monitor', [
     ['usage', '#/usage', 'Usage and cost'],
     ['requests', '#/requests', 'Requests'],
+    ['explain', '#/explain', 'Why denied?', 'explain'],
     ['jobs', '#/jobs', 'Jobs'],
     ['alerts', '#/alerts', 'Alerts'],
     ['audit', '#/audit', 'Audit log'],
@@ -159,6 +162,7 @@ function Shell({ session, onSignOut }) {
   const may = (need) =>
     !need || owner || (need === 'admin' ? !portalOnly
       : need === 'agents' ? !portalOnly && (session.me.agents || []).length > 0
+      : need === 'explain' ? op.grants.some((g) => (g.permissions || []).some((p) => p === 'keys.read' || p === 'keys.self'))
       : need !== 'owner' && op.grants.some((g) => (g.permissions || []).includes(need)));
   if (portalOnly && route.path === '/') {
     Page = Portal;
@@ -167,7 +171,7 @@ function Shell({ session, onSignOut }) {
   } else if (portalOnly && !needs) {
     needs = 'admin';
   }
-  const groups = nav.map(([title, items]) => [title, items.filter(([, , , role]) => may(role) && (!portalOnly || role === 'keys.self'))]).filter(([, items]) => items.length);
+  const groups = nav.map(([title, items]) => [title, items.filter(([, , , role]) => may(role) && (!portalOnly || role === 'keys.self' || role === 'explain'))]).filter(([, items]) => items.length);
   const pages = groups.flatMap(([, items]) => items.map(([, href, label]) => [label, href]));
   if (may('playground.use')) pages.push(['Playground', '#/playground']);
   if (owner) pages.push(['Setup wizard', '#/setup']);

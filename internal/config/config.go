@@ -315,6 +315,7 @@ const (
 	RecordAudit           = "audit"
 	RecordMCPCalls        = "mcp_calls"
 	RecordGuardrailEvents = "guardrail_events"
+	RecordDenials         = "denials"
 
 	DefaultStreamBatchSize     = 500
 	DefaultStreamFlushInterval = 5 * time.Second
@@ -322,7 +323,7 @@ const (
 )
 
 // RecordTypes lists what a stream can carry.
-var RecordTypes = []string{RecordUsage, RecordAudit, RecordMCPCalls, RecordGuardrailEvents}
+var RecordTypes = []string{RecordUsage, RecordAudit, RecordMCPCalls, RecordGuardrailEvents, RecordDenials}
 
 // Stream sends records to a webhook as signed NDJSON batches, or appends
 // them to a JSON Lines file for a log shipper.

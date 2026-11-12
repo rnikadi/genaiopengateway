@@ -43,6 +43,7 @@ export function Portal({ params }) {
             { label: 'Expires', render: (k) => (k.expires_at ? html`<${Ago} t=${k.expires_at} />` : 'Never') },
             { label: 'Last used', render: (k) => (k.last_used_at ? html`<${Ago} t=${k.last_used_at} />` : 'Never') },
             { label: '', render: (k) => !k.revoked_at && html`<span class="row-actions">
+              <a href=${'#/explain?key=' + encodeURIComponent(k.id)}>Why denied?</a>
               <button class="link" onClick=${() => setModal({ kind: 'rotate', key: k })}>Rotate</button>
               <button class="link danger" onClick=${() => setModal({ kind: 'revoke', key: k })}>Revoke</button>
             </span>` },

@@ -183,6 +183,8 @@ func (s *Server) serveRecords(w http.ResponseWriter, r *http.Request) {
 		err = insertRecords(ctx, body, streamed(s, config.RecordMCPCalls, s.store.InsertMCPCalls))
 	case config.RecordGuardrailEvents:
 		err = insertRecords(ctx, body, streamed(s, config.RecordGuardrailEvents, s.store.InsertGuardrailEvents))
+	case config.RecordDenials:
+		err = insertRecords(ctx, body, streamed(s, config.RecordDenials, s.store.InsertDenials))
 	default:
 		writeError(w, "", http.StatusNotFound, codeNotFound, "unknown record kind")
 		return
@@ -455,4 +457,5 @@ func newPlaneWriters(s *Server) {
 	s.usage = usage.NewWriter(planeSink[usage.Record](c, config.RecordUsage), log, "usage")
 	s.calls = usage.NewWriter(planeSink[store.MCPCall](c, config.RecordMCPCalls), log, "mcp_calls")
 	s.guardEvents = usage.NewWriter(planeSink[store.GuardrailEvent](c, config.RecordGuardrailEvents), log, "guardrail_events")
+	s.denials = usage.NewWriter(planeSink[store.Denial](c, config.RecordDenials), log, "denials")
 }

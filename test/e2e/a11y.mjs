@@ -10,7 +10,7 @@ const token = JSON.parse(readFileSync(process.env.BOOTSTRAP_FILE, 'utf8')).admin
 const axe = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
 const routes = ['/', '/orgs', '/keys', '/models', '/providers', '/mcp', '/mcp?tab=servers', '/agents', '/guardrails?tab=definitions', '/alerts', '/alerts?tab=webhooks',
   '/settings', '/settings/limits', '/settings/data', '/settings/cache', '/settings/notifications', '/settings/mcp', '/settings/startup',
-  '/usage', '/requests', '/jobs', '/audit', '/setup', '/playground', '/directory'];
+  '/usage', '/requests', '/requests?tab=refused', '/explain', '/jobs', '/audit', '/setup', '/playground', '/directory'];
 
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 let failed = 0;

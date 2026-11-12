@@ -70,6 +70,8 @@ type Server struct {
 	bodies *usage.Writer[capturedBody]
 	// guardEvents is nil without a store.
 	guardEvents *usage.Writer[store.GuardrailEvent]
+	// denials records refused requests (docs/why-denied.md); nil without a store.
+	denials *usage.Writer[store.Denial]
 
 	limiter *limits.Limiter
 	valkey  *limits.Valkey // nil unless the valkey driver is used
@@ -142,6 +144,7 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error)
 		s.calls = usage.NewWriter(streamed(s, config.RecordMCPCalls, st.InsertMCPCalls), log, "mcp_calls")
 		s.bodies = usage.NewWriterSize(s.writeBodies, log, "request_bodies", bodyQueue)
 		s.guardEvents = usage.NewWriter(streamed(s, config.RecordGuardrailEvents, st.InsertGuardrailEvents), log, "guardrail_events")
+		s.denials = usage.NewWriter(streamed(s, config.RecordDenials, st.InsertDenials), log, "denials")
 		st.OnAudit(func(e store.AuditEntry) { stream.Publish(s.streams, config.RecordAudit, []store.AuditEntry{e}) })
 		s.source = st
 	} else if cfg.ControlPlane.URL != "" {
@@ -276,6 +279,7 @@ func (s *Server) Close(ctx context.Context) {
 			s.bodies.Close(ctx)
 		}
 		s.guardEvents.Close(ctx)
+		s.denials.Close(ctx)
 	}
 	s.stop()
 	// Streams flush what they hold once stopped; wait for that as long
@@ -384,7 +388,7 @@ func (s *Server) usageWriteErrors() float64 {
 	if s.usage == nil {
 		return 0
 	}
-	return float64(s.usage.Dropped() + s.calls.Dropped() + s.guardEvents.Dropped())
+	return float64(s.usage.Dropped() + s.calls.Dropped() + s.guardEvents.Dropped() + s.denials.Dropped())
 }
 
 // snapshotAge is zero without a store or before the first load, which
@@ -437,6 +441,12 @@ func (s *Server) prune(ctx context.Context, before time.Time) {
 		s.log.Error("pruning guardrail events failed", "err", err)
 	} else if n > 0 {
 		s.log.Info("pruned guardrail events", "rows", n)
+	}
+	n, err = s.store.PruneDenials(ctx, before)
+	if err != nil {
+		s.log.Error("pruning denials failed", "err", err)
+	} else if n > 0 {
+		s.log.Info("pruned denials", "rows", n)
 	}
 }
 

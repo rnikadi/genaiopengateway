@@ -72,7 +72,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(ctx)
 	defer func() { s.finish(rt, rec, span, start) }()
 	fail := func(status int, code, msg string) {
-		rec.Status, rec.ErrorCode = status, code
+		rec.Status, rec.ErrorCode, rec.ErrorMessage = status, code, msg
 		writeError(w, ep, status, code, msg)
 	}
 

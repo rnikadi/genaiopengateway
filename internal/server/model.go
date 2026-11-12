@@ -51,7 +51,7 @@ func (s *Server) model(ep provider.Endpoint) http.HandlerFunc {
 		defer func() { s.finish(rt, rec, span, start) }()
 
 		fail := func(status int, code, msg string) {
-			rec.Status, rec.ErrorCode = status, code
+			rec.Status, rec.ErrorCode, rec.ErrorMessage = status, code, msg
 			writeError(w, ep, status, code, msg)
 		}
 
@@ -410,11 +410,13 @@ type requestLog struct {
 	OrgID, TeamID, KeyID, KeyPrefix    string
 	Status                             int
 	ErrorCode                          string
-	Fallbacks                          int
-	UpstreamLatency                    time.Duration
-	Tokens                             usage.Tokens
-	CostUSD                            float64
-	Unpriced                           bool
+	// ErrorMessage is the message sent with ErrorCode.
+	ErrorMessage    string
+	Fallbacks       int
+	UpstreamLatency time.Duration
+	Tokens          usage.Tokens
+	CostUSD         float64
+	Unpriced        bool
 	// Cache is the response cache's result: hit, semantic, miss or
 	// empty when the cache was not used.
 	Cache    string
@@ -439,6 +441,7 @@ func (s *Server) finish(rt *runtime, rec *requestLog, span trace.Span, start tim
 		mr.ProviderType, mr.UpstreamModel = rt.cfg.Providers[rec.Provider].Type, rec.UpstreamModel
 	}
 	s.metrics.ObserveRequest(mr)
+	s.recordDenial(rec)
 
 	span.SetAttributes(
 		attribute.String("gog.virtual_model", rec.Model),

@@ -85,6 +85,7 @@ export function Keys({ params }) {
 export function KeyActions({ k, canWrite, setModal }) {
   return html`<div class="row-actions">
     <button class="link" onClick=${() => setModal({ kind: 'access', key: k })}>Access</button>
+    <a class="link" href=${'#/explain?key=' + encodeURIComponent(k.id)} title="Check why a model or tool is denied">Why denied?</a>
     ${canWrite && !k.revoked_at && html`
       <button class="link" onClick=${() => setModal({ kind: 'edit-key', key: k })}>Edit</button>
       <button class="link" onClick=${() => setModal({ kind: 'rotate', key: k })}>Rotate</button>

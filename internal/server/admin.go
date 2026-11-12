@@ -32,6 +32,7 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	h := func(pattern string, fn func(http.ResponseWriter, *http.Request) error) {
 		mux.Handle(pattern, s.adminAuth(fn))
 	}
+	s.explainRoutes(h)
 	h("POST /admin/v1/orgs", s.createOrg)
 	h("GET /admin/v1/orgs", s.listOrgs)
 	h("GET /admin/v1/orgs/{org_id}", s.getOrg)

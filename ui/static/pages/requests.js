@@ -1,5 +1,5 @@
 import { guardrailColumns } from './guardrails.js';
-import { html, useState, useEffect, api, qs, useLoad, useSession, PageHeader, OrgPicker, defaultOrg, Table, Loading, ErrorBox, JSONView, Modal, Field, when, usd, num, Ago } from '../lib.js';
+import { html, useState, useEffect, api, qs, useLoad, useSession, PageHeader, OrgPicker, defaultOrg, Table, Loading, ErrorBox, JSONView, Modal, Field, when, usd, num, Ago, Tabs } from '../lib.js';
 
 // Requests lists recent model requests; those with a logged body link to
 // it (docs/body-logging.md).
@@ -9,6 +9,7 @@ export function Requests({ params }) {
   const [list, setList] = useState({ items: [], more: false, loading: true });
   const [error, setError] = useState(null);
   const [erasing, setErasing] = useState(false);
+  const [tab, setTab] = useState(params.get('tab') || 'served');
 
   const load = async (after) => {
     setError(null);
@@ -36,8 +37,9 @@ export function Requests({ params }) {
       ${s.owner && html`<button class="secondary" onClick=${() => setErasing(true)}>Delete logged bodies</button>`}
     <//>
     <div class="filters"><${OrgPicker} value=${org} onChange=${setOrg} /></div>
+    <${Tabs} tabs=${{ served: 'Served', refused: 'Refused' }} value=${tab} onChange=${setTab} />
     ${erasing && html`<${EraseBodies} initialOrg=${org} onClose=${() => setErasing(false)} onDone=${() => load()} />`}
-    <${ErrorBox} error=${error} />
+    ${tab === 'refused' ? html`<${Refused} org=${org} />` : html`<${ErrorBox} error=${error} />
     ${list.loading ? html`<p class="muted">Loading…</p>` : html`<${Table}
       rows=${list.items}
       rowKey=${(r) => r.org_id + r.request_id}
@@ -52,6 +54,38 @@ export function Requests({ params }) {
         { label: 'Body', render: body },
       ]}
     />`}
+    ${list.more && html`<p class="center"><button class="secondary" onClick=${() => load(list.items[list.items.length - 1].request_id)}>Load more</button></p>`}`}`;
+}
+
+// Refused lists requests a policy, limit or guardrail refused, each
+// with a link to why (docs/why-denied.md).
+function Refused({ org }) {
+  const [list, setList] = useState({ items: [], more: false, loading: true });
+  const [error, setError] = useState(null);
+  const load = async (after) => {
+    setError(null);
+    try {
+      const d = await api('GET', '/admin/v1/denials' + qs({ org_id: org, limit: 50, after }));
+      setList((l) => ({ items: after ? [...l.items, ...d.data] : d.data, more: d.has_more, loading: false }));
+    } catch (err) {
+      setError(err);
+      setList((l) => ({ ...l, loading: false }));
+    }
+  };
+  useEffect(() => {
+    setList({ items: [], more: false, loading: true });
+    load();
+  }, [org]);
+  return html`<${ErrorBox} error=${error} />
+    ${list.loading ? html`<p class="muted">Loading…</p>` : html`<${Table} rows=${list.items} rowKey=${(r) => r.request_id}
+      empty="No refused requests. Requests a policy, limit, Cedar rule or guardrail refuses are listed here."
+      columns=${[
+        { label: 'Time', render: (r) => html`<${Ago} t=${r.ts} />` },
+        { label: 'Model', render: (r) => r.model },
+        { label: 'Status', render: (r) => html`<span class="badge bad">${r.status}</span> <code class="small">${r.code}</code>` },
+        { label: 'Reason', render: (r) => html`<span class="small">${r.reason}</span>` },
+        { label: html`<span class="sr-only">Explain</span>`, render: (r) => html`<a href=${'#/explain?request_id=' + encodeURIComponent(r.request_id)}>Why?</a>` },
+      ]} />`}
     ${list.more && html`<p class="center"><button class="secondary" onClick=${() => load(list.items[list.items.length - 1].request_id)}>Load more</button></p>`}`;
 }
 

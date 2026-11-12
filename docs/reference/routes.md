@@ -62,7 +62,9 @@ Every route the gateway serves, generated from the handlers in `internal/server`
 | `DELETE` | `/admin/v1/config/{kind}/{name}` | `s.deleteConfig` | deleteConfig removes an object from the running config: a stored one is deleted, and one from the file gets a deletion marker (ADR 0028). |
 | `PUT` | `/admin/v1/config/{kind}/{name}` | `s.putConfig` | putConfig creates or replaces a stored configuration object, validated against the merged config. |
 | `POST` | `/admin/v1/config/{kind}/{name}/reset` | `s.resetConfig` | resetConfig removes the stored copy or deletion marker of a file object, so the file's version applies again. |
+| `GET` | `/admin/v1/denials` | `s.listDenials` | listDenials lists recorded refusals the operator may read. |
 | `GET` | `/admin/v1/directory` | `s.listDirectory` | listDirectory lists provisioned users with their groups, and the groups, for owners. |
+| `POST` | `/admin/v1/explain` | `s.explain` | explain answers whether a key may make a request now, and why not. |
 | `GET` | `/admin/v1/guardrail-events` | `s.listGuardrailEvents` | listGuardrailEvents serves GET /admin/v1/guardrail-events. |
 | `GET` | `/admin/v1/guardrails` | `s.listGuardrails` | listGuardrails lists the configured guardrails without their secrets. |
 | `GET` | `/admin/v1/keys` | `s.listAllKeys` | listAllKeys lists keys across teams, limited to the organizations the operator can read (docs/virtual-keys.md). |

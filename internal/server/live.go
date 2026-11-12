@@ -43,7 +43,7 @@ func (s *Server) live(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(ctx)
 	defer func() { s.finish(rt, rec, span, start) }()
 	fail := func(status int, code, msg string) {
-		rec.Status, rec.ErrorCode = status, code
+		rec.Status, rec.ErrorCode, rec.ErrorMessage = status, code, msg
 		writeError(w, provider.GenerateContent, status, code, msg)
 	}
 
@@ -77,7 +77,7 @@ func (s *Server) live(w http.ResponseWriter, r *http.Request) {
 	limit := rt.cfg.Limits.MaxRequestBytes
 	client.SetReadLimit(limit)
 	refuse := func(status int, code, msg string) {
-		rec.Status, rec.ErrorCode = status, code
+		rec.Status, rec.ErrorCode, rec.ErrorMessage = status, code, msg
 		if len(msg) > 120 {
 			msg = msg[:120]
 		}
