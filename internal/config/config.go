@@ -805,6 +805,17 @@ type A2A struct {
 	// Default: mcp.public_url, or else the URL of each card request.
 	PublicURL string              `yaml:"public_url"`
 	Agents    map[string]A2AAgent `yaml:"agents"`
+	Push      A2APush             `yaml:"push"`
+}
+
+// A2APush lets callers set push notifications, which the gateway takes
+// from the agent and delivers (docs/a2a.md#push-notifications).
+type A2APush struct {
+	Enabled bool `yaml:"enabled"`
+	// AllowedHosts are the hosts callers' webhooks may be on: a host
+	// name, or "*." and a domain for its subdomains. They may be
+	// internal. Empty allows any host with a public address, over HTTPS.
+	AllowedHosts []string `yaml:"allowed_hosts"`
 }
 
 // A2AAgent is an upstream A2A agent reached over JSON-RPC.
@@ -1790,6 +1801,19 @@ func (c *Config) validateA2A(add func(string, ...any)) {
 	a.PublicURL = strings.TrimRight(a.PublicURL, "/")
 	if a.PublicURL != "" && !httpURL(a.PublicURL) {
 		add("a2a.public_url must be an http or https URL")
+	}
+	if a.Push.Enabled {
+		if a.PublicURL == "" && c.MCP.PublicURL == "" {
+			add("a2a.push needs a2a.public_url, where agents send notifications")
+		}
+		if c.Store.Driver == "" {
+			add("a2a.push needs a store, where callers' webhooks are kept")
+		}
+	}
+	for _, h := range a.Push.AllowedHosts {
+		if h == "" || strings.ContainsAny(h, "/: ") || strings.Contains(strings.TrimPrefix(h, "*."), "*") {
+			add("a2a.push.allowed_hosts: %q must be a host name, or *. and a domain", h)
+		}
 	}
 	for name, ag := range a.Agents {
 		if !mcpName.MatchString(name) {

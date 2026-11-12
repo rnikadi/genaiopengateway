@@ -54,6 +54,9 @@ type a2aOp struct {
 	// names a task.
 	message bool
 	streams bool
+	// push is set, get, list or delete for an operation on a task's
+	// push notification configurations.
+	push string
 }
 
 var (
@@ -62,6 +65,11 @@ var (
 	opGet       = a2aOp{label: "tasks/get"}
 	opCancel    = a2aOp{label: "tasks/cancel"}
 	opSubscribe = a2aOp{label: "tasks/resubscribe", streams: true}
+
+	opPushSet    = a2aOp{label: "push/set", push: "set"}
+	opPushGet    = a2aOp{label: "push/get", push: "get"}
+	opPushList   = a2aOp{label: "push/list", push: "list"}
+	opPushDelete = a2aOp{label: "push/delete", push: "delete"}
 )
 
 // a2aMethods are the JSON-RPC methods relayed to agents: the names of
@@ -78,12 +86,15 @@ var a2aMethods = map[string]a2aOp{
 	"GetTask":              opGet,
 	"CancelTask":           opCancel,
 	"SubscribeToTask":      opSubscribe,
-}
 
-// a2aPushMethod reports whether a JSON-RPC method manages push
-// notification configurations.
-func a2aPushMethod(method string) bool {
-	return strings.HasPrefix(method, "tasks/pushNotificationConfig/") || strings.HasSuffix(method, "TaskPushNotificationConfig") || method == "ListTaskPushNotificationConfigs"
+	"tasks/pushNotificationConfig/set":    opPushSet,
+	"tasks/pushNotificationConfig/get":    opPushGet,
+	"tasks/pushNotificationConfig/list":   opPushList,
+	"tasks/pushNotificationConfig/delete": opPushDelete,
+	"CreateTaskPushNotificationConfig":    opPushSet,
+	"GetTaskPushNotificationConfig":       opPushGet,
+	"ListTaskPushNotificationConfigs":     opPushList,
+	"DeleteTaskPushNotificationConfig":    opPushDelete,
 }
 
 type rpcRequest struct {
@@ -110,6 +121,11 @@ type a2aCall struct {
 	// rest is true for a request over the HTTP+JSON binding, whose
 	// errors are HTTP errors and whose results have no envelope.
 	rest bool
+	// op is the operation, and for one on push notification
+	// configurations pushTask and pushConfig are the task and the
+	// configuration it names.
+	op                   a2aOp
+	pushTask, pushConfig string
 }
 
 // restErrors maps a JSON-RPC or A2A error code to the HTTP status, the
@@ -231,9 +247,6 @@ func (s *Server) serveA2A(w http.ResponseWriter, r *http.Request) {
 	case req.JSONRPC != "2.0" || req.Method == "":
 		c.rpcError(w, rpcInvalidRequest, "invalid", "not a JSON-RPC 2.0 request")
 		return
-	case a2aPushMethod(req.Method):
-		c.rpcError(w, a2aPushNotSupported, "invalid", "push notifications are not available through the gateway")
-		return
 	case req.Method == "tasks/list" || req.Method == "ListTasks":
 		c.rpcError(w, a2aUnsupported, "invalid", listTasksRefused)
 		return
@@ -254,6 +267,14 @@ func (s *Server) serveA2A(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	taskID, _ := params["id"].(string)
+	if op.push != "" {
+		// A2A 1.0 names the task taskId and the configuration id; 0.3
+		// names the task id, except when setting a configuration.
+		c.pushConfig, _ = params["pushNotificationConfigId"].(string)
+		if t, _ := params["taskId"].(string); t != "" {
+			c.pushConfig, taskID = taskID, t
+		}
+	}
 	changed, ok := c.check(w, r.Context(), op, taskID, params)
 	if !ok {
 		return
@@ -300,8 +321,23 @@ func (s *Server) serveA2AREST(w http.ResponseWriter, r *http.Request) {
 		c.rpcError(w, a2aUnsupported, "invalid", listTasksRefused)
 		return
 	case strings.Contains(rest, "/pushNotificationConfigs"):
-		c.rpcError(w, a2aPushNotSupported, "invalid", "push notifications are not available through the gateway")
-		return
+		// tasks/{id}/pushNotificationConfigs[/{config}]; A2A 0.3 spells
+		// the first segment task when creating.
+		seg := strings.Split(rest, "/")
+		if len(seg) < 3 || len(seg) > 4 || (seg[0] != "tasks" && seg[0] != "task") || seg[2] != "pushNotificationConfigs" {
+			break
+		}
+		taskID = seg[1]
+		switch {
+		case len(seg) == 3 && r.Method == http.MethodPost:
+			op, known = opPushSet, true
+		case len(seg) == 3 && r.Method == http.MethodGet:
+			op, known = opPushList, true
+		case len(seg) == 4 && r.Method == http.MethodGet:
+			op, known, c.pushConfig = opPushGet, true, seg[3]
+		case len(seg) == 4 && r.Method == http.MethodDelete:
+			op, known, c.pushConfig = opPushDelete, true, seg[3]
+		}
 	case strings.HasPrefix(rest, "tasks/") && !strings.Contains(rest[len("tasks/"):], "/"):
 		id, verb, _ := strings.Cut(rest[len("tasks/"):], ":")
 		taskID = id
@@ -329,7 +365,7 @@ func (s *Server) serveA2AREST(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var params map[string]any
-	if op.message {
+	if op.message || op.push == "set" {
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.UseNumber()
 		if dec.Decode(&params) != nil || params == nil {
@@ -363,23 +399,36 @@ func (s *Server) serveA2AREST(w http.ResponseWriter, r *http.Request) {
 // guardrails on a message, which may change params. It returns false
 // after writing an error.
 func (c *a2aCall) check(w http.ResponseWriter, ctx context.Context, op a2aOp, taskID string, params map[string]any) (changed, ok bool) {
+	c.op = op
+	if op.push != "" && (!c.rt.cfg.A2A.Push.Enabled || c.s.store == nil) {
+		c.rpcError(w, a2aPushNotSupported, "invalid", "push notifications are not available through the gateway")
+		return false, false
+	}
 	if !op.message {
 		if taskID == "" {
 			c.rpcError(w, rpcInvalidParams, "invalid", "the request must name a task")
 			return false, false
 		}
-		return false, c.owns(w, ctx, store.A2ATask, taskID, true)
+		if !c.owns(w, ctx, store.A2ATask, taskID, true) {
+			return false, false
+		}
+		if op.push == "" {
+			return false, true
+		}
+		c.pushTask = taskID
+		if op.push != "set" {
+			return false, true
+		}
+		conf := pushConfigIn(params)
+		if conf == nil {
+			c.rpcError(w, rpcInvalidParams, "invalid", "the request must carry a push notification configuration with a url")
+			return false, false
+		}
+		return true, c.setPush(w, ctx, conf, taskID)
 	}
 	msg, _ := params["message"].(map[string]any)
 	if msg == nil {
 		c.rpcError(w, rpcInvalidParams, "invalid", "params.message is required")
-		return false, false
-	}
-	// The configuration's field is named differently in A2A 0.3 over
-	// JSON-RPC, 0.3 over HTTP+JSON, and 1.0.
-	conf, _ := params["configuration"].(map[string]any)
-	if conf != nil && (conf["pushNotificationConfig"] != nil || conf["pushNotification"] != nil || conf["taskPushNotificationConfig"] != nil) {
-		c.rpcError(w, a2aPushNotSupported, "invalid", "push notifications are not available through the gateway")
 		return false, false
 	}
 	// A task must have come from this caller. A context may be new,
@@ -390,9 +439,21 @@ func (c *a2aCall) check(w http.ResponseWriter, ctx context.Context, op a2aOp, ta
 	if id, _ := msg["contextId"].(string); id != "" && !c.owns(w, ctx, store.A2AContext, id, false) {
 		return false, false
 	}
+	// A push configuration sent with the message gets the gateway's
+	// URL. Its field is named differently in A2A 0.3 over JSON-RPC, 0.3
+	// over HTTP+JSON, and 1.0.
+	if conf, _ := params["configuration"].(map[string]any); conf != nil {
+		if push := pushConfigIn(conf); push != nil {
+			taskID, _ := msg["taskId"].(string)
+			if !c.setPush(w, ctx, push, taskID) {
+				return false, false
+			}
+			changed = true
+		}
+	}
 	names := c.agent.Guardrails
 	if !c.rt.guards.Applies(config.StageInput, names) {
-		return false, true
+		return changed, true
 	}
 	parts := textParts(msg)
 	texts := make([]string, len(parts))
@@ -407,7 +468,7 @@ func (c *a2aCall) check(w http.ResponseWriter, ctx context.Context, op a2aOp, ta
 		return false, false
 	}
 	if !res.Changed {
-		return false, true
+		return changed, true
 	}
 	for i, p := range parts {
 		p["text"] = res.Texts[i]
@@ -514,6 +575,15 @@ func (c *a2aCall) forward(w http.ResponseWriter, r *http.Request, req *http.Requ
 	result := out
 	if !c.rest {
 		result, _ = out["result"].(map[string]any)
+	}
+	if c.op.push != "" && result != nil {
+		c.restorePush(ctx, result, c.pushTask)
+		raw, _ = json.Marshal(out)
+		if c.op.push == "delete" {
+			if err := c.s.store.DeleteA2APush(ctx, c.name, c.pushTask, c.pushConfig); err != nil {
+				c.s.log.Error("deleting an A2A push configuration failed", "request_id", c.rid, "err", err)
+			}
+		}
 	}
 	if result != nil {
 		c.record(ctx, result)
@@ -720,7 +790,9 @@ func (s *Server) a2aCard(w http.ResponseWriter, r *http.Request) {
 	if caps == nil {
 		caps = map[string]any{}
 	}
-	caps["pushNotifications"] = false
+	// Push notifications go through the gateway, when it is set to
+	// deliver them and the agent sends them.
+	caps["pushNotifications"] = caps["pushNotifications"] == true && rt.cfg.A2A.Push.Enabled && s.store != nil
 	if rt.guards.Applies(config.StageOutput, agent.Guardrails) {
 		caps["streaming"] = false
 	}
