@@ -21,6 +21,7 @@
 | [Admin UI and SSO](admin-ui.md) | Pages, roles, OIDC sign-in, sessions, admin API changes |
 | [Roles and permissions](roles.md) | Built-in and custom roles, permissions, team grants |
 | [SAML sign-in](saml.md) | Signing operators in with a SAML 2.0 identity provider |
+| [Identity providers](identity-providers.md) | Setup for Keycloak, Okta, Entra ID, Google and PingOne, and how each is tested |
 | [SCIM provisioning](scim.md) | Users and groups from Okta, Entra ID and others, deprovisioning |
 | [Cedar policies](cedar.md) | Attribute-based rules per organization for models and MCP tools |
 | [Admin UI: configuration views](admin-ui-config.md) | Providers, models, guardrails, alerts and settings in the UI |

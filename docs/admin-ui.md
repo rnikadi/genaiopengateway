@@ -100,7 +100,7 @@ sso:
 3. The roles are resolved. With none, the user sees "no access" and nothing is stored.
 4. A session is created and the user is sent back to the page they asked for (a same-origin path only).
 
-The client is confidential (it has a secret) and only needs the redirect URL registered at the identity provider. It uses only standard OIDC discovery, so any compliant provider works (Keycloak, Dex, Okta, Entra ID, Google, Auth0). The Compose setup tests it against Dex.
+The client is confidential (it has a secret) and only needs the redirect URL registered at the identity provider. It uses only standard OIDC discovery, so any compliant provider works (Keycloak, Dex, Okta, Entra ID, Google, Auth0). [identity-providers.md](identity-providers.md) has the setup for each. The Compose setup tests it against Dex, and CI against Keycloak.
 
 ### With SAML
 
