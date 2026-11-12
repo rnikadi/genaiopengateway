@@ -16,6 +16,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- The operator watches its resources ([docs/operator.md](docs/operator.md#how-it-works)), so a change is applied within a second instead of at the next pass; `operator.interval` is now only the time between full passes. A new kind, `GatewayCedarPolicySet`, holds Cedar policies shared by several organizations. Run `kubectl apply -f crds/` from the chart to install it; without it the operator works as before.
+
 - A2A push notifications ([docs/a2a.md](docs/a2a.md#push-notifications)), off by default. With `a2a.push.enabled`, a caller's push configuration reaches the agent with a URL at the gateway; the gateway delivers what the agent posts there to the caller's webhook, after the agent's output guardrails, and only to public HTTPS addresses or the hosts in `a2a.push.allowed_hosts`.
 - A2A 1.0 and the HTTP+JSON binding ([docs/a2a.md](docs/a2a.md#calling-an-agent)). Agents are relayed over JSON-RPC with the method names of A2A 0.3 or 1.0, and, with `rest_url`, over HTTP+JSON at `/a2a/{name}/message:send` and the other paths of the binding. Ownership of tasks, guardrails, limits and telemetry apply to every form, and cards of A2A 1.0 are rewritten to name the gateway's interfaces.
 - MCP servers can ask the client for input ([docs/mcp.md](docs/mcp.md#requests-for-input)). Elicitation and sampling requests of servers whose `client_requests` allows them reach clients on MCP 2026-07-28 as `input_required` results, and the answers reach the server, whether the server speaks 2026-07-28 or asks in the middle of a call as older servers do. Each request passed on is audited. Nothing is passed on by default.

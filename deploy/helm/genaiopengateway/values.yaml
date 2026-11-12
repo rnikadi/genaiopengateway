@@ -124,8 +124,8 @@ affinity: {}
 topologySpreadConstraints: []
 priorityClassName: ""
 
-# The operator reconciles GatewayOrganization and GatewayConfigObject
-# resources into the gateway through its admin API (docs/operator.md).
+# The operator reconciles GatewayOrganization, GatewayConfigObject and
+# GatewayCedarPolicySet resources into the gateway through its admin API (docs/operator.md).
 # The CRDs are in the chart's crds/ directory and installed with it.
 operator:
   enabled: false
@@ -135,6 +135,8 @@ operator:
     key: GATEWAY_ADMIN_TOKEN
   # Namespace whose resources are watched; empty watches every namespace.
   watchNamespace: ""
+  # Changes to resources are applied at once. This is the time between
+  # full passes, which undo changes made in the gateway.
   interval: 15s
   resources:
     requests: {cpu: 10m, memory: 32Mi}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -24,6 +25,41 @@ type fakeKube struct {
 	objects map[string]map[string]any // plural/ns/name
 	secrets map[string]map[string]string
 	rv      int
+	// events are the changes, for watches.
+	events []fakeEvent
+	// missing are plurals whose CRD is not installed.
+	missing map[string]bool
+}
+
+type fakeEvent struct {
+	rv     int
+	plural string
+	line   []byte
+}
+
+// emit records a change for watches. The caller holds the lock.
+func (f *fakeKube) emit(plural, typ string, o map[string]any) {
+	line, _ := json.Marshal(map[string]any{"type": typ, "object": o})
+	f.events = append(f.events, fakeEvent{f.rv, plural, append(line, '\n')})
+}
+
+// watch streams the events of a plural after a resource version.
+func (f *fakeKube) watch(w http.ResponseWriter, r *http.Request, plural string) {
+	after, _ := strconv.Atoi(r.URL.Query().Get("resourceVersion"))
+	sent := 0
+	for r.Context().Err() == nil {
+		f.mu.Lock()
+		evs := f.events[sent:]
+		sent = len(f.events)
+		f.mu.Unlock()
+		for _, ev := range evs {
+			if ev.plural == plural && ev.rv > after {
+				_, _ = w.Write(ev.line)
+			}
+		}
+		w.(http.Flusher).Flush()
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 func newFakeKube(t *testing.T) (*fakeKube, string) {
@@ -41,6 +77,7 @@ func (f *fakeKube) add(plural, ns, name string, spec map[string]any) {
 		"metadata": map[string]any{"name": name, "namespace": ns, "generation": 1.0, "resourceVersion": strconv.Itoa(f.rv)},
 		"spec":     spec,
 	}
+	f.emit(plural, "ADDED", f.objects[plural+"/"+ns+"/"+name])
 }
 
 func (f *fakeKube) get(plural, ns, name string) map[string]any {
@@ -71,8 +108,9 @@ func (f *fakeKube) update(plural, ns, name string, spec map[string]any, deleting
 	}
 	if deleting {
 		md["deletionTimestamp"] = time.Now().UTC().Format(time.RFC3339)
-		f.collect(plural+"/"+ns+"/"+name, o)
 	}
+	f.emit(plural, "MODIFIED", o)
+	f.collect(plural+"/"+ns+"/"+name, o)
 }
 
 // collect removes a deleting resource that has no finalizers left.
@@ -100,9 +138,19 @@ func merge(dst, src map[string]any) {
 }
 
 func (f *fakeKube) serve(w http.ResponseWriter, r *http.Request) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	f.mu.Lock()
+	if f.missing[parts[len(parts)-1]] {
+		f.mu.Unlock()
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if r.URL.Query().Get("watch") == "true" {
+		f.mu.Unlock()
+		f.watch(w, r, parts[len(parts)-1])
+		return
+	}
+	defer f.mu.Unlock()
 	if len(parts) == 6 && parts[0] == "api" && parts[4] == "secrets" {
 		data, ok := f.secrets[parts[3]+"/"+parts[5]]
 		if !ok {
@@ -126,7 +174,7 @@ func (f *fakeKube) serve(w http.ResponseWriter, r *http.Request) {
 				items = append(items, o)
 			}
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
+		_ = json.NewEncoder(w).Encode(map[string]any{"metadata": map[string]any{"resourceVersion": strconv.Itoa(f.rv)}, "items": items})
 		return
 	}
 	key := plural + "/" + ns + "/" + rest[1]
@@ -157,6 +205,7 @@ func (f *fakeKube) serve(w http.ResponseWriter, r *http.Request) {
 	merge(o, patch)
 	f.rv++
 	md["resourceVersion"] = strconv.Itoa(f.rv)
+	f.emit(plural, "MODIFIED", o)
 	f.collect(key, o)
 	_ = json.NewEncoder(w).Encode(o)
 }
@@ -244,6 +293,135 @@ func TestOperator(t *testing.T) {
 	}
 	if strings.Contains(ctl(t, gw, "orgs", "list"), "acme") {
 		t.Fatal("the organization is still in the gateway")
+	}
+}
+
+// syncBuffer is the operator's log, read while it runs.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+// The operator applies a change when it is made, without waiting for
+// the next pass.
+func TestOperatorWatches(t *testing.T) {
+	gw := gateway(t)
+	k, kubeURL := newFakeKube(t)
+	k.missing = map[string]bool{pluralSets: true}
+	k.add(pluralOrgs, "ai", "acme", map[string]any{"rpm": 100.0})
+	var log syncBuffer
+	o := &operator{k: newKube(kubeURL, "", nil), a: &applier{c: &client{base: gw, token: token, http: &http.Client{Timeout: time.Minute}, stdout: &log}}}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	// The interval is long, so only watches can explain later passes.
+	go func() { done <- o.run(ctx, time.Hour) }()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	wait := func(want string) {
+		t.Helper()
+		for deadline := time.Now().Add(10 * time.Second); !strings.Contains(log.String(), want); time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("the operator never logged %q:\n%s", want, log.String())
+			}
+		}
+	}
+	wait("created org acme")
+	if !strings.Contains(log.String(), "GatewayCedarPolicySet is not installed") {
+		t.Fatalf("no word on the missing CRD:\n%s", log.String())
+	}
+	k.add(pluralOrgs, "ai", "globex", map[string]any{})
+	wait("created org globex")
+	k.update(pluralOrgs, "ai", "acme", map[string]any{"rpm": 50.0}, false)
+	wait("updated org acme")
+	k.update(pluralOrgs, "ai", "globex", nil, true)
+	wait("deleted org globex")
+	// The operator's own status and finalizer writes start no passes:
+	// the log goes quiet, and the statuses are as the last pass left them.
+	time.Sleep(600 * time.Millisecond)
+	before := log.String()
+	time.Sleep(600 * time.Millisecond)
+	if after := log.String(); after != before {
+		t.Fatalf("the operator kept working:\n%s", after[len(before):])
+	}
+	if s := ready(t, k.get(pluralOrgs, "ai", "acme")); !strings.HasPrefix(s, "True") {
+		t.Fatalf("acme status = %s", s)
+	}
+}
+
+func TestOperatorCedarPolicySets(t *testing.T) {
+	gw := gateway(t)
+	k, kubeURL := newFakeKube(t)
+	const forbidEU = `forbid (principal, action == Action::"invoke_model", resource) when { resource.residency != "eu" };`
+	const forbidTool = `forbid (principal, action == Action::"call_tool", resource);`
+	k.add(pluralOrgs, "ai", "acme", map[string]any{"cedar": forbidTool})
+	k.add(pluralOrgs, "ai", "globex", map[string]any{})
+	k.add(pluralSets, "ai", "residency", map[string]any{"allOrganizations": true, "cedar": forbidEU})
+	k.add(pluralSets, "ai", "stray", map[string]any{"organizations": []any{"acme", "nobody"}, "cedar": forbidEU})
+	k.add(pluralSets, "ai", "empty", map[string]any{"allOrganizations": true})
+	operate := func() string {
+		t.Helper()
+		return ctl(t, gw, "operator", "-once", "-kube-url", kubeURL)
+	}
+	out := operate()
+	exported := ctl(t, gw, "config", "export")
+	for _, want := range []string{"GatewayCedarPolicySet ai/residency", "GatewayCedarPolicySet ai/stray", "The organization's own policies", "call_tool"} {
+		if !strings.Contains(exported, want) {
+			t.Fatalf("export misses %q:\n%s\n%s", want, exported, out)
+		}
+	}
+	if n := strings.Count(exported, "GatewayCedarPolicySet ai/residency"); n != 2 {
+		t.Fatalf("the residency set is in %d organizations, want 2:\n%s", n, exported)
+	}
+	if strings.Contains(out, "gatewaycedarpolicysets ai/residency") {
+		t.Fatalf("residency failed:\n%s", out)
+	}
+	if s := ready(t, k.get(pluralSets, "ai", "residency")); !strings.HasPrefix(s, "True") {
+		t.Fatalf("residency status = %s", s)
+	}
+	if s := ready(t, k.get(pluralSets, "ai", "stray")); !strings.HasPrefix(s, "False") || !strings.Contains(s, "nobody") {
+		t.Fatalf("stray status = %s", s)
+	}
+	if s := ready(t, k.get(pluralSets, "ai", "empty")); !strings.HasPrefix(s, "False") || !strings.Contains(s, "spec.cedar") {
+		t.Fatalf("empty status = %s", s)
+	}
+	// A second pass changes nothing.
+	if out := operate(); strings.Contains(out, "updated") {
+		t.Fatalf("second pass changed things:\n%s", out)
+	}
+	// Policies the gateway refuses fail the set and the organizations it selects.
+	k.update(pluralSets, "ai", "residency", map[string]any{"allOrganizations": true, "cedar": "permit nonsense"}, false)
+	operate()
+	if s := ready(t, k.get(pluralSets, "ai", "residency")); !strings.HasPrefix(s, "False") {
+		t.Fatalf("broken set status = %s", s)
+	}
+	if s := ready(t, k.get(pluralOrgs, "ai", "globex")); !strings.HasPrefix(s, "False") {
+		t.Fatalf("globex status with a broken set = %s", s)
+	}
+	// Deleting the sets leaves each organization its own policies.
+	for _, name := range []string{"residency", "stray", "empty"} {
+		k.update(pluralSets, "ai", name, nil, true)
+	}
+	operate()
+	exported = ctl(t, gw, "config", "export")
+	if strings.Contains(exported, "GatewayCedarPolicySet") || !strings.Contains(exported, "call_tool") {
+		t.Fatalf("export after the sets were deleted:\n%s", exported)
+	}
+	if k.get(pluralSets, "ai", "residency") != nil {
+		t.Fatal("a deleted set was kept")
 	}
 }
 
