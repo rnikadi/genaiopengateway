@@ -70,5 +70,5 @@ Existing webhooks do not start receiving the new events until they are added to 
 ## Limits
 
 - The check runs hourly, so an alert can come up to an hour after the spend that caused it. Budgets, not these alerts, are what stops spend.
-- Forecasts read the usage table; usage older than `store.usage_retention` does not count. Keep at least 15 days for the anomaly baseline.
+- Forecasts and the anomaly baseline read usage rows, not rollups, so keep `store.usage_retention` at 31 days or more, or unset.
 - Prices are the ones configured on each model, as everywhere in the gateway.

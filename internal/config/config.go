@@ -606,6 +606,9 @@ type Store struct {
 	DSN             Secret   `yaml:"dsn"`
 	RefreshInterval Duration `yaml:"refresh_interval"`
 	UsageRetention  Duration `yaml:"usage_retention"`
+	// RollupRetention is how long daily usage rollups are kept. Zero
+	// keeps them forever (docs/analytics.md).
+	RollupRetention Duration `yaml:"rollup_retention"`
 }
 
 // Limiter configures where rate limit and budget counters live.
@@ -1045,6 +1048,9 @@ func (c *Config) validate() error {
 	case "", "sqlite", "postgres":
 	default:
 		add("store.driver must be sqlite or postgres, got %q", c.Store.Driver)
+	}
+	if r, u := c.Store.RollupRetention.Std(), c.Store.UsageRetention.Std(); r > 0 && (u == 0 || r < u) {
+		add("store.rollup_retention must be at least store.usage_retention: rollups are what remains after usage rows are pruned")
 	}
 	if c.Store.Driver != "" && c.Store.DSN.Value() == "" {
 		add("store.dsn is required when store.driver is set")

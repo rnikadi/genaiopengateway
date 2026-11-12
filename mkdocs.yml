@@ -86,6 +86,7 @@ nav:
       - Why was this denied?: why-denied.md
       - Chargeback and FOCUS exports: chargeback.md
       - Forecasts and unusual spend: forecast.md
+      - Usage rollups and analytics: analytics.md
       - Cedar policies: cedar.md
       - Configuration views: admin-ui-config.md
       - Editing configuration: admin-ui-config-editing.md

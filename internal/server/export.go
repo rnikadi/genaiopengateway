@@ -222,3 +222,53 @@ func (s *Server) exportUsage(w http.ResponseWriter, r *http.Request) error {
 	}
 	return nil
 }
+
+var rollupColumns = []string{
+	"day", "org_id", "team_id", "key_id", "endpoint", "model", "provider", "upstream_model", "requests", "errors",
+	"input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens", "images", "characters", "audio_seconds", "video_seconds",
+	"cost_usd", "cache_hits", "saved_usd", "latency_ms_sum",
+}
+
+// exportRollups streams the daily usage rollups, for loading into a
+// warehouse (docs/analytics.md): JSON lines by default, or format=csv.
+// refresh=true sums today's usage first.
+func (s *Server) exportRollups(w http.ResponseWriter, r *http.Request) error {
+	uq, err := s.usageFilter(r)
+	if err != nil {
+		return err
+	}
+	q := r.URL.Query()
+	format := q.Get("format")
+	if format == "" {
+		format = "ndjson"
+	}
+	if format != "ndjson" && format != "csv" {
+		return badRequest("format must be ndjson or csv")
+	}
+	if q.Get("refresh") == "true" {
+		if err := s.rollupUsage(r.Context(), time.Now()); err != nil {
+			return err
+		}
+	}
+	h := w.Header()
+	h.Set("Cache-Control", "no-store")
+	if format == "csv" {
+		h.Set("Content-Type", "text/csv; charset=utf-8")
+		cw := csv.NewWriter(w)
+		defer cw.Flush()
+		if err := cw.Write(rollupColumns); err != nil {
+			return err
+		}
+		i := strconv.FormatInt
+		return s.store.EachRollup(r.Context(), uq, func(x *store.Rollup) error {
+			return cw.Write([]string{
+				x.Day, x.OrgID, x.TeamID, x.KeyID, x.Endpoint, csvText(x.Model), csvText(x.Provider), csvText(x.UpstreamModel), i(x.Requests, 10), i(x.Errors, 10),
+				i(x.InputTokens, 10), i(x.OutputTokens, 10), i(x.CachedInputTokens, 10), i(x.ReasoningTokens, 10), i(x.Images, 10), i(x.Characters, 10),
+				qty(x.AudioSeconds), qty(x.VideoSeconds), money6(x.CostUSD), i(x.CacheHits, 10), money6(x.SavedUSD), i(x.LatencyMSSum, 10),
+			})
+		})
+	}
+	h.Set("Content-Type", "application/x-ndjson")
+	enc := json.NewEncoder(w)
+	return s.store.EachRollup(r.Context(), uq, func(x *store.Rollup) error { return enc.Encode(x) })
+}

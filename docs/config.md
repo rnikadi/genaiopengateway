@@ -97,6 +97,7 @@ store:                               # omit to run without a database (static ke
   dsn: file:/var/lib/genaiopengateway/gateway.db
   refresh_interval: 5s
   usage_retention: 90d               # omit to keep usage forever
+  rollup_retention: 1095d            # daily totals (analytics.md); omit to keep forever
 
 limiter:
   driver: memory                     # memory | valkey
@@ -245,4 +246,4 @@ Key secrets have the form `sk-gog-` followed by 40 random base62 characters (abo
 
 Policies are stored as JSON so new policy fields need no migration.
 
-Usage rows older than `store.usage_retention` are pruned daily. `last_used_at` is updated in batches, never on the request path.
+Usage rows older than `store.usage_retention` are pruned hourly, by whole UTC days, after their day is summed into `usage_daily` ([analytics.md](analytics.md)). `last_used_at` is updated in batches, never on the request path.

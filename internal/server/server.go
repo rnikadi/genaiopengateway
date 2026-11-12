@@ -412,8 +412,24 @@ func (s *Server) pruneLoop(ctx context.Context) {
 	t := time.NewTicker(time.Hour)
 	defer t.Stop()
 	for {
-		if retention := s.rt.Load().cfg.Store.UsageRetention.Std(); retention > 0 {
-			s.prune(ctx, time.Now().Add(-retention))
+		// Days are summed before their rows are pruned, and rows are
+		// pruned by whole UTC days, so every day is either all there or
+		// in the rollups (docs/analytics.md).
+		now := time.Now()
+		cfg := s.rt.Load().cfg.Store
+		if err := s.rollupUsage(ctx, now); err != nil {
+			s.log.Error("rolling up usage failed; pruning is skipped", "err", err)
+		} else {
+			if retention := cfg.UsageRetention.Std(); retention > 0 {
+				s.prune(ctx, store.DayStart(now.Add(-retention)))
+			}
+			if retention := cfg.RollupRetention.Std(); retention > 0 {
+				if n, err := s.store.PruneRollups(ctx, now.Add(-retention)); err != nil {
+					s.log.Error("pruning usage rollups failed", "err", err)
+				} else if n > 0 {
+					s.log.Info("pruned usage rollups", "rows", n)
+				}
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -421,6 +437,37 @@ func (s *Server) pruneLoop(ctx context.Context) {
 		case <-t.C:
 		}
 	}
+}
+
+// rawFrom is the start of the first UTC day whose usage rows are all
+// kept, or zero when usage is kept forever.
+func (s *Server) rawFrom(now time.Time) time.Time {
+	if retention := s.rt.Load().cfg.Store.UsageRetention.Std(); retention > 0 {
+		return store.DayStart(now.Add(-retention))
+	}
+	return time.Time{}
+}
+
+// rollupUsage rebuilds the daily rollups from the last day that has
+// them, or from the first day of usage, to today. Usage rows arrive up
+// to a day late from data planes, so the last day is always redone.
+func (s *Server) rollupUsage(ctx context.Context, now time.Time) error {
+	last, first, err := s.store.RollupBounds(ctx)
+	if err != nil {
+		return err
+	}
+	from := first
+	if !last.IsZero() {
+		from = last.AddDate(0, 0, -1)
+	}
+	if from.IsZero() {
+		return nil // no usage yet
+	}
+	// Days before the first usage row are pruned; their rollups stay.
+	if from.Before(first) {
+		from = first
+	}
+	return s.store.RollupUsage(ctx, from, store.DayStart(now).AddDate(0, 0, 1))
 }
 
 // prune deletes usage, MCP call and guardrail event records from before.

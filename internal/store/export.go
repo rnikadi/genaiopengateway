@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"strings"
 	"time"
 )
 
@@ -22,26 +21,9 @@ type UsageExportRow struct {
 // (exclusive) by UTC day, team, upstream model and endpoint. GroupBy is
 // ignored.
 func (s *Store) UsageExport(ctx context.Context, uq UsageQuery) ([]UsageExportRow, error) {
-	where := []string{"ts >= ?", "ts < ?"}
-	args := []any{uq.From.UnixMilli(), uq.To.UnixMilli()}
-	if uq.OrgID != "" {
-		where = append(where, "org_id = ?")
-		args = append(args, uq.OrgID)
-	}
-	if uq.TeamID != "" {
-		where = append(where, "team_id = ?")
-		args = append(args, uq.TeamID)
-	}
-	if uq.KeyID != "" {
-		where = append(where, "key_id = ?")
-		args = append(args, uq.KeyID)
-	}
-	rows, err := s.db.QueryContext(ctx, s.q(`SELECT ts / 86400000 AS d, org_id, team_id, provider, upstream_model, model, endpoint,
-		COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),
-		COALESCE(SUM(cached_input_tokens), 0), COALESCE(SUM(reasoning_tokens), 0), COALESCE(SUM(images), 0), COALESCE(SUM(characters), 0),
-		COALESCE(SUM(audio_seconds), 0), COALESCE(SUM(video_seconds), 0), COALESCE(SUM(cost_usd), 0),
-		COALESCE(SUM(cache_hit), 0), COALESCE(SUM(saved_usd), 0)
-		FROM usage WHERE `+strings.Join(where, " AND ")+`
+	src, args := s.usageSource(uq)
+	rows, err := s.db.QueryContext(ctx, s.q(`SELECT day AS d, org_id, team_id, provider, upstream_model, model, endpoint, `+usageSums+`
+		FROM `+src+`
 		GROUP BY d, org_id, team_id, provider, upstream_model, model, endpoint
 		ORDER BY d, org_id, team_id, provider, upstream_model, model, endpoint`), args...)
 	if err != nil {

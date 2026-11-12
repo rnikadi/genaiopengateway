@@ -21,7 +21,7 @@ curl -H "Authorization: Bearer $GATEWAY_ADMIN_TOKEN" \
 | `org_id`, `team_id`, `key_id` | Limit the export. Organization admins and viewers must name their organization. |
 | `from`, `to` | RFC 3339 times, from inclusive and to exclusive. Default: this month so far. Days are UTC days. |
 
-Usage older than `store.usage_retention` is no longer there to export, so export each month before it ages out, or raise the retention.
+Exports reach back past `store.usage_retention`: days whose usage rows are pruned are read from the daily rollups ([analytics.md](analytics.md)), which are kept for `store.rollup_retention`.
 
 ## The chargeback statement
 

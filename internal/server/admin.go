@@ -61,6 +61,7 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	h("GET /admin/v1/usage", s.queryUsage)
 	h("GET /admin/v1/usage/export", s.exportUsage)
 	h("GET /admin/v1/usage/forecast", s.listForecasts)
+	h("GET /admin/v1/usage/rollups", s.exportRollups)
 	h("GET /admin/v1/audit", s.listAudit)
 	h("GET /admin/v1/mcp/servers", s.listMCPServers)
 	h("GET /admin/v1/mcp/tools", s.listMCPTools)
@@ -816,8 +817,9 @@ func (s *Server) usageFilter(r *http.Request) (store.UsageQuery, error) {
 	now := time.Now().UTC()
 	uq := store.UsageQuery{
 		OrgID: q.Get("org_id"), TeamID: q.Get("team_id"), KeyID: q.Get("key_id"),
-		From: time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC),
-		To:   now.Add(time.Millisecond),
+		From:    time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC),
+		To:      now.Add(time.Millisecond),
+		RawFrom: s.rawFrom(now),
 	}
 	for name, dst := range map[string]*time.Time{"from": &uq.From, "to": &uq.To} {
 		if v := q.Get(name); v != "" {

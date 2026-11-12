@@ -34,6 +34,7 @@ const sections = [
     title: 'Data and refresh',
     fields: [
       { path: 'store.usage_retention', label: 'Keep usage, MCP calls and guardrail events for', type: 'duration', zero: 'Forever' },
+      { path: 'store.rollup_retention', label: 'Keep daily usage totals for', type: 'duration', zero: 'Forever', hint: 'Daily totals keep reports and exports working after the usage rows are gone. At least as long as the line above.' },
       { path: 'store.refresh_interval', label: 'Replicas reload keys and configuration every', type: 'duration' },
     ],
   },

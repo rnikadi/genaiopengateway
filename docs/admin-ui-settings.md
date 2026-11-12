@@ -25,7 +25,7 @@ Deployments pass their values as `${VAR}` from the environment, as the compose e
 A new stored object of kind `settings`, always named `gateway`, holds the gateway settings changed in the UI. Its spec has the config file's shape, limited to these fields:
 
 ```yaml
-store:        {refresh_interval, usage_retention}
+store:        {refresh_interval, usage_retention, rollup_retention}
 limiter:      {fail_open_rate_limits, fail_open_budgets}
 limits:       {max_request_bytes, max_realtime_session, max_batch_file_bytes}
 body_logging: {enabled, retention, max_body_bytes, redact: {builtin, patterns}}
