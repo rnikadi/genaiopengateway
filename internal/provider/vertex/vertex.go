@@ -6,6 +6,8 @@ package vertex
 import (
 	"context"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -43,6 +45,77 @@ type Provider struct {
 // or cfg.CredentialsFile.
 func New(cfg config.Provider, client *http.Client) *Provider {
 	return newWithTokens(cfg, client, &tokens{file: cfg.CredentialsFile})
+}
+
+// TokenURL is where a team's service account key is exchanged for a
+// token. A key cannot name another endpoint, so storing one cannot make
+// the gateway call an address of the key owner's choosing.
+var TokenURL = "https://oauth2.googleapis.com/token"
+
+// TeamCredential is what a team stores to call Vertex AI as itself
+// (docs/team-credentials.md): a service account key, and the project
+// its requests are billed to.
+type TeamCredential struct {
+	Project        string          `json:"project"`
+	ServiceAccount json.RawMessage `json:"service_account"`
+}
+
+// ParseTeamCredential checks a team's credential and fills in the
+// project from the key when none is given. Only service account keys
+// are accepted: the other Google credential types read files or call
+// URLs that the key names.
+func ParseTeamCredential(raw []byte) (*TeamCredential, error) {
+	var c TeamCredential
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return nil, errors.New("the credential is not JSON")
+	}
+	var key struct {
+		Type        string `json:"type"`
+		ProjectID   string `json:"project_id"`
+		ClientEmail string `json:"client_email"`
+		PrivateKey  string `json:"private_key"`
+		TokenURI    string `json:"token_uri"`
+	}
+	if len(c.ServiceAccount) == 0 || json.Unmarshal(c.ServiceAccount, &key) != nil {
+		return nil, errors.New("service_account must be the JSON of a service account key")
+	}
+	switch {
+	case key.Type != string(google.ServiceAccount):
+		return nil, fmt.Errorf("service_account must be a service account key (type service_account), got type %q", key.Type)
+	case key.ClientEmail == "":
+		return nil, errors.New("the service account key has no client_email")
+	case key.TokenURI != "" && key.TokenURI != TokenURL:
+		return nil, fmt.Errorf("the service account key's token_uri must be %s", TokenURL)
+	}
+	block, _ := pem.Decode([]byte(key.PrivateKey))
+	if block == nil {
+		return nil, errors.New("the service account key's private_key is not a PEM key")
+	}
+	if c.Project == "" {
+		c.Project = key.ProjectID
+	}
+	if c.Project == "" {
+		return nil, errors.New("project is required: the key names none")
+	}
+	return &c, nil
+}
+
+// NewForTeam returns an adapter for cfg that authenticates with a
+// team's credential and calls the team's project.
+func NewForTeam(cfg config.Provider, client *http.Client, raw string) (*Provider, error) {
+	c, err := ParseTeamCredential([]byte(raw))
+	if err != nil {
+		return nil, err
+	}
+	jc, err := google.JWTConfigFromJSON(c.ServiceAccount, scope)
+	if err != nil {
+		return nil, fmt.Errorf("service account key: %w", err)
+	}
+	jc.TokenURL = TokenURL
+	cfg.Project = c.Project
+	// The token source outlives any one request.
+	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, client)
+	return newWithTokens(cfg, client, &tokens{ts: jc.TokenSource(ctx)}), nil
 }
 
 func newWithTokens(cfg config.Provider, client *http.Client, t *tokens) *Provider {

@@ -332,8 +332,8 @@ function Credentials({ team, canWrite }) {
       ]}
     />`}<//>
     ${editing && html`<${Modal} title=${`${editing.set ? 'Replace' : 'Set'} the ${editing.provider} key of ${team.name}`} onClose=${() => setEditing(null)}>
-      <${CredentialForm} onCancel=${() => setEditing(null)}
-        onSubmit=${async (apiKey) => { await api('PUT', `/admin/v1/teams/${encodeURIComponent(team.id)}/credentials/${encodeURIComponent(editing.provider)}`, { api_key: apiKey }); setEditing(null); state.reload(); }} />
+      <${CredentialForm} kind=${editing.kind} onCancel=${() => setEditing(null)}
+        onSubmit=${async (body) => { await api('PUT', `/admin/v1/teams/${encodeURIComponent(team.id)}/credentials/${encodeURIComponent(editing.provider)}`, body); setEditing(null); state.reload(); }} />
     <//>`}
     ${removing && html`<${Confirm} title="Remove the team's key" action="Remove" onClose=${() => setRemoving(null)}
       message=${`${team.name} goes back to the gateway's shared ${removing.provider} key.`}
@@ -341,15 +341,17 @@ function Credentials({ team, canWrite }) {
   </section>`;
 }
 
-function CredentialForm({ onSubmit, onCancel }) {
+function CredentialForm({ kind, onSubmit, onCancel }) {
   const [key, setKey] = useState('');
+  const [project, setProject] = useState('');
+  const account = kind === 'service_account';
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
     try {
-      await onSubmit(key.trim());
+      await onSubmit(account ? { service_account: key.trim(), project: project.trim() || undefined } : { api_key: key.trim() });
     } catch (err) {
       setError(err);
       setBusy(false);
@@ -357,9 +359,16 @@ function CredentialForm({ onSubmit, onCancel }) {
   };
   return html`<form class="form" onSubmit=${submit}>
     <${ErrorBox} error=${error} />
-    <${Field} label="API key" hint="Stored encrypted and never shown again.">
+    ${account ? html`
+      <${Field} label="Service account key (JSON)" hint="Paste the key file of a service account in the team's Google Cloud project that may call Vertex AI. Stored encrypted and never shown again.">
+        <textarea rows="8" class="mono" required autocomplete="off" spellcheck=${false} value=${key} onInput=${(e) => setKey(e.target.value)}></textarea>
+      <//>
+      <${Field} label="Project" hint="The Google Cloud project to call and bill. Empty uses the key's own project.">
+        <input value=${project} onInput=${(e) => setProject(e.target.value)} />
+      <//>`
+    : html`<${Field} label="API key" hint="Stored encrypted and never shown again.">
       <input type="password" required autocomplete="off" value=${key} onInput=${(e) => setKey(e.target.value)} />
-    <//>
+    <//>`}
     <footer>
       <button type="button" class="secondary" onClick=${onCancel}>Cancel</button>
       <button type="submit" disabled=${busy}>Save</button>
