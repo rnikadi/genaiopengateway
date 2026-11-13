@@ -1,0 +1,122 @@
+name: identity providers
+
+# Sign-in through real identity providers in a browser
+# (docs/identity-providers.md). Keycloak runs here in a container, on
+# every change to sign-in code and nightly. The hosted identity providers
+# run nightly once their test tenant's settings are stored as a secret
+# named IDP_<NAME>_ENV; until then their jobs say so and pass.
+
+on:
+  pull_request:
+    paths:
+      - internal/server/sso.go
+      - internal/server/saml*.go
+      - internal/server/operator.go
+      - internal/config/config.go
+      - ui/static/app.js
+      - test/idp/**
+      - test/e2e/idp-signin.mjs
+      - .github/workflows/idp.yml
+  schedule:
+    - cron: "23 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  keycloak:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        protocol: [oidc, saml]
+    steps:
+      - name: Work directory
+        run: |
+          echo "WORK=$RUNNER_TEMP/idp" >> "$GITHUB_ENV"
+          echo "SCREENSHOTS=$RUNNER_TEMP/idp/shots" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          check-latest: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Browser
+        working-directory: test/e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Start Keycloak
+        run: mkdir -p "$SCREENSHOTS" && test/idp/keycloak/start.sh
+      - name: Sign in through Keycloak
+        run: |
+          set -a; . "$WORK/keycloak.env"; set +a
+          test/idp/run.sh keycloak ${{ matrix.protocol }}
+      - name: Keycloak log
+        if: failure()
+        run: docker logs gog-keycloak 2>&1 | tail -200
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: keycloak-${{ matrix.protocol }}
+          path: ${{ runner.temp }}/idp/shots
+
+  hosted:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {idp: okta, protocol: oidc}
+          - {idp: okta, protocol: saml}
+          - {idp: entra, protocol: oidc}
+          - {idp: entra, protocol: saml}
+          - {idp: google, protocol: oidc}
+          - {idp: ping, protocol: oidc}
+          - {idp: ping, protocol: saml}
+    env:
+      # One secret per identity provider and protocol, such as
+      # IDP_OKTA_SAML_ENV: a dotenv file with the variables that
+      # test/idp/run.sh lists.
+      IDP_ENV: ${{ secrets[format('IDP_{0}_{1}_ENV', matrix.idp, matrix.protocol)] }}
+    steps:
+      - name: Configured?
+        id: configured
+        run: |
+          echo "WORK=$RUNNER_TEMP/idp" >> "$GITHUB_ENV"
+          echo "SCREENSHOTS=$RUNNER_TEMP/idp/shots" >> "$GITHUB_ENV"
+          if [ -z "$IDP_ENV" ]; then
+            echo "::notice::${{ matrix.idp }} ${{ matrix.protocol }} is not set up: add the secret IDP_$(echo ${{ matrix.idp }}_${{ matrix.protocol }} | tr a-z A-Z)_ENV (docs/identity-providers.md)."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v7
+        if: steps.configured.outputs.run == 'true'
+      - uses: actions/setup-go@v7
+        if: steps.configured.outputs.run == 'true'
+        with:
+          go-version: stable
+          check-latest: true
+      - uses: actions/setup-node@v7
+        if: steps.configured.outputs.run == 'true'
+        with:
+          node-version: 22
+      - name: Sign in through ${{ matrix.idp }}
+        if: steps.configured.outputs.run == 'true'
+        run: |
+          mkdir -p "$SCREENSHOTS"
+          (cd test/e2e && npm ci && npx playwright install --with-deps chromium)
+          printf '%s\n' "$IDP_ENV" > "$WORK.env"
+          set -a; . "$WORK.env"; set +a
+          rm "$WORK.env"
+          test/idp/run.sh ${{ matrix.idp }} ${{ matrix.protocol }}
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: ${{ matrix.idp }}-${{ matrix.protocol }}
+          path: ${{ runner.temp }}/idp/shots

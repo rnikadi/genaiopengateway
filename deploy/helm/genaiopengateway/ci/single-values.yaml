@@ -1,0 +1,4 @@
+replicaCount: 1
+podDisruptionBudget: {enabled: true}
+config: |
+  listen: ":8080"

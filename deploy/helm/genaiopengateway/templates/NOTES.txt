@@ -1,0 +1,10 @@
+GenAIOpenGateway {{ .Chart.AppVersion }} is starting with {{ include "gog.maxReplicas" . }} replica(s).
+
+Inside the cluster it answers at:
+  http://{{ include "gog.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}
+
+Check it from your machine:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "gog.fullname" . }} 8080:{{ .Values.service.port }}
+  curl localhost:8080/readyz
+
+The admin UI is at /ui/ when the config has a store and admin.token or sso.

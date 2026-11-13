@@ -1,0 +1,78 @@
+{
+  "realm": "gateway",
+  "enabled": true,
+  "sslRequired": "none",
+  "groups": [{ "name": "gateway-owners" }, { "name": "staff" }],
+  "users": [
+    {
+      "username": "ada",
+      "email": "ada@example.com",
+      "emailVerified": true,
+      "firstName": "Ada",
+      "lastName": "Lovelace",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "${IDP_PASSWORD}", "temporary": false }],
+      "groups": ["/gateway-owners", "/staff"],
+      "requiredActions": []
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "gateway",
+      "name": "GenAIOpenGateway (OIDC)",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${OIDC_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["${OIDC_GATEWAY}/ui/auth/callback"],
+      "webOrigins": ["${OIDC_GATEWAY}"],
+      "attributes": { "pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "${OIDC_GATEWAY}/ui/" },
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": { "claim.name": "groups", "full.path": "false", "id.token.claim": "true", "access.token.claim": "true", "userinfo.token.claim": "true" }
+        }
+      ]
+    },
+    {
+      "clientId": "${SAML_GATEWAY}/ui/auth/saml/metadata",
+      "name": "GenAIOpenGateway (SAML)",
+      "protocol": "saml",
+      "enabled": true,
+      "frontchannelLogout": true,
+      "redirectUris": ["${SAML_GATEWAY}/*"],
+      "attributes": {
+        "saml_assertion_consumer_url_post": "${SAML_GATEWAY}/ui/auth/saml/acs",
+        "saml_single_logout_service_url_redirect": "${SAML_GATEWAY}/ui/auth/saml/slo",
+        "saml.authnstatement": "true",
+        "saml.server.signature": "true",
+        "saml.assertion.signature": "true",
+        "saml.signature.algorithm": "RSA_SHA256",
+        "saml.client.signature": "true",
+        "saml.signing.certificate": "${SP_CERT_B64}",
+        "saml.encrypt": "true",
+        "saml.encryption.certificate": "${SP_CERT_B64}",
+        "saml.force.name.id.format": "true",
+        "saml_name_id_format": "email",
+        "saml_force_name_id_format": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "saml",
+          "protocolMapper": "saml-group-membership-mapper",
+          "config": { "attribute.name": "groups", "full.path": "false", "single": "false", "attribute.nameformat": "Basic" }
+        },
+        {
+          "name": "email",
+          "protocol": "saml",
+          "protocolMapper": "saml-user-property-mapper",
+          "config": { "user.attribute": "email", "attribute.name": "email", "attribute.nameformat": "Basic" }
+        }
+      ]
+    }
+  ]
+}

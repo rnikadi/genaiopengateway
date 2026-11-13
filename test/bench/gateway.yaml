@@ -1,0 +1,11 @@
+# Gateway config for the benchmark (scripts/bench.sh): one virtual model on
+# the fake upstream, a static key, and usage metered into SQLite, so the
+# numbers include authentication, policy, limits and metering.
+listen: "127.0.0.1:18290"
+store: {driver: sqlite, dsn: "file:${BENCH_DB}"}
+providers:
+  up: {base_url: "http://127.0.0.1:18291/v1", api_key: upstream-key}
+models:
+  bench: {targets: [{provider: up, model: bench-upstream, price: {input_per_mtok: 1, output_per_mtok: 2}}]}
+keys:
+  - {name: bench, key: bench-key-00000000000000000000}

@@ -1,0 +1,217 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: gog_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+      valkey:
+        image: valkey/valkey:8
+        ports: ["6379:6379"]
+    env:
+      GOG_TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/gog_test?sslmode=disable
+      GOG_TEST_VALKEY_ADDR: localhost:6379
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          check-latest: true
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then echo "$unformatted"; exit 1; fi
+      - run: go vet ./...
+      - name: fuzz targets
+        # Each target's seed corpus runs with the tests; this checks that
+        # continuous fuzzing builds every target.
+        run: scripts/check-fuzz-targets.sh
+      - name: staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - run: go test -race ./...
+      - name: Guardrail latency gate
+        # Without -race, which slows the code it measures.
+        run: go test -run TestBuiltinsLatencyGate -count=1 ./internal/guardrail/
+      - run: go build ./cmd/gateway
+      - name: Benchmark gate
+        # Fails when the gateway adds more than 10 ms at p50 (docs/benchmarks.md).
+        run: N=2000 C=16 GATE=10ms scripts/bench.sh
+
+  terraform:
+    # The Terraform provider is its own module (docs/terraform.md); its
+    # acceptance tests build the gateway and run the terraform CLI.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          check-latest: true
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.13.5
+          terraform_wrapper: false
+      - run: go vet ./...
+      - name: staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - name: Acceptance tests
+        run: TF_ACC=1 go test -count=1 ./...
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build for every release platform
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+
+  binaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          check-latest: true
+      - name: Binaries build for every platform
+        run: scripts/build-binaries.sh ci
+
+  e2e:
+    # The Docker Compose setup with Dex, driven by a browser.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Start the Compose setup with sign-in
+        working-directory: deploy/compose
+        run: |
+          docker compose -f compose.yaml -f compose.sso.yaml up -d --build --wait --wait-timeout 300
+          timeout 60 sh -c 'until curl -sf localhost:8080/readyz && curl -sf localhost:5556/dex/.well-known/openid-configuration >/dev/null; do sleep 1; done'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Admin UI browser test
+        working-directory: test/e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          node admin-ui.mjs
+      - name: Logs
+        if: failure()
+        working-directory: deploy/compose
+        run: docker compose -f compose.yaml -f compose.sso.yaml logs
+
+  upgrade:
+    # The previous release's database upgraded by this build, then backed
+    # up and restored (docs/backup.md).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          check-latest: true
+      - run: scripts/upgrade-test.sh
+
+  quickstart:
+    # Zero-config start and the setup wizard, driven by a browser.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          check-latest: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Setup wizard browser test
+        working-directory: test/e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          ./quickstart.sh
+
+  conformance:
+    # The official OpenAI Python SDK against the gateway, one call per endpoint.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          check-latest: true
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: OpenAI SDK conformance
+        run: |
+          pip install openai==2.8.1 websockets==15.0.1
+          test/conformance/run.sh
+
+  docs:
+    # The documentation site builds without broken links.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install -r docs/requirements.txt
+      - run: mkdocs build --strict -d site
+
+  helm:
+    # Template checks, then the chart installed with 2 replicas into kind.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.19.0
+      - name: Install kubeconform
+        run: |
+          curl -sSfL https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz | tar xz -C /usr/local/bin kubeconform
+      - name: Chart checks
+        run: deploy/helm/genaiopengateway/ci/test.sh
+      - uses: helm/kind-action@v1
+        with:
+          node_image: kindest/node:v1.33.4
+      - name: Build and load the image
+        run: |
+          docker build -t genaiopengateway:ci .
+          kind load docker-image genaiopengateway:ci --name chart-testing
+      - name: Install with 2 replicas and send traffic
+        run: deploy/helm/genaiopengateway/ci/kind.sh
+      - name: Logs
+        if: failure()
+        run: |
+          kubectl get pods -o wide
+          kubectl describe pods -l app.kubernetes.io/name=genaiopengateway
+          kubectl logs -l app.kubernetes.io/name=genaiopengateway --all-containers --prefix --tail=200

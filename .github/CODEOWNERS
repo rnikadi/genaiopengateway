@@ -1,0 +1,8 @@
+# Reviewers for each area. Add co-maintainers here as they join, so no area
+# depends on one person (docs/roadmap.md, community track).
+*                       @rnikadi
+/internal/provider/     @rnikadi
+/internal/mcpgw/        @rnikadi
+/deploy/helm/           @rnikadi
+/ui/                    @rnikadi
+/docs/                  @rnikadi

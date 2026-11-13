@@ -1,0 +1,276 @@
+// Package limits enforces requests-per-minute, tokens-per-minute and
+// budget limits at the org, team and key levels. See ADR 0005.
+package limits
+
+import (
+	"context"
+	"fmt"
+	"math"
+	"strconv"
+	"sync/atomic"
+	"time"
+
+	"github.com/rnikadi/genaiopengateway/internal/auth"
+	"github.com/rnikadi/genaiopengateway/internal/policy"
+)
+
+// Rejection codes, matching docs/api.md.
+const (
+	CodeRateLimited = "rate_limit_exceeded"
+	CodeBudget      = "budget_exceeded"
+	CodeUnavailable = "limiter_unavailable"
+)
+
+// Decision is the outcome of Admit.
+type Decision struct {
+	Allowed    bool
+	Code       string
+	Message    string
+	RetryAfter time.Duration
+	// Scope (org, team or key) and Kind (rpm, tpm or budget) name the
+	// limit that rejected the request, for metrics.
+	Scope, Kind string
+	// Requests and Tokens describe the tightest per-minute limits that
+	// apply, for rate limit headers. Limit is zero when none applies.
+	Requests, Tokens Window
+}
+
+// Window is a per-minute limit and what is left of it.
+type Window struct {
+	Limit, Remaining int64
+	Reset            time.Duration
+}
+
+// Limiter checks and charges limits against a backend.
+type Limiter struct {
+	b              Backend
+	failOpenRate   atomic.Bool
+	failOpenBudget atomic.Bool
+	now            func() time.Time
+}
+
+// New returns a limiter. failOpenRate and failOpenBudget decide whether
+// requests pass when the backend is unreachable.
+func New(b Backend, failOpenRate, failOpenBudget bool) *Limiter {
+	l := &Limiter{b: b, now: time.Now}
+	l.SetFailOpen(failOpenRate, failOpenBudget)
+	return l
+}
+
+// SetFailOpen changes whether requests pass when the backend is
+// unreachable, for rate limits and for budgets.
+func (l *Limiter) SetFailOpen(rate, budget bool) {
+	l.failOpenRate.Store(rate)
+	l.failOpenBudget.Store(budget)
+}
+
+// FailOpenRate reports whether rate limits pass when the backend is
+// unreachable.
+func (l *Limiter) FailOpenRate() bool { return l.failOpenRate.Load() }
+
+var (
+	levelNames  = [3]string{"organization", "team", "key"}
+	scopeLabels = [3]string{"org", "team", "key"}
+)
+
+func scopes(p *auth.Principal) [3]string { return [3]string{p.OrgID, p.TeamID, p.KeyID} }
+
+func minuteKey(kind, scope string, window time.Time) string {
+	return "gog:" + kind + ":" + scope + ":" + strconv.FormatInt(window.Unix(), 10)
+}
+
+// spendKey names the counter for a scope's spend in the period holding t,
+// and returns how long the counter must live.
+func spendKey(scope, period string, t time.Time) (string, time.Duration) {
+	t = t.UTC()
+	switch period {
+	case policy.PeriodDaily:
+		end := time.Date(t.Year(), t.Month(), t.Day()+1, 0, 0, 0, 0, time.UTC)
+		return "gog:spend:" + scope + ":" + t.Format("20060102"), end.Sub(t) + 24*time.Hour
+	case policy.PeriodMonthly:
+		end := time.Date(t.Year(), t.Month()+1, 1, 0, 0, 0, 0, time.UTC)
+		return "gog:spend:" + scope + ":" + t.Format("200601"), end.Sub(t) + 24*time.Hour
+	}
+	return "gog:spend:" + scope + ":total", 0
+}
+
+// PeriodStart returns when the budget period holding t began.
+func PeriodStart(period string, t time.Time) time.Time {
+	t = t.UTC()
+	switch period {
+	case policy.PeriodDaily:
+		return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+	case policy.PeriodMonthly:
+		return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+	}
+	return time.Unix(0, 0).UTC()
+}
+
+// Admit counts a request against every request limit and checks token
+// and budget limits. It must be called once per request.
+func (l *Limiter) Admit(ctx context.Context, p *auth.Principal) Decision {
+	now := l.now()
+	window := now.Truncate(time.Minute)
+	reset := window.Add(time.Minute).Sub(now)
+	ids := scopes(p)
+	d := Decision{Allowed: true}
+
+	for i, pol := range p.Policies {
+		if pol.RPM > 0 {
+			n, err := l.b.Add(ctx, minuteKey("rpm", ids[i], window), 1, 2*time.Minute)
+			if err != nil {
+				return l.unavailable(d, l.failOpenRate.Load(), err)
+			}
+			d.Requests = tighter(d.Requests, Window{pol.RPM, pol.RPM - int64(n), reset})
+			if int64(n) > pol.RPM {
+				return reject(d, i, "rpm", CodeRateLimited, fmt.Sprintf("%s request limit of %d per minute reached", levelNames[i], pol.RPM), reset)
+			}
+		}
+		if pol.TPM > 0 {
+			v, err := l.b.Get(ctx, minuteKey("tpm", ids[i], window))
+			if err != nil {
+				return l.unavailable(d, l.failOpenRate.Load(), err)
+			}
+			d.Tokens = tighter(d.Tokens, Window{pol.TPM, pol.TPM - int64(v[0]), reset})
+			if int64(v[0]) >= pol.TPM {
+				return reject(d, i, "tpm", CodeRateLimited, fmt.Sprintf("%s token limit of %d per minute reached", levelNames[i], pol.TPM), reset)
+			}
+		}
+		if b := pol.Budget; b != nil {
+			key, _ := spendKey(ids[i], b.Period, now)
+			v, err := l.b.Get(ctx, key)
+			if err != nil {
+				return l.unavailable(d, l.failOpenBudget.Load(), err)
+			}
+			if v[0] >= b.AmountUSD {
+				return reject(d, i, "budget", CodeBudget, fmt.Sprintf("%s %s budget of $%s is spent", levelNames[i], b.Period, strconv.FormatFloat(b.AmountUSD, 'f', -1, 64)), 0)
+			}
+		}
+	}
+	return d
+}
+
+// Spend is a budget's spend just before and after a charge, which is
+// what budget alerts compare with their thresholds.
+type Spend struct {
+	// Level is 0, 1 or 2 for the org, team or key budget.
+	Level         int
+	ScopeID       string
+	Budget        policy.Budget
+	Before, After float64
+	PeriodStart   time.Time
+}
+
+// Charge records tokens and cost after a request completes, and returns
+// the spend of every budget it charged. Errors are returned for logging;
+// the request has already been served.
+func (l *Limiter) Charge(ctx context.Context, p *auth.Principal, tokens int64, costUSD float64) ([]Spend, error) {
+	now := l.now()
+	window := now.Truncate(time.Minute)
+	ids := scopes(p)
+	var spent []Spend
+	for i, pol := range p.Policies {
+		if pol.TPM > 0 && tokens > 0 {
+			if _, err := l.b.Add(ctx, minuteKey("tpm", ids[i], window), float64(tokens), 2*time.Minute); err != nil {
+				return spent, err
+			}
+		}
+		if pol.Budget != nil && costUSD > 0 {
+			key, ttl := spendKey(ids[i], pol.Budget.Period, now)
+			after, err := l.b.Add(ctx, key, costUSD, ttl)
+			if err != nil {
+				return spent, err
+			}
+			spent = append(spent, Spend{
+				Level: i, ScopeID: ids[i], Budget: *pol.Budget,
+				Before: after - costUSD, After: after, PeriodStart: PeriodStart(pol.Budget.Period, now),
+			})
+		}
+	}
+	return spent, nil
+}
+
+// Seed raises spend counters to recorded spend so a restarted memory
+// backend or a flushed Valkey does not reset budgets. spend maps scope
+// ids to USD spent since the start of the period.
+func (l *Limiter) Seed(ctx context.Context, period string, spend map[string]float64) error {
+	now := l.now()
+	for scope, v := range spend {
+		key, ttl := spendKey(scope, period, now)
+		if err := l.b.Raise(ctx, key, v, ttl); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (l *Limiter) unavailable(d Decision, failOpen bool, err error) Decision {
+	if failOpen {
+		return d
+	}
+	return Decision{Code: CodeUnavailable, Message: "limits could not be checked: " + err.Error()}
+}
+
+func reject(d Decision, level int, kind, code, msg string, retry time.Duration) Decision {
+	d.Allowed, d.Code, d.Message = false, code, msg
+	d.Scope, d.Kind = scopeLabels[level], kind
+	d.RetryAfter = retry
+	return d
+}
+
+// tighter returns the window with less remaining.
+func tighter(a, b Window) Window {
+	if b.Remaining < 0 {
+		b.Remaining = 0
+	}
+	if a.Limit == 0 || b.Remaining < a.Remaining {
+		return b
+	}
+	return a
+}
+
+// RetryAfterSeconds rounds a duration up to whole seconds for the
+// retry-after header.
+func RetryAfterSeconds(d time.Duration) int64 { return int64(math.Ceil(d.Seconds())) }
+
+// LevelUsage is what one level (organization, team or key) has used of
+// its limits, for explaining a refusal (docs/why-denied.md).
+type LevelUsage struct {
+	Level        string
+	RPM, RPMUsed int64
+	TPM, TPMUsed int64
+	Budget       *policy.Budget
+	Spent        float64
+	// Reset is when the per-minute counters start again.
+	Reset time.Duration
+}
+
+// Peek reads, without counting anything, what each level of a principal
+// has used of its limits now.
+func (l *Limiter) Peek(ctx context.Context, p *auth.Principal) ([3]LevelUsage, error) {
+	now := l.now()
+	window := now.Truncate(time.Minute)
+	ids := scopes(p)
+	var out [3]LevelUsage
+	for i, pol := range p.Policies {
+		u := LevelUsage{Level: levelNames[i], RPM: pol.RPM, TPM: pol.TPM, Budget: pol.Budget, Reset: window.Add(time.Minute).Sub(now)}
+		spend := ""
+		if pol.Budget != nil {
+			spend, _ = spendKey(ids[i], pol.Budget.Period, now)
+		}
+		keys := []string{minuteKey("rpm", ids[i], window), minuteKey("tpm", ids[i], window)}
+		if spend != "" {
+			keys = append(keys, spend)
+		}
+		v, err := l.b.Get(ctx, keys...)
+		if err != nil {
+			return out, err
+		}
+		u.RPMUsed, u.TPMUsed = int64(v[0]), int64(v[1])
+		if spend != "" {
+			u.Spent = v[2]
+		}
+		out[i] = u
+	}
+	return out, nil
+}

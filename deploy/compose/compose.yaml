@@ -1,0 +1,128 @@
+# GenAIOpenGateway local development setup. From this directory:
+#
+#   docker compose up -d                          gateway built from this checkout, Postgres, Valkey, an MCP server
+#   docker compose --profile ollama up -d         plus a local model, no API keys needed
+#   docker compose --profile observability up -d  plus Jaeger (traces) and Prometheus
+#   docker compose -f compose.yaml -f compose.sso.yaml up -d   plus Dex, for single sign-on to the admin UI
+#
+# See README.md here. The defaults below are for a laptop, not for production.
+name: genaiopengateway
+
+x-gateway-env: &gateway-env
+  GATEWAY_ADMIN_TOKEN: ${GATEWAY_ADMIN_TOKEN:-local-admin-token-change-me-0000000000}
+  GATEWAY_DEV_KEY: ${GATEWAY_DEV_KEY:-gog-local-dev-key}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:0.5b}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+
+services:
+  gateway:
+    # Always built from this checkout, never pulled.
+    build:
+      context: ../..
+      args:
+        VERSION: dev
+    image: genaiopengateway-dev
+    pull_policy: build
+    environment: *gateway-env
+    volumes:
+      - ./config.yaml:/etc/genaiopengateway/config.yaml:ro
+    ports:
+      - "127.0.0.1:${GATEWAY_PORT:-8080}:8080"   # loopback only: the sample admin token is public
+    depends_on:
+      postgres: {condition: service_healthy}
+      valkey: {condition: service_healthy}
+      mcp-everything: {condition: service_healthy}
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: gateway
+      POSTGRES_PASSWORD: gateway
+      POSTGRES_DB: gateway
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "gateway", "-d", "gateway"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  valkey:
+    image: valkey/valkey:8.1-alpine
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  # The MCP reference server, behind the gateway at /mcp/demo.
+  mcp-everything:
+    image: node:22-alpine
+    command: ["npx", "-y", "@modelcontextprotocol/server-everything@2026.8.31", "streamableHttp"]
+    environment:
+      PORT: "3001"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "3001"]
+      interval: 2s
+      timeout: 5s
+      retries: 90
+    restart: unless-stopped
+
+  ollama:
+    profiles: [ollama]
+    image: ollama/ollama:0.12.3
+    volumes:
+      - ollama:/root/.ollama
+    restart: unless-stopped
+
+  # Downloads the model once, then exits.
+  ollama-pull:
+    profiles: [ollama]
+    image: ollama/ollama:0.12.3
+    environment:
+      OLLAMA_HOST: ollama:11434
+    entrypoint: ["ollama", "pull", "${OLLAMA_MODEL:-qwen2.5:0.5b}"]
+    depends_on: [ollama]
+    restart: on-failure
+
+  jaeger:
+    profiles: [observability]
+    image: jaegertracing/jaeger:2.10.0
+    ports:
+      - "127.0.0.1:16686:16686"   # UI
+    restart: unless-stopped
+
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v3.5.0
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../helm/genaiopengateway/files/alerts.yaml:/etc/prometheus/alerts.yaml:ro
+    ports:
+      - "127.0.0.1:9090:9090"
+    restart: unless-stopped
+
+  grafana:
+    profiles: [observability]
+    image: grafana/grafana:12.2.1
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/genaiopengateway.json
+    volumes:
+      - ./grafana/provisioning.yaml:/etc/grafana/provisioning/datasources/gateway.yaml:ro
+      - ./grafana/dashboards.yaml:/etc/grafana/provisioning/dashboards/gateway.yaml:ro
+      - ../helm/genaiopengateway/files/dashboard.json:/var/lib/grafana/dashboards/genaiopengateway.json:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on: [prometheus]
+    restart: unless-stopped
+
+volumes:
+  postgres:
+  ollama:

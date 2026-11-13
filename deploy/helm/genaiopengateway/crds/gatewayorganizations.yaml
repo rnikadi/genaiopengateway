@@ -1,0 +1,99 @@
+# An organization of the gateway, with its policy, teams and Cedar
+# policies, reconciled by the operator (docs/operator.md). The resource
+# owns the organization: teams and Cedar policies it leaves out are
+# removed, and deleting it deletes the organization.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: gatewayorganizations.genaiopengateway.io
+spec:
+  group: genaiopengateway.io
+  scope: Namespaced
+  names:
+    plural: gatewayorganizations
+    singular: gatewayorganization
+    kind: GatewayOrganization
+    shortNames: [gorg]
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - {name: Organization, type: string, jsonPath: .spec.name}
+        - {name: Ready, type: string, jsonPath: ".status.conditions[?(@.type==\"Ready\")].status"}
+        - {name: Age, type: date, jsonPath: .metadata.creationTimestamp}
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                name: {type: string, description: "The organization's name in the gateway; default: the resource's name."}
+                cedar: {type: string, description: "Cedar policies (docs/cedar.md); empty or absent removes them."}
+                allowed_models: {type: array, items: {type: string}}
+                allowed_mcp_servers: {type: array, items: {type: string}}
+                allowed_agents: {type: array, items: {type: string}}
+                guardrails: {type: array, items: {type: string}}
+                residency: {type: array, items: {type: string}}
+                rpm: {type: integer, minimum: 0}
+                tpm: {type: integer, minimum: 0}
+                log_bodies: {type: boolean}
+                budget:
+                  type: object
+                  required: [amount_usd, period]
+                  properties:
+                    amount_usd: {type: number, minimum: 0}
+                    period: {type: string, enum: [daily, monthly, total]}
+                    alert_at: {type: array, items: {type: number}}
+                cache:
+                  type: object
+                  required: [mode]
+                  properties:
+                    mode: {type: string, enum: ["off", exact, semantic]}
+                    ttl: {type: string}
+                teams:
+                  type: object
+                  description: Teams by name, each with its policy.
+                  additionalProperties:
+                    type: object
+                    properties:
+                      allowed_models: {type: array, items: {type: string}}
+                      allowed_mcp_servers: {type: array, items: {type: string}}
+                      allowed_agents: {type: array, items: {type: string}}
+                      guardrails: {type: array, items: {type: string}}
+                      residency: {type: array, items: {type: string}}
+                      rpm: {type: integer, minimum: 0}
+                      tpm: {type: integer, minimum: 0}
+                      log_bodies: {type: boolean}
+                      budget:
+                        type: object
+                        required: [amount_usd, period]
+                        properties:
+                          amount_usd: {type: number, minimum: 0}
+                          period: {type: string, enum: [daily, monthly, total]}
+                          alert_at: {type: array, items: {type: number}}
+                      cache:
+                        type: object
+                        required: [mode]
+                        properties:
+                          mode: {type: string, enum: ["off", exact, semantic]}
+                          ttl: {type: string}
+            status:
+              type: object
+              properties:
+                observedGeneration: {type: integer}
+                appliedHash: {type: string}
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: [type, status]
+                    properties:
+                      type: {type: string}
+                      status: {type: string}
+                      reason: {type: string}
+                      message: {type: string}
+                      lastTransitionTime: {type: string, format: date-time}

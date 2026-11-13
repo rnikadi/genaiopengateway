@@ -1,0 +1,10 @@
+/bin/
+/dist/
+config.yaml
+*.test
+*.out
+dump.rdb
+deploy/compose/.env
+!deploy/compose/config.yaml
+/site/
+/gogctl

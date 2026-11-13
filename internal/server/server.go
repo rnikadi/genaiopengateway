@@ -1,0 +1,724 @@
+// Package server serves the gateway's HTTP APIs.
+package server
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"maps"
+	"net"
+	"net/http"
+	"reflect"
+	"regexp"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/rnikadi/genaiopengateway/internal/alerts"
+	"github.com/rnikadi/genaiopengateway/internal/auth"
+	"github.com/rnikadi/genaiopengateway/internal/cache"
+	"github.com/rnikadi/genaiopengateway/internal/config"
+	"github.com/rnikadi/genaiopengateway/internal/guardrail"
+	"github.com/rnikadi/genaiopengateway/internal/id"
+	"github.com/rnikadi/genaiopengateway/internal/limits"
+	"github.com/rnikadi/genaiopengateway/internal/mcpgw"
+	"github.com/rnikadi/genaiopengateway/internal/oauth"
+	"github.com/rnikadi/genaiopengateway/internal/policy"
+	"github.com/rnikadi/genaiopengateway/internal/provider"
+	"github.com/rnikadi/genaiopengateway/internal/router"
+	"github.com/rnikadi/genaiopengateway/internal/store"
+	"github.com/rnikadi/genaiopengateway/internal/stream"
+	"github.com/rnikadi/genaiopengateway/internal/telemetry"
+	"github.com/rnikadi/genaiopengateway/internal/usage"
+)
+
+// runtime is everything derived from one config version. It is replaced
+// as a whole on reload so a request always sees a consistent view.
+type runtime struct {
+	cfg    *config.Config
+	router *router.Router
+	oauth  *oauth.Verifier // nil unless mcp.oauth is configured
+	bodies *bodyLogger     // nil unless body logging is enabled
+	guards *guardrail.Set
+}
+
+// Server holds the live runtime and serves requests against it.
+type Server struct {
+	rt    atomic.Pointer[runtime]
+	keys  atomic.Pointer[auth.Directory]
+	ready atomic.Bool
+	// draining is set when shutdown starts, so load balancers stop
+	// sending requests before the listener closes.
+	draining atomic.Bool
+	log      *slog.Logger
+	client   *http.Client
+	// rtc are the realtime calls over WebRTC this replica watches, by
+	// call id.
+	rtc     sync.Map
+	routing *router.Health
+	// a2aCards caches agent cards by agent name.
+	a2aCards sync.Map
+	// pushClient delivers A2A push notifications to public addresses
+	// only; pushTrusted to the hosts the configuration names.
+	pushClient, pushTrusted *http.Client
+	streams                 *stream.Manager
+
+	// store and usage are nil when no database is configured. A data
+	// plane has no store but a plane, which its snapshot comes from and
+	// its records go to; source is where snapshots are read.
+	store  *store.Store
+	plane  *planeClient
+	source snapshotSource
+	usage  *usage.Writer[usage.Record]
+	calls  *usage.Writer[store.MCPCall]
+	// bodies is nil without a store, like usage and calls.
+	bodies *usage.Writer[capturedBody]
+	// guardEvents is nil without a store.
+	guardEvents *usage.Writer[store.GuardrailEvent]
+	// denials records refused requests (docs/why-denied.md); nil without a store.
+	denials *usage.Writer[store.Denial]
+
+	limiter *limits.Limiter
+	valkey  *limits.Valkey // nil unless the valkey driver is used
+	stop    context.CancelFunc
+
+	// cache holds answers for reuse, in Valkey when the limiter uses it;
+	// cacheIndex holds this replica's question embeddings.
+	cache      cache.Store
+	cacheIndex *cache.Index
+
+	metrics     *telemetry.Metrics
+	mcp         *mcpgw.Gateway
+	lastRefresh atomic.Int64 // unix nanoseconds of the last store load
+	tenants     atomic.Pointer[tenants]
+	// cedar holds each organization's Cedar policies in force.
+	cedar atomic.Pointer[map[string]*orgCedar]
+
+	// mu serializes rebuilding the key directory from its two sources.
+	mu        sync.Mutex
+	storeKeys map[string]*auth.Principal
+
+	// ssoMu guards sso, the identity provider operators sign in with.
+	ssoMu sync.Mutex
+	sso   *oidcClient
+	saml  *samlProvider
+
+	uiFiles map[string]*uiFile
+
+	// cfgMu guards the config sources: the file, the stored objects last
+	// applied, the revision last read and why it did not apply (ADR 0023).
+	cfgMu   sync.Mutex
+	file    *config.Config
+	applied []config.Object
+	cfgRev  int64
+	cfgErr  string
+
+	notifier *alerts.Notifier
+	conns    *connections
+
+	// teamCreds are teams' own provider credentials; credsMu serializes
+	// rebuilding their adapters.
+	teamCreds atomic.Pointer[teamCredentials]
+	credsMu   sync.Mutex
+}
+
+// New builds a server. st may be nil.
+func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error) {
+	s := &Server{log: log, client: newUpstreamClient(), routing: router.NewHealth(), store: st, cfgRev: -1}
+	s.pushClient = newPublicClient()
+	s.pushTrusted = &http.Client{Transport: s.client.Transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	if strings.Contains(cfg.Admin.Token.Value(), "change-me") {
+		log.Warn("the admin token is the sample from the Compose files: anyone who has read them is an owner; set GATEWAY_ADMIN_TOKEN to a random value (openssl rand -hex 32)")
+	}
+	ctx, stop := context.WithCancel(context.Background())
+	s.stop = stop
+	var backend limits.Backend
+	if lc := cfg.Limiter; lc.Driver == "valkey" {
+		s.valkey = limits.NewValkey(lc.Address, lc.Password.Value())
+		backend = s.valkey
+	} else {
+		backend = limits.NewMemory(ctx)
+	}
+	s.limiter = limits.New(backend, cfg.Limiter.FailOpenRateLimits, cfg.Limiter.FailOpenBudgets)
+	if s.valkey != nil {
+		s.cache = cache.NewValkey(s.valkey.Client())
+	} else {
+		s.cache = cache.NewMemory(cfg.Cache.MaxMemoryBytes)
+	}
+	s.cacheIndex = cache.NewIndex(cfg.Cache.Semantic.MaxEntries)
+	if st != nil {
+		s.usage = usage.NewWriter(streamed(s, config.RecordUsage, st.InsertUsage), log, "usage")
+		s.calls = usage.NewWriter(streamed(s, config.RecordMCPCalls, st.InsertMCPCalls), log, "mcp_calls")
+		s.bodies = usage.NewWriterSize(s.writeBodies, log, "request_bodies", bodyQueue)
+		s.guardEvents = usage.NewWriter(streamed(s, config.RecordGuardrailEvents, st.InsertGuardrailEvents), log, "guardrail_events")
+		s.denials = usage.NewWriter(streamed(s, config.RecordDenials, st.InsertDenials), log, "denials")
+		st.OnAudit(func(e store.AuditEntry) { stream.Publish(s.streams, config.RecordAudit, []store.AuditEntry{e}) })
+		s.source = st
+	} else if cfg.ControlPlane.URL != "" {
+		// Ready once the first snapshot is in.
+		s.plane = newPlaneClient(cfg.ControlPlane, s.client, log)
+		s.source = s.plane
+		newPlaneWriters(s)
+	} else {
+		s.ready.Store(true)
+	}
+	s.metrics = telemetry.NewMetrics(s.usageWriteErrors, s.snapshotAge, s.bodiesDropped)
+	s.metrics.WatchCircuits(s.circuitStates)
+	s.streams = stream.New(ctx, log, s.client.Transport, s.metrics)
+	s.notifier = alerts.New(log, s.client.Transport, mcpgw.Version, s.metrics.ObserveAlertDelivery)
+	mo := mcpgw.Options{Log: log, Transport: s.client.Transport, Limiter: s.limiter, Metrics: s.metrics, Guard: s.guardTool, Authorize: s.authorizeTool}
+	if st != nil {
+		s.conns = newConnections(s)
+		mo.Pins, mo.Record, mo.Audit, mo.OnPending, mo.LogBody = st, s.calls.Add, st.AppendAudit, s.toolPending, s.logMCPBody
+		mo.Credentials = s.conns
+	} else if s.plane != nil {
+		mo.Record = s.calls.Add
+	}
+	s.mcp = mcpgw.New(ctx, cfg.MCP, mo)
+	if err := s.Reload(cfg); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// Reload swaps in a new config file, with the stored configuration
+// objects merged in. In-flight requests finish on the old config.
+func (s *Server) Reload(file *config.Config) error {
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
+	cfg, err := s.merge(file, s.applied)
+	if err != nil {
+		return err
+	}
+	if err := s.install(cfg); err != nil {
+		return err
+	}
+	// Read the stored objects again on the next refresh: a set that did
+	// not apply to the old file may apply to this one.
+	s.file, s.cfgRev = file, -1
+	return nil
+}
+
+// build prepares the runtime for a config without installing it.
+func (s *Server) build(cfg *config.Config) (*runtime, error) {
+	r, err := router.New(cfg, s.client, s.routing)
+	if err != nil {
+		return nil, err
+	}
+	bodies, err := newBodyLogger(cfg)
+	if err != nil {
+		return nil, err
+	}
+	guards, err := s.newGuardrails(cfg)
+	if err != nil {
+		return nil, err
+	}
+	next := &runtime{cfg: cfg, router: r, bodies: bodies, guards: guards}
+	if oc := cfg.MCP.OAuth; oc != nil {
+		// Keep the verifier, and the keys it holds, when OAuth settings
+		// did not change.
+		if prev := s.rt.Load(); prev != nil && prev.oauth != nil && reflect.DeepEqual(prev.cfg.MCP.OAuth, oc) {
+			next.oauth = prev.oauth
+		} else {
+			next.oauth = oauth.NewVerifier(oauth.Config{Issuer: oc.Issuer, JWKSURL: oc.JWKSURL, Scopes: oc.Scopes}, s.client)
+		}
+	}
+	return next, nil
+}
+
+// install builds and swaps in the runtime for a config.
+func (s *Server) install(cfg *config.Config) error {
+	next, err := s.build(cfg)
+	if err != nil {
+		return err
+	}
+	s.rt.Store(next)
+	s.limiter.SetFailOpen(cfg.Limiter.FailOpenRateLimits, cfg.Limiter.FailOpenBudgets)
+	if m, ok := s.cache.(*cache.Memory); ok {
+		m.SetMax(cfg.Cache.MaxMemoryBytes)
+	}
+	s.cacheIndex.SetMax(cfg.Cache.Semantic.MaxEntries)
+	s.mcp.Reload(cfg.MCP)
+	s.streams.Apply(cfg.Streams)
+	s.rebuildKeys()
+	return nil
+}
+
+// rebuildKeys merges static keys from config with keys from the store.
+func (s *Server) rebuildKeys() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	all := auth.StaticPrincipals(s.rt.Load().cfg.Keys)
+	maps.Copy(all, s.storeKeys)
+	if len(all) == 0 && s.store == nil {
+		s.log.Warn("no API keys configured; every model request will be rejected")
+	}
+	s.keys.Store(auth.NewDirectory(all))
+}
+
+// Start runs background work until ctx is done: refreshing keys from the
+// store and pruning old usage.
+func (s *Server) Start(ctx context.Context) {
+	if s.store == nil {
+		if s.plane != nil {
+			go s.refreshLoop(ctx)
+			go s.notifier.Run(ctx)
+		}
+		return
+	}
+	go s.seedBudgets(ctx)
+	go s.refreshLoop(ctx)
+	go s.sessionPruneLoop(ctx)
+	go s.notifier.Run(ctx)
+	go s.keyExpiryLoop(ctx)
+	go s.forecastLoop(ctx)
+	go s.bodyPruneLoop(ctx)
+	go s.connectionsLoop(ctx)
+	go s.batchPollLoop(ctx)
+	go s.pruneLoop(ctx)
+}
+
+// Close flushes queued usage records and releases background resources.
+func (s *Server) Close(ctx context.Context) {
+	// First, so the calls' last charges and request lines are kept.
+	s.endRealtimeCalls(ctx)
+	if s.usage != nil {
+		s.usage.Close(ctx)
+		s.calls.Close(ctx)
+		if s.bodies != nil {
+			s.bodies.Close(ctx)
+		}
+		s.guardEvents.Close(ctx)
+		s.denials.Close(ctx)
+	}
+	s.stop()
+	// Streams flush what they hold once stopped; wait for that as long
+	// as the shutdown allows.
+	flushed := make(chan struct{})
+	go func() { s.streams.Wait(); close(flushed) }()
+	select {
+	case <-flushed:
+	case <-ctx.Done():
+	}
+	s.mcp.Close()
+	if s.valkey != nil {
+		_ = s.valkey.Close()
+	}
+}
+
+// seedBudgets raises budget counters to the spend recorded in the store,
+// so a restart does not reset budgets.
+func (s *Server) seedBudgets(ctx context.Context) {
+	for _, period := range []string{policy.PeriodDaily, policy.PeriodMonthly, policy.PeriodTotal} {
+		spend, err := s.store.SpendSince(ctx, limits.PeriodStart(period, time.Now()))
+		if err == nil {
+			err = s.limiter.Seed(ctx, period, spend)
+		}
+		if err != nil {
+			s.log.Error("seeding budget counters failed", "period", period, "err", err)
+		}
+	}
+}
+
+func (s *Server) refreshLoop(ctx context.Context) {
+	for {
+		if err := s.refresh(ctx); err != nil {
+			s.log.Error("loading keys from the store failed; serving the previous snapshot", "err", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(s.rt.Load().cfg.Store.RefreshInterval.Std()):
+		}
+	}
+}
+
+// refresh loads stored configuration objects, tenants and keys from the
+// store.
+func (s *Server) refresh(ctx context.Context) error {
+	if s.plane != nil {
+		if err := s.plane.update(ctx); err != nil {
+			return err
+		}
+	}
+	if err := s.refreshConfig(ctx); err != nil {
+		return err
+	}
+	snap, err := s.source.LoadSnapshot(ctx)
+	if err != nil {
+		return err
+	}
+	if err := s.loadTeamCredentials(ctx); err != nil {
+		return err
+	}
+	if err := s.loadCedar(ctx); err != nil {
+		return err
+	}
+	keys := make(map[string]*auth.Principal, len(snap.Keys))
+	for _, k := range snap.Keys {
+		org, team := snap.Orgs[k.OrgID], snap.Teams[k.TeamID]
+		if org == nil || team == nil {
+			continue
+		}
+		p := &auth.Principal{
+			OrgID: k.OrgID, TeamID: k.TeamID, KeyID: k.ID, KeyName: k.Name, KeyPrefix: k.Prefix,
+			Policies:  [3]policy.Policy{org.Policy, team.Policy, k.Policy},
+			ExpiresAt: k.ExpiresAt, Owner: k.Owner,
+		}
+		keys[k.SecretHash] = p
+		// The secret a rotation replaced works until its grace period ends.
+		if k.PreviousHash != "" && k.PreviousExpiresAt != nil && time.Now().Before(*k.PreviousExpiresAt) {
+			prev := *p
+			prev.Previous = true
+			if prev.ExpiresAt == nil || k.PreviousExpiresAt.Before(*prev.ExpiresAt) {
+				prev.ExpiresAt = k.PreviousExpiresAt
+			}
+			keys[k.PreviousHash] = &prev
+		}
+	}
+	t := &tenants{orgs: snap.Orgs, teams: map[string]map[string]*store.Team{}}
+	for _, team := range snap.Teams {
+		if t.teams[team.OrgID] == nil {
+			t.teams[team.OrgID] = map[string]*store.Team{}
+		}
+		t.teams[team.OrgID][team.Name] = team
+		t.teams[team.OrgID][team.ID] = team
+	}
+	s.tenants.Store(t)
+	s.mu.Lock()
+	s.storeKeys = keys
+	s.mu.Unlock()
+	s.rebuildKeys()
+	s.lastRefresh.Store(time.Now().UnixNano())
+	s.ready.Store(true)
+	return nil
+}
+
+func (s *Server) usageWriteErrors() float64 {
+	if s.usage == nil {
+		return 0
+	}
+	return float64(s.usage.Dropped() + s.calls.Dropped() + s.guardEvents.Dropped() + s.denials.Dropped())
+}
+
+// snapshotAge is zero without a store or before the first load, which
+// /readyz already reports.
+func (s *Server) snapshotAge() float64 {
+	if s.source == nil {
+		return 0
+	}
+	last := s.lastRefresh.Load()
+	if last == 0 {
+		return 0
+	}
+	return time.Since(time.Unix(0, last)).Seconds()
+}
+
+// pruneLoop deletes records older than store.usage_retention every
+// hour, reading the setting each time so a change from the admin UI
+// applies without a restart. Zero keeps everything.
+func (s *Server) pruneLoop(ctx context.Context) {
+	t := time.NewTicker(time.Hour)
+	defer t.Stop()
+	for {
+		// Days are summed before their rows are pruned, and rows are
+		// pruned by whole UTC days, so every day is either all there or
+		// in the rollups (docs/analytics.md).
+		now := time.Now()
+		cfg := s.rt.Load().cfg.Store
+		if err := s.rollupUsage(ctx, now); err != nil {
+			s.log.Error("rolling up usage failed; pruning is skipped", "err", err)
+		} else {
+			if retention := cfg.UsageRetention.Std(); retention > 0 {
+				s.prune(ctx, store.DayStart(now.Add(-retention)))
+			}
+			if retention := cfg.RollupRetention.Std(); retention > 0 {
+				if n, err := s.store.PruneRollups(ctx, now.Add(-retention)); err != nil {
+					s.log.Error("pruning usage rollups failed", "err", err)
+				} else if n > 0 {
+					s.log.Info("pruned usage rollups", "rows", n)
+				}
+			}
+		}
+		if n, err := s.store.PruneA2APush(ctx, now); err != nil {
+			s.log.Error("pruning A2A push configurations failed", "err", err)
+		} else if n > 0 {
+			s.log.Info("pruned A2A push configurations", "rows", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// rawFrom is the start of the first UTC day whose usage rows are all
+// kept, or zero when usage is kept forever.
+func (s *Server) rawFrom(now time.Time) time.Time {
+	if retention := s.rt.Load().cfg.Store.UsageRetention.Std(); retention > 0 {
+		return store.DayStart(now.Add(-retention))
+	}
+	return time.Time{}
+}
+
+// rollupUsage rebuilds the daily rollups from the last day that has
+// them, or from the first day of usage, to today. Usage rows arrive up
+// to a day late from data planes, so the last day is always redone.
+func (s *Server) rollupUsage(ctx context.Context, now time.Time) error {
+	last, first, err := s.store.RollupBounds(ctx)
+	if err != nil {
+		return err
+	}
+	from := first
+	if !last.IsZero() {
+		from = last.AddDate(0, 0, -1)
+	}
+	if from.IsZero() {
+		return nil // no usage yet
+	}
+	// Days before the first usage row are pruned; their rollups stay.
+	if from.Before(first) {
+		from = first
+	}
+	return s.store.RollupUsage(ctx, from, store.DayStart(now).AddDate(0, 0, 1))
+}
+
+// prune deletes usage, MCP call and guardrail event records from before.
+func (s *Server) prune(ctx context.Context, before time.Time) {
+	n, err := s.store.PruneUsage(ctx, before)
+	if err != nil {
+		s.log.Error("pruning usage failed", "err", err)
+	} else if n > 0 {
+		s.log.Info("pruned usage records", "rows", n)
+	}
+	n, err = s.store.PruneMCPCalls(ctx, before)
+	if err != nil {
+		s.log.Error("pruning MCP call records failed", "err", err)
+	} else if n > 0 {
+		s.log.Info("pruned MCP call records", "rows", n)
+	}
+	n, err = s.store.PruneGuardrailEvents(ctx, before)
+	if err != nil {
+		s.log.Error("pruning guardrail events failed", "err", err)
+	} else if n > 0 {
+		s.log.Info("pruned guardrail events", "rows", n)
+	}
+	n, err = s.store.PruneDenials(ctx, before)
+	if err != nil {
+		s.log.Error("pruning denials failed", "err", err)
+	} else if n > 0 {
+		s.log.Info("pruned denials", "rows", n)
+	}
+}
+
+// MetricsHandler serves Prometheus metrics.
+func (s *Server) MetricsHandler() http.Handler { return s.metrics.Handler() }
+
+// Handler returns the HTTP handler with all routes registered. /metrics
+// is included unless metrics have a listener of their own.
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	if s.rt.Load().cfg.Metrics.Listen == "" {
+		mux.Handle("GET /metrics", s.MetricsHandler())
+	}
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
+	mux.HandleFunc("GET /readyz", s.readyz)
+	mux.HandleFunc("GET /v1/models", s.listModels)
+	mux.HandleFunc("POST /v1/chat/completions", s.model(provider.ChatCompletions))
+	mux.HandleFunc("POST /v1/embeddings", s.model(provider.Embeddings))
+	mux.HandleFunc("POST /v1/responses", s.model(provider.Responses))
+	mux.HandleFunc("POST /v1/messages", s.model(provider.Messages))
+	mux.HandleFunc("POST /v1beta/models/{action}", s.model(provider.GenerateContent))
+	mux.HandleFunc("POST /v1/images/generations", s.model(provider.ImageGenerations))
+	mux.HandleFunc("POST /v1/images/edits", s.model(provider.ImageEdits))
+	mux.HandleFunc("POST /v1/audio/speech", s.model(provider.Speech))
+	mux.HandleFunc("POST /v1/audio/transcriptions", s.model(provider.Transcriptions))
+	mux.HandleFunc("POST /v1/audio/translations", s.model(provider.Translations))
+	mux.HandleFunc("POST /v1/moderations", s.model(provider.Moderations))
+	mux.HandleFunc("POST /v1/rerank", s.model(provider.Rerank))
+	mux.HandleFunc("POST /v1/videos", s.model(provider.Videos))
+	mux.HandleFunc("GET /v1/videos", s.listVideos)
+	mux.HandleFunc("GET /v1/videos/{id}", s.videoJob(http.MethodGet, ""))
+	mux.HandleFunc("DELETE /v1/videos/{id}", s.videoJob(http.MethodDelete, ""))
+	mux.HandleFunc("GET /v1/videos/{id}/content", s.videoJob(http.MethodGet, "/content"))
+	mux.HandleFunc("POST /v1/videos/{id}/remix", s.model(provider.VideoRemix))
+	mux.HandleFunc("POST /v1/files", s.uploadFile)
+	mux.HandleFunc("GET /v1/files", s.listFiles)
+	mux.HandleFunc("GET /v1/files/{id}", s.fileCall(http.MethodGet, ""))
+	mux.HandleFunc("DELETE /v1/files/{id}", s.fileCall(http.MethodDelete, ""))
+	mux.HandleFunc("GET /v1/files/{id}/content", s.fileCall(http.MethodGet, "/content"))
+	mux.HandleFunc("POST /v1/batches", s.createBatch)
+	mux.HandleFunc("GET /v1/batches", s.listBatches)
+	mux.HandleFunc("GET /v1/batches/{id}", s.batchCall(http.MethodGet, ""))
+	mux.HandleFunc("POST /v1/batches/{id}/cancel", s.batchCall(http.MethodPost, "/cancel"))
+	mux.HandleFunc("GET /v1/realtime", s.realtime)
+	mux.HandleFunc("POST /v1/realtime/calls", s.realtimeCall)
+	mux.HandleFunc("POST /v1/realtime/calls/{call_id}/hangup", s.realtimeHangup)
+	mux.HandleFunc("OPTIONS /v1/realtime/calls", realtimeCallCORS)
+	mux.HandleFunc("OPTIONS /v1/realtime/calls/{call_id}/hangup", realtimeCallCORS)
+	mux.HandleFunc("GET /ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent", s.live)
+	mux.HandleFunc("GET /bedrock/model/{model}/invoke-with-bidirectional-stream", s.bidi)
+	if s.store != nil {
+		mux.HandleFunc("GET "+planeSnapshotPath, s.serveSnapshot)
+		mux.HandleFunc("POST "+planeRecordsPath+"{kind}", s.serveRecords)
+	}
+	mux.HandleFunc("POST /a2a/{name}", s.serveA2A)
+	mux.HandleFunc("GET /a2a/{name}/.well-known/agent-card.json", s.a2aCard)
+	mux.HandleFunc("GET /a2a/{name}/.well-known/agent.json", s.a2aCard)
+	mux.HandleFunc("/a2a/{name}/{path...}", s.serveA2AREST)
+	mux.HandleFunc("POST /a2a/{name}/push/{secret}", s.a2aPushNotify)
+	mux.HandleFunc("/mcp/{name}", s.serveMCP)
+	if s.store != nil {
+		mux.HandleFunc("GET /mcp/connect/callback", s.connectCallback)
+		mux.HandleFunc("GET /mcp/connect/{id}", s.connectStart)
+		mux.HandleFunc("GET "+myConnectionsPath, s.myConnections)
+		mux.HandleFunc("POST "+myConnectionsPath+"/{server}/disconnect", s.disconnectMine)
+		s.scimRoutes(mux)
+	}
+	mux.HandleFunc("/.well-known/oauth-protected-resource/mcp/{name}", s.mcpResourceMetadata)
+	s.adminRoutes(mux)
+	s.portalRoutes(mux)
+	s.uiRoutes(mux)
+	return s.recoverer(withRequestID(withSecurityHeaders(mux)))
+}
+
+// Drain makes /readyz fail, before a graceful shutdown.
+func (s *Server) Drain() { s.draining.Store(true) }
+
+// readyz answers 200 once keys are loaded, and 503 before that and while the gateway drains.
+func (s *Server) readyz(w http.ResponseWriter, _ *http.Request) {
+	if s.draining.Load() {
+		http.Error(w, "shutting down", http.StatusServiceUnavailable)
+		return
+	}
+	if !s.ready.Load() {
+		http.Error(w, "loading keys", http.StatusServiceUnavailable)
+		return
+	}
+	_, _ = w.Write([]byte("ok"))
+}
+
+// authenticate resolves the presented key, rejecting expired keys.
+func (s *Server) authenticate(r *http.Request) (*auth.Principal, bool) {
+	p, ok := s.keys.Load().Lookup(presentedKey(r))
+	if !ok || p.Expired(time.Now()) {
+		return nil, false
+	}
+	return p, true
+}
+
+// listModels lists the virtual models the caller's key may use, in OpenAI's shape.
+func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.authenticate(r)
+	if !ok {
+		writeError(w, provider.ChatCompletions, http.StatusUnauthorized, codeInvalidKey, "missing or invalid API key")
+		return
+	}
+	data := []map[string]any{}
+	for _, name := range s.rt.Load().router.Models() {
+		if p.AllowsModel(name) {
+			data = append(data, map[string]any{"id": name, "object": "model", "created": 0, "owned_by": "genaiopengateway"})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
+}
+
+// presentedKey returns the gateway key from Authorization: Bearer or,
+// for the Anthropic and Google SDKs, x-api-key or x-goog-api-key.
+func presentedKey(r *http.Request) string {
+	if v := r.Header.Get("Authorization"); len(v) > 7 && (v[:7] == "Bearer " || v[:7] == "bearer ") {
+		return v[7:]
+	}
+	if v := r.Header.Get("X-Api-Key"); v != "" {
+		return v
+	}
+	return r.Header.Get("X-Goog-Api-Key")
+}
+
+var safeRequestID = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
+
+// withRequestID keeps a safe client-supplied x-request-id or makes one,
+// and echoes it on the response.
+func withRequestID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rid := r.Header.Get("X-Request-Id")
+		if !safeRequestID.MatchString(rid) {
+			rid = id.New("req")
+			r.Header.Set("X-Request-Id", rid)
+		}
+		w.Header().Set("X-Request-Id", rid)
+		next.ServeHTTP(w, r)
+	})
+}
+
+// withSecurityHeaders sets the headers every response gets: no MIME
+// sniffing of JSON or proxied files, and HSTS when served over HTTPS.
+func withSecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		if secure(r) {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) recoverer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if v := recover(); v != nil {
+				if v == http.ErrAbortHandler {
+					panic(v)
+				}
+				s.log.Error("panic serving request", "request_id", r.Header.Get("X-Request-Id"), "panic", fmt.Sprint(v))
+				writeError(w, provider.ChatCompletions, http.StatusInternalServerError, "internal_error", "internal error")
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
+// newUpstreamClient returns the HTTP client shared by all adapters.
+// Per-request timeouts come from each provider's config.
+func newUpstreamClient() *http.Client {
+	return &http.Client{Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          1000,
+		MaxIdleConnsPerHost:   100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: time.Second,
+	}}
+}
+
+// circuitStates is each target's breaker state for metrics.
+func (s *Server) circuitStates() map[string]float64 {
+	out := map[string]float64{}
+	for key, c := range s.routing.States() {
+		switch c.State {
+		case "open":
+			out[key] = 1
+		case "half_open":
+			out[key] = 2
+		default:
+			out[key] = 0
+		}
+	}
+	return out
+}
+
+// streamed wraps a store write so the records also go to streams once
+// they are written.
+func streamed[T any](s *Server, recordType string, write func(context.Context, []T) error) func(context.Context, []T) error {
+	return func(ctx context.Context, recs []T) error {
+		if err := write(ctx, recs); err != nil {
+			return err
+		}
+		stream.Publish(s.streams, recordType, recs)
+		return nil
+	}
+}

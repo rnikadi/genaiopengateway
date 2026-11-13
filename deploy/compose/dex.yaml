@@ -1,0 +1,29 @@
+# Dex, a local OpenID Connect provider for trying operator sign-in.
+# Used by compose.sso.yaml. Every user's password is "password".
+issuer: http://dex.localhost:5556/dex
+storage:
+  type: memory
+web:
+  http: 0.0.0.0:5556
+oauth2:
+  skipApprovalScreen: true
+staticClients:
+  - id: genaiopengateway
+    name: GenAIOpenGateway
+    secret: local-dex-client-secret
+    redirectURIs:
+      - http://localhost:8080/ui/auth/callback
+enablePasswordDB: true
+staticPasswords:
+  - email: owner@example.com
+    username: owner
+    userID: 6a1f8d5e-0000-4000-8000-000000000001
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+  - email: admin@example.com
+    username: admin
+    userID: 6a1f8d5e-0000-4000-8000-000000000002
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+  - email: viewer@example.com
+    username: viewer
+    userID: 6a1f8d5e-0000-4000-8000-000000000003
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"

@@ -1,0 +1,253 @@
+# MCP gateway
+
+The gateway puts MCP servers behind the same keys, tenancy, limits, audit and telemetry as models. Clients connect to one gateway URL per **virtual server** and see a curated set of tools from one or more upstream MCP servers. Upstream credentials never reach clients.
+
+This document is the design for v0.2. Decisions are recorded in ADRs [0011](adr/0011-mcp-scope.md), [0013](adr/0013-mcp-termination.md) and [0014](adr/0014-mcp-auth.md).
+
+## Concepts
+
+| Term | Meaning |
+| --- | --- |
+| **Upstream server** | A remote MCP server the gateway connects to over Streamable HTTP, with credentials held by the gateway. Defined in config under `mcp.servers`. |
+| **Virtual server** | What clients connect to, at `/mcp/{name}`. It exposes chosen tools, prompts and resources from one or more upstream servers. Defined under `mcp.virtual_servers`. |
+| **Tool pin** | The hash of a tool's definition (name, description, input and output schemas, annotations) as approved. A tool whose definition changes is hidden until approved again. |
+
+## What v0.2 supports
+
+- Clients on MCP protocol versions 2024-11-05 through 2026-07-28 over Streamable HTTP. The gateway runs stateless, which suits load-balanced replicas; legacy clients still work, with a short-lived session per request.
+- Upstream servers on any of those versions over Streamable HTTP. The gateway negotiates the highest common version.
+- Tools, prompts and resources (including resource templates), with listing, calling, getting and reading.
+- Several upstreams per virtual server. Tool and prompt names are prefixed (`github_search_code`) so they cannot collide; the prefix is configurable and can be empty for a single upstream.
+- Allow lists of tools per upstream within a virtual server.
+- Tool pinning against silent definition changes ("rug pulls").
+- Gateway keys and OAuth 2.1 bearer tokens for clients.
+- Static upstream credentials (headers, such as a bearer token or API key), set per upstream server.
+- From v0.3, per-user upstream credentials: each user connects their own upstream account and the gateway calls that upstream as them ([mcp-user-credentials.md](mcp-user-credentials.md)).
+- Rate limits: each `tools/call`, `prompts/get` and `resources/read` counts against the caller's RPM at org, team and key level. Listing does not.
+- An audit record per tool call, Prometheus metrics, and OpenTelemetry spans that continue the client's trace.
+
+## Not in v0.2
+
+| Feature | Why, and when |
+| --- | --- |
+| stdio servers | Supported from v0.12 as [hosted stdio servers](#hosted-stdio-servers), set in the config file. |
+| The deprecated HTTP+SSE transport | Deprecated by the spec since 2025-03-26. |
+| Elicitation and sampling | Supported from v1.4 for servers set to ask: see [Requests for input](#requests-for-input). Roots are not passed on: a remote server has no use for the client's folders. |
+| List-changed notifications | Supported from v1.4: see [Change notifications](#change-notifications). |
+| The tasks extension, completions and resource subscriptions | The MCP SDK the gateway builds on does not implement tasks yet. Long calls run within the server's `timeout`. |
+| Admin API for MCP servers | MCP servers are infrastructure, like providers, so they live in config (ADR 0003). Pins and audit are runtime data and do have admin endpoints. |
+
+## Request flow
+
+```
+client ──POST /mcp/{virtual}──▶ auth ─▶ policy ─▶ limits ─▶ route by name ─▶ upstream session ─▶ upstream server
+                                 │                                                   │
+                                 └──────────── audit record, metrics, span ◀─────────┘
+```
+
+1. **Authenticate** the `Authorization: Bearer` token as a gateway key or an OAuth access token (ADR 0014). Failure returns `401` with a `WWW-Authenticate` header that points OAuth clients at the protected resource metadata.
+2. **Authorize** the virtual server against `allowed_mcp_servers` at org, team and key level, the same way `allowed_models` works. Failure returns `403`.
+3. **Admit** `tools/call`, `prompts/get` and `resources/read` through the limiter. Failure returns a JSON-RPC error with code `-32005` and the wait in `data.retryAfterSeconds`.
+4. **Route** the prefixed name to its upstream and original name, or a resource URI to the upstream that listed it.
+5. **Call** the upstream over a pooled client session, passing `traceparent` in `_meta`.
+6. **Return** the upstream result unchanged, apart from names.
+7. **Record** the audit entry, metrics and span after the call.
+
+## Discovery and the catalog
+
+At startup and then every `mcp.refresh_interval` (default 60s), the gateway lists the tools, prompts, resources and resource templates of every upstream server. For each virtual server it builds a catalog: the allowed, approved items with names prefixed. Catalogs swap in atomically, so a request always sees one consistent view.
+
+Until an upstream's first listing succeeds, its items are absent. An upstream that cannot be reached keeps its last good catalog and is retried with backoff (1s, doubling up to the refresh interval). Its calls fail with a JSON-RPC error until it recovers, and `gog_mcp_upstream_up` drops to 0.
+
+## Tool pinning
+
+With `pin_tools: true` on an upstream (the default), the gateway hashes each tool's definition with SHA-256 over canonical JSON:
+
+- **First sight:** the tool is approved automatically and its hash recorded (trust on first use). Set `pin_tools: strict` to require approval for new tools too.
+- **Definition changed:** the tool is hidden from every virtual server, an audit entry and a warning are logged, and `gog_mcp_tools_pending_approval` rises. An admin reviews the new definition and approves it, or leaves it hidden.
+
+Pins live in the store, shared by every replica. Without a store they live in memory, so every restart is a new first sight, and `strict` is not allowed. An approval shows the tool at once on the replica that took it, and on the others after their next refresh. Changes and approvals are written to the admin audit log (`mcp_tool.changed` by `gateway`, `mcp_tool.approve` by the admin).
+
+The hash covers the whole definition except `_meta`, which carries nothing for the model and may change on every listing.
+
+## Requests for input
+
+A server can ask the client for something while it serves a call: **elicitation** asks the user (a form, or a link to open), and **sampling** asks the client's model for a completion (deprecated by MCP 2026-07-28, and still used by servers). The gateway passes these on only for servers you allow:
+
+```yaml
+mcp:
+  servers:
+    travel:
+      url: https://mcp.travel.example/mcp
+      client_requests: [elicitation, sampling]   # default: none
+```
+
+Leave it empty for servers you would not trust to ask your people questions. An elicitation is text the server wrote, shown by the user's own MCP client, so a hostile server could use it to ask for a password. Guardrails do not check these requests.
+
+How it works:
+
+- **Clients need MCP 2026-07-28 or later.** The client gets a result of type `input_required` with the server's requests, shows them, and makes the call again with the answers. Every exchange is an ordinary request, so any replica can serve it. An older client gets an error it can show: for `tools/call` a result with `isError: true`, otherwise a JSON-RPC error.
+- **Servers on 2026-07-28** ask the same way, so their requests, their request state and the client's answers pass through unchanged.
+- **Older servers** ask with a request of their own in the middle of the call. The gateway holds that call open, hands the client an `input_required` result with one request, `input`, and gives the server the answer when the client calls again. The held call lives on the replica that started it, for up to five minutes per question. With several replicas the client's next call must reach the same one, so route `/mcp/` with session affinity (by the `Authorization` header, for example) if you use such servers; a call that lands elsewhere gets an error that says to start again. Only the caller that started a call can answer it. Each held call uses a session of its own with the server.
+- A server that asks for something it is not allowed, or for the client's roots, gets no answer, and the call fails with an error that names the server.
+- Each request passed on is an [audit record](#audit-records) with the method `elicitation/create` or `sampling/createMessage`, under the tool that asked. With body logging on, the request and answer are in the logged bodies of the call.
+
+`client_requests` is for `url` servers; hosted stdio servers cannot ask.
+
+## Change notifications
+
+A client on MCP 2026-07-28 can open a `subscriptions/listen` stream on a virtual server. The gateway then sends `notifications/tools/list_changed`, `notifications/prompts/list_changed` and `notifications/resources/list_changed` when what that virtual server lists changes: an upstream added or removed something, a tool was approved or hidden by pinning, or the configuration changed. The gateway learns of upstream changes at its next refresh (`mcp.refresh_interval`), so a notification follows a change within that time.
+
+A stream is closed after 30 minutes, and the client opens a new one, which checks its credentials again. Each replica serves up to 2,000 streams. Older clients cannot be notified by a stateless server; they see changes through `ttlMs` on list results and by listing again.
+
+## Upstream sessions
+
+The gateway keeps one client session per upstream server per replica, shared by every client, because static upstream credentials are per server, not per user. A server with `user_auth` gets one session per user instead ([mcp-user-credentials.md](mcp-user-credentials.md#calls-with-a-users-token)). Calls on a shared session are independent, which matches stateless servers and the way remote MCP servers are used for tools. When a call was never delivered, because the upstream expired the session (`404`) or the session had closed, the session is re-established and the call retried once. A call that may have reached the upstream is never retried, since tools can have side effects.
+
+## Hosted stdio servers
+
+From v0.12 the gateway can run a stdio MCP server itself, for servers that ship only as a local program. Give the server a `command` instead of a `url`:
+
+```yaml
+mcp:
+  servers:
+    filesystem:
+      command: [/opt/mcp/mcp-server-filesystem, /srv/shared]
+      env:
+        LOG_LEVEL: info
+        API_TOKEN: ${FS_API_TOKEN}   # expanded from the gateway's environment
+      dir: /srv                       # working directory; default: the gateway's
+      timeout: 30s
+```
+
+- Each replica starts the program on first use and talks to it over stdin and stdout. It is one shared session, like a server with static credentials. If the program exits, the next call starts it again.
+- The program sees only `PATH`, `HOME` and the variables in `env`. The gateway's own environment, with its provider keys and admin token, is not passed on.
+- Lines the program writes to stderr are logged as warnings with the server's name, each cut at 1 KiB.
+- `command`, `env` and `dir` can be set only in the config file. The admin API, `gogctl import` and the Terraform provider refuse them, so an operator with write access to MCP servers cannot run programs on the gateway's host.
+- `headers` and `user_auth` cannot be used with `command`; pass credentials through `env`.
+- Everything else works as for HTTP servers: virtual servers, prefixes, allow lists, pinning, guardrails, audit and metrics.
+
+The official container image is distroless and has no shell, Node.js or Python, so `npx` and `uvx` servers need an image built on it with the runtime added, or a static binary mounted into the container. The program runs as the gateway's user with the gateway's network access: run only programs you trust, and prefer a separate container with a stdio-to-HTTP bridge for anything that needs stronger isolation.
+
+## Audit records
+
+One row per `tools/call`, `prompts/get` and `resources/read`, and per request refused with `403`, written asynchronously like usage records (lost records count in `gog_usage_write_errors_total`):
+
+`id`, `ts`, `org_id`, `team_id`, `key_id`, `subject` (the OAuth `sub`, when present), `virtual_server`, `server`, `method`, `name` (tool, prompt or resource URI), `status` (`ok`, `tool_error`, `error`, `denied`, `rate_limited`), `error_code`, `latency_ms`, `request_id`.
+
+Arguments and results are not stored. Opt-in body capture arrives with redaction in v0.3.
+
+## Observability
+
+| Metric | Type | Labels |
+| --- | --- | --- |
+| `gog_mcp_requests_total` | counter | `virtual_server`, `method`, `status` |
+| `gog_mcp_request_duration_seconds` | histogram | `virtual_server`, `method` |
+| `gog_mcp_tool_calls_total` | counter | `server`, `tool`, `status` |
+| `gog_mcp_upstream_up` | gauge | `server` |
+| `gog_mcp_tools_pending_approval` | gauge | `server` |
+
+Spans: `mcp.request` (server) per client request with a `mcp.upstream` (client) child, using the OpenTelemetry MCP conventions: `mcp.method.name`, `gen_ai.tool.name`, `mcp.protocol.version`, plus `gog.virtual_server`, `gog.mcp_server`, `gog.org_id`, `gog.team_id`. A `traceparent` in the client's `_meta` or HTTP headers is continued.
+
+## Configuration
+
+```yaml
+mcp:
+  public_url: https://gateway.example.com   # used in OAuth metadata; required for OAuth
+  refresh_interval: 60s
+  servers:
+    github:
+      url: https://api.githubcopilot.com/mcp/
+      headers:
+        Authorization: Bearer ${GITHUB_MCP_TOKEN}
+      timeout: 60s                          # per call; default 60s
+      pin_tools: true                       # true (default) | strict | false
+      client_requests: []                   # elicitation, sampling: what the server may ask the client; see Requests for input
+    linear:
+      url: https://mcp.linear.app/mcp
+      user_auth:                            # call with each user's own token; see mcp-user-credentials.md
+        client_id: ${LINEAR_CLIENT_ID}
+        client_secret: ${LINEAR_CLIENT_SECRET}
+        scopes: [read, write]
+    docs:
+      url: https://mcp.internal.example.com/mcp
+  virtual_servers:
+    engineering:
+      description: Code search and internal docs
+      guardrails: [no-secrets]                      # checks tool arguments and results (guardrails.md)
+      servers:
+        - server: github
+          tools: [search_code, get_file_contents]   # omit for every tool
+          prefix: github                            # default: the server name
+        - server: docs
+          prompts: false                            # omit prompts from this upstream
+          resources: false                          # omit resources and templates
+  oauth:                                    # optional; needs a store; see below
+    issuer: https://login.example.com/
+    # jwks_url: https://login.example.com/keys  # default: discovered from the issuer
+    audience: api://genaiopengateway        # optional; accepted besides each server's URL
+    organization: org_01J...                # tokens map into this organization
+    team_claim: groups                      # a claim value naming a team in that organization
+    scopes: [mcp]                           # required scopes; advertised in metadata
+```
+
+### OAuth
+
+With `mcp.oauth` set, MCP endpoints accept access tokens from the company's identity provider besides gateway keys. The gateway is a resource server only (ADR 0014):
+
+- A request without valid credentials gets `401` with `WWW-Authenticate: Bearer resource_metadata="{public_url}/.well-known/oauth-protected-resource/mcp/{name}", scope="…"`. MCP clients follow it to the identity provider.
+- Tokens must be JWTs signed with RS, PS, ES or EdDSA algorithms by a key in the issuer's JWKS, which is discovered from `/.well-known/openid-configuration` or RFC 8414 metadata, cached, and refetched hourly or when a token names an unknown key (at most every 30 seconds).
+- `iss` must equal `issuer`; `exp` is required; one minute of clock skew is allowed. `aud` must name the virtual server (`{public_url}/mcp/{name}`, with or without a trailing slash) or `audience`. Every scope in `scopes` must be in `scope` or `scp`, or the request gets `403` with `error="insufficient_scope"`. `sub` is required and recorded in audit records and logs.
+- The token maps to `organization` and to the first value of `team_claim` (a string or a list) that names a team of that organization, by name or id. A token that names no such team gets `403`. Org and team policies, including `allowed_mcp_servers` and RPM, apply; there is no key level.
+
+Key, team and org policies gain `allowed_mcp_servers`, a list of virtual server names. An empty list allows all, as with `allowed_models`. Teams can ask for servers they lack in the [catalog](mcp-catalog.md), and [Cedar policies](cedar.md) can restrict individual tools.
+
+## API additions
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /mcp/{virtual_server}` | MCP Streamable HTTP endpoint |
+| `GET /.well-known/oauth-protected-resource/mcp/{virtual_server}` | RFC 9728 protected resource metadata, when OAuth is configured |
+| `GET /admin/v1/mcp/servers` | Upstream status: up or down, protocol version, counts, last refresh |
+| `GET /admin/v1/mcp/tools?server=&status=` | Tools with pin status: `approved`, `pending`, `changed` |
+| `POST /admin/v1/mcp/servers/{server}/tools/{tool}/approve` | Approve the current definition. The body, `{"hash": "…"}`, carries the hash shown, so an admin approves what they saw; a definition that changed since answers `409`. |
+| `GET /admin/v1/mcp/calls?org_id=&team_id=&key_id=&server=&from=&to=` | Audit records, newest first, paginated |
+| `GET /mcp/connect/{id}`, `GET /mcp/connect/callback` | The browser side of the connect flow for `user_auth` servers |
+| `GET /mcp/connections`, `POST /mcp/connections/{server}/disconnect` | The page where users see and disconnect their own `user_auth` connections ([details](mcp-user-credentials.md#admin-api-and-ui)) |
+| `GET /admin/v1/mcp/connections?server=&subject=` | Users' connections to `user_auth` servers, without tokens (owners only) |
+| `DELETE /admin/v1/mcp/connections/{server}/{subject}` | Revoke a connection at the upstream when it can, and delete it (owners only, audited) |
+
+## Errors
+
+Protocol-level failures use HTTP status codes, so any client or proxy can see them. Failures inside a valid request use JSON-RPC errors.
+
+| Case | Response |
+| --- | --- |
+| Missing or invalid credentials | HTTP `401`, `WWW-Authenticate: Bearer resource_metadata="…"` |
+| Virtual server not allowed for this key | HTTP `403` |
+| Unknown virtual server | HTTP `404` |
+| Rate limited | JSON-RPC error `-32005` (in the implementation-defined range) with `data.retryAfterSeconds` |
+| Unknown or hidden tool | JSON-RPC error `-32602` (invalid params), as the spec prescribes |
+| Upstream unreachable or timed out | JSON-RPC error `-32603` with `data.server` |
+| Tool returned an error | Passed through as a result with `isError: true` |
+| The user has not connected a `user_auth` server | JSON-RPC error `-32042` (URL elicitation required) with the connect link, or for `tools/call` from clients before 2025-11-25 a result with `isError: true` and the link |
+| A server asks for input that cannot be passed on (the client is older than 2026-07-28, or the server is not set to ask) | For `tools/call` a result with `isError: true`; otherwise JSON-RPC error `-32600` |
+| A held call is answered too late, twice, by another caller or on another replica | JSON-RPC error `-32602` that says to make the call again |
+| A gateway key calls a `user_auth` server | JSON-RPC error `-32600`: these servers need an OAuth caller |
+
+## Security
+
+The threats listed in [security.md](security.md) and their controls in v0.2:
+
+| Threat | Control |
+| --- | --- |
+| Token passthrough: a client token forwarded to an upstream, or an upstream accepting tokens minted for someone else | Client credentials are never forwarded. Upstreams receive only the credentials configured for them. OAuth tokens are checked for the gateway's own audience. |
+| Tool poisoning through a malicious description | Admins choose which servers and tools each virtual server exposes; pinning makes descriptions reviewable. |
+| A server phishes users through elicitation, or spends the client's model through sampling | Both are refused unless `client_requests` allows them for that server, and each one passed on is audited. |
+| Rug pull: a tool definition changes after approval | Pinning hides changed tools until approved again. |
+| Name collision or shadowing across servers | Per-upstream prefixes; a collision within a virtual server fails config validation. |
+| Confused deputy | The gateway does not run an OAuth proxy or dynamic client registration; it is only a resource server. |
+| DNS rebinding and cross-origin requests to the gateway | Bearer authentication on every request. The gateway sends no CORS headers, so a page on another origin cannot make an authenticated request. |
+| SSRF through upstream URLs | Upstream URLs come only from operator config. |
+| Prompt injection in tool output | Out of scope for the transport; `tool_output` [guardrails](guardrails.md) on a virtual server check results with a classifier or webhook from v0.5. Audit makes every call traceable. |
+| Denial of service through slow or huge upstream responses | Per-server timeouts and a 4 MiB request body limit. |

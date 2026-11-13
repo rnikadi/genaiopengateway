@@ -1,0 +1,150 @@
+import { guardrailColumns } from './guardrails.js';
+import { html, useState, useEffect, api, qs, useLoad, useSession, PageHeader, OrgPicker, defaultOrg, Table, Loading, ErrorBox, JSONView, Modal, Field, when, usd, num, Ago, Tabs } from '../lib.js';
+
+// Requests lists recent model requests; those with a logged body link to
+// it (docs/body-logging.md).
+export function Requests({ params }) {
+  const s = useSession();
+  const [org, setOrg] = useState(params.get('org') ?? defaultOrg(s));
+  const [list, setList] = useState({ items: [], more: false, loading: true });
+  const [error, setError] = useState(null);
+  const [erasing, setErasing] = useState(false);
+  const [tab, setTab] = useState(params.get('tab') || 'served');
+
+  const load = async (after) => {
+    setError(null);
+    try {
+      const d = await api('GET', '/admin/v1/requests' + qs({ org_id: org, limit: 50, after }));
+      setList((l) => ({ items: after ? [...l.items, ...d.data] : d.data, more: d.has_more, loading: false }));
+    } catch (err) {
+      setError(err);
+      setList((l) => ({ ...l, loading: false }));
+    }
+  };
+  useEffect(() => {
+    setList({ items: [], more: false, loading: true });
+    load();
+  }, [org]);
+
+  const body = (r) => {
+    if (!r.has_body) return html`<span class="muted">—</span>`;
+    if (!s.can('bodies.read', r.org_id, r.team_id)) return html`<span class="muted small" title="Reading bodies needs the bodies.read permission">Logged</span>`;
+    return html`<a href=${`#/requests/${encodeURIComponent(r.request_id)}`}>View</a>`;
+  };
+
+  return html`
+    <${PageHeader} title="Requests" sub="Recent model requests, newest first. Bodies are stored only where a policy turns on log_bodies.">
+      ${s.owner && html`<button class="secondary" onClick=${() => setErasing(true)}>Delete logged bodies</button>`}
+    <//>
+    <div class="filters"><${OrgPicker} value=${org} onChange=${setOrg} /></div>
+    <${Tabs} tabs=${{ served: 'Served', refused: 'Refused' }} value=${tab} onChange=${setTab} />
+    ${erasing && html`<${EraseBodies} initialOrg=${org} onClose=${() => setErasing(false)} onDone=${() => load()} />`}
+    ${tab === 'refused' ? html`<${Refused} org=${org} />` : html`<${ErrorBox} error=${error} />
+    ${list.loading ? html`<p class="muted">Loading…</p>` : html`<${Table}
+      rows=${list.items}
+      rowKey=${(r) => r.org_id + r.request_id}
+      empty="No requests yet."
+      columns=${[
+        { label: 'Time', render: (r) => html`<${Ago} t=${r.ts} />` },
+        { label: 'Model', render: (r) => r.model },
+        { label: 'Status', render: (r) => html`<span class=${'badge ' + (r.status === 200 ? 'good' : 'bad')}>${r.status}</span>${r.cache_hit && html` <span class="badge" title="Answered from the response cache">Cached</span>`}` },
+        { label: 'Tokens', num: true, render: (r) => `${num(r.input_tokens)} / ${num(r.output_tokens)}` },
+        { label: 'Cost', num: true, render: (r) => usd(r.cost_usd) },
+        { label: 'Latency', num: true, render: (r) => `${num(r.latency_ms)} ms` },
+        { label: 'Body', render: body },
+      ]}
+    />`}
+    ${list.more && html`<p class="center"><button class="secondary" onClick=${() => load(list.items[list.items.length - 1].request_id)}>Load more</button></p>`}`}`;
+}
+
+// Refused lists requests a policy, limit or guardrail refused, each
+// with a link to why (docs/why-denied.md).
+function Refused({ org }) {
+  const [list, setList] = useState({ items: [], more: false, loading: true });
+  const [error, setError] = useState(null);
+  const load = async (after) => {
+    setError(null);
+    try {
+      const d = await api('GET', '/admin/v1/denials' + qs({ org_id: org, limit: 50, after }));
+      setList((l) => ({ items: after ? [...l.items, ...d.data] : d.data, more: d.has_more, loading: false }));
+    } catch (err) {
+      setError(err);
+      setList((l) => ({ ...l, loading: false }));
+    }
+  };
+  useEffect(() => {
+    setList({ items: [], more: false, loading: true });
+    load();
+  }, [org]);
+  return html`<${ErrorBox} error=${error} />
+    ${list.loading ? html`<p class="muted">Loading…</p>` : html`<${Table} rows=${list.items} rowKey=${(r) => r.request_id}
+      empty="No refused requests. Requests a policy, limit, Cedar rule or guardrail refuses are listed here."
+      columns=${[
+        { label: 'Time', render: (r) => html`<${Ago} t=${r.ts} />` },
+        { label: 'Model', render: (r) => r.model },
+        { label: 'Status', render: (r) => html`<span class="badge bad">${r.status}</span> <code class="small">${r.code}</code>` },
+        { label: 'Reason', render: (r) => html`<span class="small">${r.reason}</span>` },
+        { label: html`<span class="sr-only">Explain</span>`, render: (r) => html`<a href=${'#/explain?request_id=' + encodeURIComponent(r.request_id)}>Why?</a>` },
+      ]} />`}
+    ${list.more && html`<p class="center"><button class="secondary" onClick=${() => load(list.items[list.items.length - 1].request_id)}>Load more</button></p>`}`;
+}
+
+// EraseBodies deletes an organization's logged bodies before a date, for
+// erasure requests (owners; audited).
+function EraseBodies({ initialOrg, onClose, onDone }) {
+  const s = useSession();
+  const [org, setOrg] = useState(initialOrg || Object.keys(s.orgNames)[0] || '');
+  const [before, setBefore] = useState(new Date(Date.now() + 86400000).toISOString().slice(0, 10));
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const go = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const d = await api('DELETE', '/admin/v1/requests' + qs({ org_id: org, before: new Date(before + 'T00:00:00Z').toISOString() }));
+      setResult(d.deleted);
+      onDone();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return html`<${Modal} title="Delete logged bodies" onClose=${onClose}>
+    <form class="form" onSubmit=${go}>
+      <${ErrorBox} error=${error} />
+      <${Field} label="Organization"><select value=${org} onChange=${(e) => setOrg(e.target.value)}>${Object.entries(s.orgNames).map(([id, name]) => html`<option value=${id}>${name}</option>`)}</select><//>
+      <${Field} label="Logged before" hint="Midnight UTC at the start of this day. Usage records stay; only the request and response bodies are deleted. This cannot be undone."><input type="date" required value=${before} onInput=${(e) => setBefore(e.target.value)} /><//>
+      ${result !== null && html`<p class="notice">Deleted ${num(result)} logged ${result === 1 ? 'body' : 'bodies'}.</p>`}
+      <footer>
+        <button type="button" class="secondary" onClick=${onClose}>${result === null ? 'Cancel' : 'Close'}</button>
+        ${result === null && html`<button type="submit" class="danger" disabled=${busy || !org}>Delete bodies</button>`}
+      </footer>
+    </form>
+  <//>`;
+}
+
+// RequestBody shows one logged body. Opening it is audited.
+export function RequestBody({ args: [id] }) {
+  const state = useLoad(() => api('GET', `/admin/v1/requests/${encodeURIComponent(id)}`), [id]);
+  const events = useLoad(() => api('GET', '/admin/v1/guardrail-events' + qs({ request_id: id, limit: 100 })), [id]);
+  return html`
+    <${PageHeader} title="Request" sub=${id}>
+      <a class="button secondary" href="#/requests">Back to requests</a>
+    <//>
+    <${Loading} state=${state}>${(b) => {
+      const redactions = Object.entries(b.redactions || {});
+      const redacted = redactions.length ? `Redacted: ${redactions.map(([k, n]) => `${n} ${k}`).join(', ')}.` : 'Nothing was redacted.';
+      return html`
+        <p class="muted">
+          ${when(b.ts)} · <code>${b.endpoint}</code> · key <code>${b.key_id}</code>
+          ${b.truncated && html` · <span class="badge warn">Truncated</span>`}
+        </p>
+        <p class="notice">${`Content is shown as stored, redacted before it was written. ${redacted} This view is recorded in the audit log.`}</p>
+        <section class="panel"><h2>Request</h2><${JSONView} value=${b.request} /></section>
+        <section class="panel"><h2>Response</h2><${JSONView} value=${b.response} /></section>
+        ${events.data?.data?.length > 0 && html`<section class="panel"><h2>Guardrails</h2><${Table} rows=${events.data.data} rowKey=${(e) => e.id} columns=${guardrailColumns} /></section>`}`;
+    }}<//>`;
+}

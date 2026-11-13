@@ -1,0 +1,33 @@
+name: scorecard
+
+# OpenSSF Scorecard (https://scorecard.dev) checks the project's security
+# practices. Results go to the repository's code scanning alerts and to
+# the public badge in the README.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "41 4 * * 1"
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  analysis:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write # upload the results to code scanning
+      id-token: write # publish the results for the badge
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ossf/scorecard-action@v2
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif

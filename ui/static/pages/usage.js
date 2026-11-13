@@ -1,0 +1,123 @@
+import {
+  html, useState, api, useLoad, useSession, Loading, Table, Bars, Columns, PageHeader, OrgPicker, defaultOrg, Card,
+  periods, usageQuery, totals, qs, downloadCSV, usd, num, compact, endpointNames, mediaSummary,
+} from '../lib.js';
+
+const groups = { model: 'Model', team: 'Team', key: 'Key', day: 'Day', provider: 'Provider', endpoint: 'Endpoint' };
+
+function exportURL(f, format) {
+  const [from, to] = periods[f.period][1]();
+  return '/admin/v1/usage/export' + qs({ format, org_id: f.org, team_id: f.team, from: from.toISOString(), to: to?.toISOString() });
+}
+
+export function Usage({ params }) {
+  const s = useSession();
+  const [f, setF] = useState({
+    org: params.get('org') ?? defaultOrg(s),
+    team: params.get('team') ?? '',
+    group_by: params.get('group_by') ?? 'model',
+    period: periods[params.get('period')] ? params.get('period') : 'month',
+  });
+  const set = (k) => (v) => setF({ ...f, [k]: v, ...(k === 'org' ? { team: '' } : {}) });
+
+  const teams = useLoad(async () => (f.org ? (await api('GET', `/admin/v1/orgs/${encodeURIComponent(f.org)}/teams?limit=500`)).data : []), [f.org]);
+  const state = useLoad(() => api('GET', usageQuery(f)), [f.org, f.team, f.group_by, f.period]);
+  const forecast = useLoad(() => api('GET', '/admin/v1/usage/forecast' + qs({ org_id: f.org })).catch(() => ({ data: [] })), [f.org]);
+
+  // Rows grouped by team or key show names where this page knows them.
+  const names = { ...s.orgNames, ...Object.fromEntries((teams.data || []).map((t) => [t.id, t.name])) };
+  const label = (g) => names[g] || (f.group_by === 'endpoint' && endpointNames[g]) || g;
+
+  const csv = (rows) =>
+    downloadCSV(
+      `usage-${f.group_by}-${f.period}.csv`,
+      [f.group_by, 'requests', 'input_tokens', 'output_tokens', 'cached_input_tokens', 'reasoning_tokens', 'images', 'characters', 'audio_seconds', 'video_seconds', 'cost_usd', 'cache_hits', 'saved_usd'],
+      rows.map((r) => [r.group, r.requests, r.input_tokens, r.output_tokens, r.cached_input_tokens, r.reasoning_tokens, r.images, r.characters, r.audio_seconds, r.video_seconds, r.cost_usd, r.cache_hits, r.saved_usd]),
+    );
+
+  return html`
+    <${PageHeader} title="Usage and cost" sub="Requests, tokens and spend, in UTC. Spend uses the prices configured on each model." />
+    <div class="filters">
+      <${OrgPicker} value=${f.org} onChange=${set('org')} />
+      ${f.org && html`<label class="inline"><span>Team</span>
+        <select value=${f.team} onChange=${(e) => set('team')(e.target.value)}>
+          <option value="">All teams</option>
+          ${(teams.data || []).map((t) => html`<option key=${t.id} value=${t.id}>${t.name}</option>`)}
+        </select></label>`}
+      <label class="inline"><span>Period</span>
+        <select value=${f.period} onChange=${(e) => set('period')(e.target.value)}>
+          ${Object.entries(periods).map(([k, [l]]) => html`<option key=${k} value=${k}>${l}</option>`)}
+        </select></label>
+      <label class="inline"><span>Group by</span>
+        <select value=${f.group_by} onChange=${(e) => set('group_by')(e.target.value)}>
+          ${Object.entries(groups).map(([k, l]) => html`<option key=${k} value=${k}>${l}</option>`)}
+        </select></label>
+    </div>
+    <${Loading} state=${state}>${(d) => {
+      const t = totals(d.data);
+      const items = d.data.map((r) => ({ label: f.group_by === 'day' ? r.group : label(r.group), value: r.cost_usd }));
+      return html`
+        <div class="cards">
+          <${Card} label="Spend" value=${usd(t.cost_usd)} />
+          <${Card} label="Requests" value=${num(t.requests)} />
+          <${Card} label="Input tokens" value=${compact(t.input_tokens)} sub=${`${compact(t.cached_input_tokens)} cached`} />
+          <${Card} label="Output tokens" value=${compact(t.output_tokens)} sub=${`${compact(t.reasoning_tokens)} reasoning`} />
+          ${mediaSummary(t) && html`<${Card} label="Media" value=${mediaSummary(t)} />`}
+          ${t.cache_hits > 0 && html`<${Card} label="Cache saved" value=${usd(t.saved_usd)} sub=${`${num(t.cache_hits)} answer${t.cache_hits === 1 ? '' : 's'} from the cache`} />`}
+        </div>
+        <section class="panel">
+          <h2>Spend by ${groups[f.group_by].toLowerCase()}</h2>
+          ${f.group_by === 'day' ? html`<${Columns} items=${items} format=${usd} />` : html`<${Bars} items=${[...items].sort((a, b) => b.value - a.value).slice(0, 15)} format=${usd} />`}
+        </section>
+        <${Forecasts} rows=${(forecast.data?.data || []).filter((x) => !f.team || x.team_id === f.team)} />
+        <section class="panel">
+          <div class="panel-header"><div><h2>Exports for finance</h2>
+            <p class="muted small">The whole period as CSV, for ${f.team ? 'this team' : f.org ? 'this organization' : 'every organization'}. The chargeback statement has one line per team with its share of the total. FOCUS has one line per day, team and model in the FinOps FOCUS columns that cost tools import.</p></div>
+            <div class="row-actions"><a class="button secondary" href=${exportURL(f, 'chargeback')} download>Chargeback CSV</a>
+            <a class="button secondary" href=${exportURL(f, 'focus')} download>FOCUS CSV</a></div></div>
+        </section>
+        <section class="panel">
+          <div class="panel-header"><h2>Details</h2>${d.data.length > 0 && html`<button class="secondary" onClick=${() => csv(d.data)}>Download CSV</button>`}</div>
+          <${Table}
+            rowKey=${(r) => r.group}
+            rows=${f.group_by === 'day' ? d.data : [...d.data].sort((a, b) => b.cost_usd - a.cost_usd)}
+            empty="No usage in this period."
+            columns=${[
+              { label: groups[f.group_by], render: (r) => (f.group_by === 'team' && names[r.group] ? html`<a href=${`#/teams/${encodeURIComponent(r.group)}`}>${label(r.group)}</a>` : label(r.group)) },
+              { label: 'Requests', num: true, render: (r) => num(r.requests) },
+              { label: 'Input tokens', num: true, render: (r) => num(r.input_tokens) },
+              { label: 'Cached', num: true, render: (r) => num(r.cached_input_tokens) },
+              { label: 'Output tokens', num: true, render: (r) => num(r.output_tokens) },
+              ...(d.data.some((r) => mediaSummary(r)) ? [{ label: 'Media', render: (r) => html`<span class="small">${mediaSummary(r)}</span>` }] : []),
+              { label: 'Spend', num: true, render: (r) => usd(r.cost_usd) },
+              ...(t.cache_hits > 0 ? [
+                { label: 'Cache hits', num: true, render: (r) => num(r.cache_hits) },
+                { label: 'Saved', num: true, render: (r) => usd(r.saved_usd) },
+              ] : []),
+            ]}
+          />
+        </section>`;
+    }}<//>`;
+}
+
+
+// Forecasts shows where each monthly budget is heading (docs/forecast.md).
+function Forecasts({ rows }) {
+  if (!rows.length) return null;
+  const outlook = (r) => (r.exhausted ? html`<span class="badge bad">Budget used up</span>`
+    : r.exhausts_at ? html`<span class="badge warn">Runs out ${new Date(r.exhausts_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' })}</span>`
+    : html`<span class="badge good">Lasts the month</span>`);
+  return html`<section class="panel">
+    <h2>Budget forecast</h2>
+    <p class="muted small">Each monthly budget, projected to the end of the month at the last 7 days' average spend per day.</p>
+    <${Table} rowKey=${(r) => r.org_id + (r.team_id || '')} rows=${rows} empty="No monthly budgets."
+      columns=${[
+        { label: 'Budget of', render: (r) => (r.team_id ? html`<a href=${`#/teams/${encodeURIComponent(r.team_id)}`}>${r.team_name}</a>` : html`${r.org_name} <span class="muted small">(organization)</span>`) },
+        { label: 'Spent', num: true, render: (r) => usd(r.spent_usd) },
+        { label: 'Per day', num: true, render: (r) => usd(r.daily_usd) },
+        { label: 'Projected', num: true, render: (r) => usd(r.projected_usd) },
+        { label: 'Budget', num: true, render: (r) => usd(r.budget_usd) },
+        { label: 'Outlook', render: outlook },
+      ]} />
+  </section>`;
+}

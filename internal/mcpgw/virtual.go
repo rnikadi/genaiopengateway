@@ -1,0 +1,667 @@
+package mcpgw
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"hash"
+	"reflect"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/rnikadi/genaiopengateway/internal/config"
+	"github.com/rnikadi/genaiopengateway/internal/guardrail"
+	"github.com/rnikadi/genaiopengateway/internal/id"
+	"github.com/rnikadi/genaiopengateway/internal/limits"
+	"github.com/rnikadi/genaiopengateway/internal/store"
+	"github.com/rnikadi/genaiopengateway/internal/telemetry"
+)
+
+// toolName is the alphabet and length the MCP spec allows for names.
+var toolName = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}$`)
+
+// buildServer makes the MCP server for one virtual server from the
+// catalogs of its upstreams. Items that are not allowed, or that would
+// clash with an item already added, are left out.
+func (g *Gateway) buildServer(name string, vs config.VirtualServer) (*mcp.Server, listHashes) {
+	s := mcp.NewServer(&mcp.Implementation{Name: "genaiopengateway/" + name, Version: Version}, &mcp.ServerOptions{
+		Instructions: vs.Description,
+		// Advertised even when empty, so a client keeps listing as
+		// upstreams come and go. Clients that listen are told of changes
+		// (listen.go).
+		Capabilities: &mcp.ServerCapabilities{
+			Tools:     &mcp.ToolCapabilities{ListChanged: true},
+			Prompts:   &mcp.PromptCapabilities{ListChanged: true},
+			Resources: &mcp.ResourceCapabilities{ListChanged: true},
+		},
+		Logger: g.opts.Log,
+	})
+	s.AddReceivingMiddleware(g.middleware(name))
+	log := g.opts.Log.With("virtual_server", name)
+	tools, prompts, uris := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	var listed [3]hash.Hash
+	for i := range listed {
+		listed[i] = sha256.New()
+	}
+	note := func(kind int, v any) {
+		raw, _ := json.Marshal(v)
+		listed[kind].Write(raw)
+		listed[kind].Write([]byte{0})
+	}
+	for _, ref := range vs.Servers {
+		u := g.upstreams[ref.Server]
+		prefix := ref.NamePrefix()
+		c := u.catalog.Load()
+		if u.perUser() && (c == nil || len(c.Tools) == 0) && !tools[prefix+"connect"] {
+			// Nobody has connected the server, so it cannot be listed, or
+			// it shows anonymous callers no tools: offer a tool that starts
+			// the connect flow.
+			s.AddTool(&mcp.Tool{
+				Name:        prefix + "connect",
+				Description: "Connect your " + u.name + " account to the gateway, so that its tools become available.",
+				InputSchema: &jsonschema.Schema{Type: "object"},
+			}, g.connectTool(u))
+			tools[prefix+"connect"] = true
+			note(listTools, prefix+"connect")
+		}
+		if c == nil {
+			continue
+		}
+		allowed := map[string]bool{}
+		for _, t := range ref.Tools {
+			allowed[t] = true
+		}
+		for _, t := range c.Tools {
+			if (ref.Tools != nil && !allowed[t.Name]) || c.hidden[t.Name] {
+				continue
+			}
+			exposed := prefix + t.Name
+			if !toolName.MatchString(exposed) || tools[exposed] {
+				log.Warn("skipping MCP tool with an invalid or clashing name", "server", u.name, "tool", t.Name, "name", exposed)
+				continue
+			}
+			tt := *t
+			tt.Name = exposed
+			if err := addTool(s, &tt, g.forwardTool(u, t.Name)); err != nil {
+				log.Warn("skipping invalid MCP tool", "server", u.name, "tool", t.Name, "err", err)
+				continue
+			}
+			tools[exposed] = true
+			note(listTools, &tt)
+		}
+		if ref.ExposesPrompts() {
+			for _, p := range c.Prompts {
+				exposed := prefix + p.Name
+				if !toolName.MatchString(exposed) || prompts[exposed] {
+					log.Warn("skipping MCP prompt with an invalid or clashing name", "server", u.name, "prompt", p.Name, "name", exposed)
+					continue
+				}
+				pp := *p
+				pp.Name = exposed
+				s.AddPrompt(&pp, g.forwardPrompt(u, p.Name))
+				prompts[exposed] = true
+				note(listPrompts, &pp)
+			}
+		}
+		if ref.ExposesResources() {
+			read := g.forwardRead(u)
+			for _, r := range c.Resources {
+				if uris[r.URI] || !absoluteURI(r.URI) {
+					log.Warn("skipping MCP resource with an invalid or clashing URI", "server", u.name, "uri", r.URI)
+					continue
+				}
+				s.AddResource(r, read)
+				uris[r.URI] = true
+				note(listResources, r)
+			}
+			for _, t := range c.Templates {
+				if uris[t.URITemplate] {
+					log.Warn("skipping MCP resource template with a clashing URI", "server", u.name, "uri_template", t.URITemplate)
+					continue
+				}
+				if err := addTemplate(s, t, read); err != nil {
+					log.Warn("skipping invalid MCP resource template", "server", u.name, "uri_template", t.URITemplate, "err", err)
+					continue
+				}
+				uris[t.URITemplate] = true
+				note(listResources, t)
+			}
+		}
+	}
+	var hashes listHashes
+	for i := range listed {
+		listed[i].Sum(hashes[i][:0])
+	}
+	return s, hashes
+}
+
+// addTool adds a tool, turning the SDK's panic on an invalid definition
+// into an error: definitions come from upstreams the gateway does not
+// control.
+func addTool(s *mcp.Server, t *mcp.Tool, h mcp.ToolHandler) (err error) {
+	defer func() {
+		if v := recover(); v != nil {
+			err = fmt.Errorf("%v", v)
+		}
+	}()
+	s.AddTool(t, h)
+	return nil
+}
+
+func addTemplate(s *mcp.Server, t *mcp.ResourceTemplate, h mcp.ResourceHandler) (err error) {
+	defer func() {
+		if v := recover(); v != nil {
+			err = fmt.Errorf("%v", v)
+		}
+	}()
+	s.AddResourceTemplate(t, h)
+	return nil
+}
+
+func absoluteURI(uri string) bool {
+	scheme, _, ok := strings.Cut(uri, ":")
+	return ok && scheme != ""
+}
+
+// call is what the gateway learns about one request while serving it,
+// and what the middleware knows that handlers need.
+type call struct {
+	Server    string
+	Name      string
+	ErrorCode int64
+
+	caller          *Caller
+	virtualServer   string
+	protocolVersion string
+	// held is set while the upstream call is held open for the server's
+	// requests (relay.go).
+	held *held
+}
+
+type callKey struct{}
+
+func callFrom(ctx context.Context) *call {
+	c, _ := ctx.Value(callKey{}).(*call)
+	if c == nil {
+		return &call{}
+	}
+	return c
+}
+
+func (g *Gateway) forwardTool(u *upstream, name string) mcp.ToolHandler {
+	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		c := callFrom(ctx)
+		c.Server, c.Name = u.name, name
+		args := any(req.Params.Arguments)
+		if g.opts.Authorize != nil {
+			if denied := g.opts.Authorize(ctx, c.caller, u.name, name); denied != "" {
+				g.opts.Metrics.ObserveMCPToolCall(u.name, name, telemetry.MCPDenied)
+				return blockedResult("Tool " + name + " is not permitted: " + denied + "."), nil
+			}
+		}
+		if g.opts.Guard != nil {
+			var blocked string
+			if args, blocked = g.guardArguments(ctx, c, req.Params.Arguments); blocked != "" {
+				g.opts.Metrics.ObserveMCPToolCall(u.name, name, telemetry.MCPToolError)
+				return blockedResult(blocked), nil
+			}
+		}
+		in := input{responses: req.Params.InputResponses, state: req.Params.RequestState}
+		res, need, err := converse(ctx, g, u, "tools/call", name, in,
+			func(ctx context.Context, cs *mcp.ClientSession, meta mcp.Meta) (*mcp.CallToolResult, error) {
+				return cs.CallTool(ctx, &mcp.CallToolParams{Meta: meta, Name: name, Arguments: args, InputResponses: in.responses, RequestState: in.state})
+			},
+			func(r *mcp.CallToolResult) (bool, mcp.InputRequestMap, string) {
+				return r != nil && r.NeedsInput(), r.InputRequests, r.RequestState
+			})
+		var ie *inputError
+		if errors.As(err, &ie) {
+			g.opts.Metrics.ObserveMCPToolCall(u.name, name, telemetry.MCPToolError)
+			return blockedResult(ie.msg), nil
+		}
+		if need != nil {
+			g.opts.Metrics.ObserveMCPToolCall(u.name, name, telemetry.MCPOk)
+			return &mcp.CallToolResult{InputRequests: need.requests, RequestState: need.state}, nil
+		}
+		if err == nil && res != nil && g.opts.Guard != nil {
+			res = g.guardResult(ctx, c, res)
+		}
+		var ce *ConnectError
+		if errors.As(err, &ce) {
+			g.opts.Metrics.ObserveMCPToolCall(u.name, name, telemetry.MCPError)
+			if c.protocolVersion < urlElicitationVersion {
+				return ce.toolResult(), nil
+			}
+			return nil, ce.rpcError()
+		}
+		status := telemetry.MCPOk
+		switch {
+		case err != nil:
+			status = telemetry.MCPError
+		case res.IsError:
+			status = telemetry.MCPToolError
+		}
+		g.opts.Metrics.ObserveMCPToolCall(u.name, name, status)
+		return res, err
+	}
+}
+
+// guardArguments runs tool_input guardrails on a call's arguments. It
+// returns the arguments to send, or a message when the call is blocked.
+func (g *Gateway) guardArguments(ctx context.Context, c *call, raw json.RawMessage) (any, string) {
+	if len(raw) == 0 {
+		return raw, ""
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return raw, ""
+	}
+	doc := guardrail.ArgumentsDoc(v)
+	texts, changed, blocked := g.opts.Guard(ctx, c.caller, c.virtualServer, config.StageToolInput, doc.Texts())
+	if blocked != "" {
+		return nil, blocked
+	}
+	if !changed {
+		return raw, ""
+	}
+	doc.SetTexts(texts)
+	return doc.Value(), ""
+}
+
+// guardResult runs tool_output guardrails on the text of a result.
+func (g *Gateway) guardResult(ctx context.Context, c *call, res *mcp.CallToolResult) *mcp.CallToolResult {
+	var texts []string
+	var refs []*mcp.TextContent
+	for _, ct := range res.Content {
+		if t, ok := ct.(*mcp.TextContent); ok && t.Text != "" {
+			texts, refs = append(texts, t.Text), append(refs, t)
+		}
+	}
+	var structured *guardrail.Doc
+	if res.StructuredContent != nil {
+		structured = guardrail.ArgumentsDoc(res.StructuredContent)
+		texts = append(texts, structured.Texts()...)
+	}
+	if len(texts) == 0 {
+		return res
+	}
+	out, changed, blocked := g.opts.Guard(ctx, c.caller, c.virtualServer, config.StageToolOutput, texts)
+	if blocked != "" {
+		return blockedResult(blocked)
+	}
+	if !changed {
+		return res
+	}
+	for i, t := range refs {
+		t.Text = out[i]
+	}
+	if structured != nil {
+		structured.SetTexts(out[len(refs):])
+		res.StructuredContent = structured.Value()
+	}
+	return res
+}
+
+// blockedResult tells the client a guardrail blocked a tool call, as a
+// tool error the model can read.
+func blockedResult(msg string) *mcp.CallToolResult {
+	return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: msg}}}
+}
+
+// connectTool serves the tool offered for a user_auth server that has not
+// been listed yet.
+func (g *Gateway) connectTool(u *upstream) mcp.ToolHandler {
+	return func(ctx context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		c := callFrom(ctx)
+		c.Server, c.Name = u.name, "connect"
+		if c.caller == nil || c.caller.Subject == "" {
+			return nil, errAnonymous(u.name)
+		}
+		var ce *ConnectError
+		if err := g.connected(ctx, u, c); errors.As(err, &ce) {
+			return ce.toolResult(), nil
+		} else if err != nil {
+			return nil, err
+		}
+		go g.RefreshServer(g.ctx, u.name)
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{
+			Text: "Your " + u.name + " account is connected. Its tools appear in a moment; list the tools again.",
+		}}}, nil
+	}
+}
+
+func (g *Gateway) forwardPrompt(u *upstream, name string) mcp.PromptHandler {
+	return func(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		c := callFrom(ctx)
+		c.Server, c.Name = u.name, name
+		in := input{responses: req.Params.InputResponses, state: req.Params.RequestState}
+		res, need, err := converse(ctx, g, u, "prompts/get", name, in,
+			func(ctx context.Context, cs *mcp.ClientSession, meta mcp.Meta) (*mcp.GetPromptResult, error) {
+				return cs.GetPrompt(ctx, &mcp.GetPromptParams{Meta: meta, Name: name, Arguments: req.Params.Arguments, InputResponses: in.responses, RequestState: in.state})
+			},
+			func(r *mcp.GetPromptResult) (bool, mcp.InputRequestMap, string) {
+				return r != nil && r.NeedsInput(), r.InputRequests, r.RequestState
+			})
+		if need != nil {
+			return &mcp.GetPromptResult{InputRequests: need.requests, RequestState: need.state}, nil
+		}
+		return res, rpcInput(rpcConnect(err))
+	}
+}
+
+func (g *Gateway) forwardRead(u *upstream) mcp.ResourceHandler {
+	return func(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		uri := req.Params.URI
+		c := callFrom(ctx)
+		c.Server, c.Name = u.name, uri
+		in := input{responses: req.Params.InputResponses, state: req.Params.RequestState}
+		res, need, err := converse(ctx, g, u, "resources/read", uri, in,
+			func(ctx context.Context, cs *mcp.ClientSession, meta mcp.Meta) (*mcp.ReadResourceResult, error) {
+				return cs.ReadResource(ctx, &mcp.ReadResourceParams{Meta: meta, URI: uri, InputResponses: in.responses, RequestState: in.state})
+			},
+			func(r *mcp.ReadResourceResult) (bool, mcp.InputRequestMap, string) {
+				return r != nil && r.NeedsInput(), r.InputRequests, r.RequestState
+			})
+		if need != nil {
+			return &mcp.ReadResourceResult{InputRequests: need.requests, RequestState: need.state}, nil
+		}
+		return res, rpcInput(rpcConnect(err))
+	}
+}
+
+// forward sends one request upstream inside an mcp.upstream span, and
+// turns transport failures into JSON-RPC errors. Errors the upstream
+// returned over JSON-RPC are passed through.
+func (g *Gateway) forward(ctx context.Context, u *upstream, method, name string, f func(context.Context, *mcp.ClientSession, mcp.Meta) error) error {
+	ctx, span := telemetry.Tracer().Start(ctx, "mcp.upstream", trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(
+			attribute.String("mcp.method.name", method),
+			attribute.String("gog.mcp_server", u.name),
+		))
+	defer span.End()
+	if method == "tools/call" {
+		span.SetAttributes(attribute.String("gen_ai.tool.name", name))
+	}
+	meta := mcp.Meta{}
+	telemetry.Propagator.Inject(ctx, metaCarrier(meta))
+	c := callFrom(ctx)
+	ctx, cancel := detach(ctx)
+	defer cancel()
+	ctx = context.WithValue(ctx, callKey{}, c)
+	subject := ""
+	if u.perUser() {
+		if c.caller == nil || c.caller.Subject == "" {
+			return errAnonymous(u.name)
+		}
+		subject = c.caller.Subject
+		if err := g.connected(ctx, u, c); err != nil {
+			return err
+		}
+	}
+	err := u.do(ctx, subject, func(ctx context.Context, cs *mcp.ClientSession) error {
+		span.SetAttributes(attribute.String("mcp.protocol.version", cs.InitializeResult().ProtocolVersion))
+		return f(ctx, cs, meta)
+	})
+	if err == nil {
+		return nil
+	}
+	if subject != "" {
+		// The upstream may have refused the user's token for good.
+		if cerr := g.connected(ctx, u, c); cerr != nil {
+			return cerr
+		}
+	}
+	span.SetStatus(codes.Error, err.Error())
+	var rpcErr *jsonrpc.Error
+	if errors.As(err, &rpcErr) && !brokenSession(err) {
+		return rpcErr
+	}
+	msg := "upstream MCP server " + u.name + " failed"
+	if errors.Is(err, context.DeadlineExceeded) || (c.held != nil && context.Cause(c.held.ctx) == context.DeadlineExceeded) {
+		msg = "upstream MCP server " + u.name + " timed out"
+	}
+	g.opts.Log.Warn("MCP upstream request failed", "server", u.name, "method", method, "err", err)
+	data, _ := json.Marshal(map[string]string{"server": u.name})
+	return &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: msg, Data: data}
+}
+
+// connected returns nil when the caller has a usable connection to a
+// user_auth upstream, and otherwise a ConnectError with a new connect link.
+func (g *Gateway) connected(ctx context.Context, u *upstream, c *call) error {
+	_, err := u.creds.Token(ctx, u.name, c.caller.Subject, false)
+	if !errors.Is(err, ErrNotConnected) {
+		if err != nil {
+			g.opts.Log.Warn("getting a user token failed", "server", u.name, "err", err)
+			return &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: "the credentials for upstream MCP server " + u.name + " cannot be read"}
+		}
+		return nil
+	}
+	link, err := u.creds.ConnectURL(ctx, u.name, c.caller.Subject, c.virtualServer)
+	if err != nil {
+		g.opts.Log.Error("starting a connect flow failed", "server", u.name, "err", err)
+		return &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: "a connect link for upstream MCP server " + u.name + " cannot be created"}
+	}
+	return &ConnectError{Server: u.name, URL: link}
+}
+
+// rpcConnect turns a ConnectError into the URL elicitation error.
+func rpcConnect(err error) error {
+	var ce *ConnectError
+	if errors.As(err, &ce) {
+		return ce.rpcError()
+	}
+	return err
+}
+
+// detach returns a context that ends with parent and carries its span,
+// but none of its other values. The SDK keeps the client's protocol
+// version in the context of a request it serves and reads it back when
+// sending one, so the upstream call must not inherit it: each side
+// negotiates its own version.
+func detach(parent context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(trace.ContextWithSpan(context.Background(), trace.SpanFromContext(parent)))
+	stop := context.AfterFunc(parent, cancel)
+	return ctx, func() { stop(); cancel() }
+}
+
+// metaCarrier lets OpenTelemetry write trace context into _meta.
+type metaCarrier mcp.Meta
+
+func (m metaCarrier) Get(k string) string {
+	v, _ := m[k].(string)
+	return v
+}
+func (m metaCarrier) Set(k, v string) { m[k] = v }
+func (m metaCarrier) Keys() []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// Error codes in the range the spec leaves to implementations.
+const codeRateLimited = -32005
+
+// counted methods are admitted through the limiter and logged.
+var counted = map[string]bool{"tools/call": true, "prompts/get": true, "resources/read": true}
+
+// knownMethods bounds the method label of metrics.
+var knownMethods = map[string]bool{
+	"initialize": true, "server/discover": true, "ping": true,
+	"tools/list": true, "tools/call": true, "prompts/list": true, "prompts/get": true,
+	"resources/list": true, "resources/templates/list": true, "resources/read": true,
+	listenMethod: true,
+}
+
+// middleware wraps every request to a virtual server: it continues the
+// caller's trace, applies rate limits to calls, and records metrics and
+// the request log line.
+func (g *Gateway) middleware(vs string) mcp.Middleware {
+	return func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			if strings.HasPrefix(method, "notifications/") {
+				return next(ctx, method, req)
+			}
+			if method == listenMethod {
+				return g.listen(ctx, vs, next, req)
+			}
+			start := time.Now()
+			caller := callerOf(req)
+			ctx = extractTrace(ctx, req)
+			label := method
+			if !knownMethods[label] {
+				label = "other"
+			}
+			ctx, span := telemetry.Tracer().Start(ctx, "mcp.request", trace.WithSpanKind(trace.SpanKindServer),
+				trace.WithAttributes(
+					attribute.String("mcp.method.name", method),
+					attribute.String("gog.virtual_server", vs),
+				))
+			defer span.End()
+			c := &call{caller: caller, virtualServer: vs}
+			if extra := req.GetExtra(); extra != nil && extra.Header != nil {
+				c.protocolVersion = extra.Header.Get("Mcp-Protocol-Version")
+			}
+			ctx = context.WithValue(ctx, callKey{}, c)
+
+			status := telemetry.MCPOk
+			var res mcp.Result
+			var err error
+			if counted[method] && caller != nil {
+				err = g.admit(ctx, caller)
+			}
+			if err != nil {
+				status = telemetry.MCPRateLimited
+			} else {
+				res, err = next(ctx, method, req)
+			}
+			var rpcErr *jsonrpc.Error
+			switch {
+			case errors.As(err, &rpcErr):
+				c.ErrorCode = rpcErr.Code
+				if rpcErr.Code != codeRateLimited {
+					status = telemetry.MCPError
+				}
+			case err != nil:
+				status = telemetry.MCPError
+			}
+			if r, ok := res.(*mcp.CallToolResult); ok && r != nil && r.IsError {
+				status = telemetry.MCPToolError
+			}
+
+			d := time.Since(start)
+			g.opts.Metrics.ObserveMCPRequest(vs, label, status, d)
+			if caller != nil {
+				p := caller.Principal
+				span.SetAttributes(attribute.String("gog.org_id", p.OrgID), attribute.String("gog.team_id", p.TeamID))
+			}
+			if c.Server != "" {
+				span.SetAttributes(attribute.String("gog.mcp_server", c.Server))
+			}
+			if method == "tools/call" && c.Name != "" {
+				span.SetAttributes(attribute.String("gen_ai.tool.name", c.Name))
+			}
+			if status != telemetry.MCPOk && status != telemetry.MCPToolError {
+				span.SetStatus(codes.Error, status)
+			}
+			if counted[method] {
+				g.logCall(ctx, caller, vs, method, c, status, d)
+				if g.opts.LogBody != nil && caller != nil {
+					g.opts.LogBody(caller, vs, method, req.GetParams(), res, err)
+				}
+			}
+			return res, err
+		}
+	}
+}
+
+// admit applies the caller's rate limits to one call.
+func (g *Gateway) admit(ctx context.Context, caller *Caller) error {
+	d := g.opts.Limiter.Admit(ctx, caller.Principal)
+	if d.Allowed {
+		return nil
+	}
+	if d.Code == limits.CodeUnavailable {
+		g.opts.Log.Error("limiter unavailable", "request_id", caller.RequestID, "err", d.Message)
+		return &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: "limits could not be checked"}
+	}
+	if d.Kind != "" {
+		g.opts.Metrics.ObserveLimitRejection(d.Scope, d.Kind)
+	}
+	data, _ := json.Marshal(map[string]any{"retryAfterSeconds": limits.RetryAfterSeconds(d.RetryAfter)})
+	return &jsonrpc.Error{Code: codeRateLimited, Message: d.Message, Data: data}
+}
+
+func (g *Gateway) logCall(ctx context.Context, caller *Caller, vs, method string, c *call, status string, d time.Duration) {
+	attrs := []any{
+		"virtual_server", vs, "method", method, "server", c.Server, "name", c.Name,
+		"status", status, "latency_ms", d.Milliseconds(),
+	}
+	if c.ErrorCode != 0 {
+		attrs = append(attrs, "error_code", c.ErrorCode)
+	}
+	if caller != nil {
+		p := caller.Principal
+		attrs = append(attrs, "request_id", caller.RequestID, "org_id", p.OrgID, "team_id", p.TeamID, "key_id", p.KeyID)
+		if caller.Subject != "" {
+			attrs = append(attrs, "subject", caller.Subject)
+		}
+	}
+	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+		attrs = append(attrs, "trace_id", sc.TraceID().String())
+	}
+	g.opts.Log.Info("mcp request", attrs...)
+	if caller != nil {
+		g.Record(caller, vs, method, c.Server, c.Name, status, c.ErrorCode, d)
+	}
+}
+
+// Record writes the audit record of a call, when records are kept.
+func (g *Gateway) Record(caller *Caller, vs, method, server, name, status string, errorCode int64, d time.Duration) {
+	if g.opts.Record == nil {
+		return
+	}
+	p := caller.Principal
+	g.opts.Record(store.MCPCall{
+		ID: id.New("mcpcall"), Time: time.Now().UTC(), OrgID: p.OrgID, TeamID: p.TeamID, KeyID: p.KeyID, Subject: caller.Subject,
+		VirtualServer: vs, Server: server, Method: method, Name: name, Status: status, ErrorCode: errorCode,
+		LatencyMS: d.Milliseconds(), RequestID: caller.RequestID,
+	})
+}
+
+func callerOf(req mcp.Request) *Caller {
+	extra := req.GetExtra()
+	if extra == nil || extra.TokenInfo == nil {
+		return nil
+	}
+	c, _ := extra.TokenInfo.Extra[callerExtra].(*Caller)
+	return c
+}
+
+// extractTrace continues a trace from the request's _meta, as the MCP
+// semantic conventions propagate it, or else from its HTTP headers.
+func extractTrace(ctx context.Context, req mcp.Request) context.Context {
+	if p := req.GetParams(); p != nil && !reflect.ValueOf(p).IsNil() {
+		if m := p.GetMeta(); m != nil {
+			if _, ok := m["traceparent"]; ok {
+				return telemetry.Propagator.Extract(ctx, metaCarrier(m))
+			}
+		}
+	}
+	if extra := req.GetExtra(); extra != nil && extra.Header != nil {
+		return telemetry.Propagator.Extract(ctx, propagation.HeaderCarrier(extra.Header))
+	}
+	return ctx
+}

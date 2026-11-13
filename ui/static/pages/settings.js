@@ -1,0 +1,474 @@
+import { html, useState, api, useLoad, useSession, Loading, Table, PageHeader, KV, ErrorBox, Confirm, num, policySummary } from '../lib.js';
+import { ConfigKind } from './config.js';
+
+// Settings edits the gateway's own settings, for owners
+// (docs/admin-ui-settings.md). Each field shows its value, its default and
+// where the value comes from; a value saved here wins over the
+// configuration file. Every path below is also checked by
+// ui/coverage_test.go, which fails when a gateway setting has no control.
+const sections = [
+  {
+    title: 'Request limits',
+    fields: [
+      { path: 'limits.max_request_bytes', label: 'Largest request body', type: 'bytes', hint: 'Also the largest realtime message.' },
+      { path: 'limits.max_batch_file_bytes', label: 'Largest batch input file', type: 'bytes', hint: 'Read into memory to check each line.' },
+      { path: 'limits.max_realtime_session', label: 'Longest realtime session', type: 'duration' },
+    ],
+  },
+  {
+    title: 'If the limiter is unreachable',
+    fields: [
+      { path: 'limiter.fail_open_rate_limits', label: 'Rate limits', type: 'bool', on: 'Allow requests', off: 'Refuse requests' },
+      { path: 'limiter.fail_open_budgets', label: 'Budgets', type: 'bool', on: 'Allow requests', off: 'Refuse requests' },
+    ],
+  },
+  {
+    title: 'Circuit breaker',
+    note: 'Takes a failing model target out of rotation, then lets one request probe it after the cooldown (docs/routing.md).',
+    fields: [
+      { path: 'routing.circuit_breaker.failures', label: 'Open after this many failures in a row', type: 'number', min: '0', step: '1', hint: '0 turns the breaker off.' },
+      { path: 'routing.circuit_breaker.cooldown', label: 'Probe again after', type: 'duration' },
+    ],
+  },
+  {
+    title: 'Data and refresh',
+    fields: [
+      { path: 'store.usage_retention', label: 'Keep usage, MCP calls and guardrail events for', type: 'duration', zero: 'Forever' },
+      { path: 'store.rollup_retention', label: 'Keep daily usage totals for', type: 'duration', zero: 'Forever', hint: 'Daily totals keep reports and exports working after the usage rows are gone. At least as long as the line above.' },
+      { path: 'store.refresh_interval', label: 'Replicas reload keys and configuration every', type: 'duration' },
+    ],
+  },
+  {
+    title: 'Body logging',
+    note: 'Policies choose which requests are logged; this switch turns logging off everywhere.',
+    fields: [
+      { path: 'body_logging.enabled', label: 'Body logging', type: 'bool', on: 'Allowed', off: 'Off everywhere' },
+      { path: 'body_logging.retention', label: 'Keep bodies for', type: 'duration' },
+      { path: 'body_logging.max_body_bytes', label: 'Largest body kept', type: 'bytes', hint: 'Longer bodies are cut and marked truncated.' },
+      { path: 'body_logging.redact.builtin', label: 'Redaction detectors', type: 'detectors', hint: 'None checked means all of them.' },
+      { path: 'body_logging.redact.patterns', label: 'Custom redaction patterns', type: 'list', hint: 'One RE2 expression per line.' },
+    ],
+  },
+  {
+    title: 'Response cache',
+    note: 'Organizations, teams and keys turn the cache on in their policy.',
+    fields: [
+      { path: 'cache.max_entry_bytes', label: 'Largest answer kept', type: 'bytes' },
+      { path: 'cache.max_memory_bytes', label: 'Memory per replica', type: 'bytes', hint: 'Used when the limiter is not Valkey.' },
+      { path: 'cache.semantic.model', label: 'Semantic matching model', type: 'model', hint: 'An embeddings model. Needed for the semantic mode.' },
+      { path: 'cache.semantic.threshold', label: 'Similarity a reworded question needs', type: 'number', step: '0.01', min: '0', max: '1' },
+      { path: 'cache.semantic.max_entries', label: 'Questions remembered per replica', type: 'int' },
+    ],
+  },
+  {
+    title: 'Budget alerts',
+    note: 'A forecast alert is raised when a monthly budget is set to run out before the month ends, and an unusual spend alert when a team\'s last 24 hours cost several times its usual day (docs/forecast.md).',
+    fields: [
+      { path: 'alerts.budget_thresholds', label: 'Alert at (% of budget)', type: 'percents', hint: 'For example 50, 80, 100. A budget can set its own.' },
+      { path: 'alerts.spend_anomaly.factor', label: 'Unusual spend: times the usual day', type: 'number', min: '0', step: '0.5', hint: '0 turns the alert off; otherwise at least 1.5.' },
+      { path: 'alerts.spend_anomaly.min_usd', label: 'Unusual spend: smallest day to alert on (USD)', type: 'number', min: '0', step: '1' },
+    ],
+  },
+  {
+    title: 'Single sign-on',
+    note: 'Changes apply at the next sign-in. The admin token always signs in, so a mistake here can be fixed.',
+    fields: [
+      { path: 'sso.oidc.issuer', label: 'Identity provider (issuer URL)', type: 'text' },
+      { path: 'sso.oidc.client_id', label: 'Client id', type: 'text' },
+      { path: 'sso.oidc.client_secret', label: 'Client secret', type: 'secret' },
+      { path: 'sso.oidc.redirect_url', label: 'Redirect URL', type: 'text', hint: "The gateway's URL ending in /ui/auth/callback." },
+      { path: 'sso.oidc.groups_claim', label: 'Groups claim', type: 'text' },
+      { path: 'sso.oidc.scopes', label: 'Scopes', type: 'list', hint: 'One per line.' },
+      { path: 'sso.session_ttl', label: 'Session length', type: 'duration' },
+      { path: 'sso.scim.token', label: 'SCIM token', type: 'secret', hint: 'Turns on provisioning at /scim/v2 for the identity provider; at least 32 characters (docs/scim.md).' },
+      { path: 'sso.custom_roles', label: 'Custom roles', type: 'customRoles', hint: 'Named sets of permissions that role mappings can grant besides owner, admin and viewer (docs/roles.md).' },
+      { path: 'sso.roles', label: 'Role mappings', type: 'roles', hint: 'A role for every organization, one organization, or one team of it.' },
+    ],
+  },
+  {
+    title: 'SAML sign-in',
+    note: 'Instead of OIDC, for identity providers that only speak SAML 2.0. Give the identity provider the metadata at /ui/auth/saml/metadata (docs/saml.md).',
+    fields: [
+      { path: 'sso.saml.idp_metadata_url', label: 'Identity provider metadata URL', type: 'text' },
+      { path: 'sso.saml.idp_metadata', label: 'or its metadata XML', type: 'textarea', hint: 'Paste the XML when the identity provider has no metadata URL.' },
+      { path: 'sso.saml.acs_url', label: 'Assertion consumer service URL', type: 'text', hint: "The gateway's URL ending in /ui/auth/saml/acs." },
+      { path: 'sso.saml.entity_id', label: 'Entity id', type: 'text', hint: 'Empty: the metadata URL.' },
+      { path: 'sso.saml.email_attribute', label: 'Email attribute', type: 'text', hint: 'Empty: email, mail or the NameID.' },
+      { path: 'sso.saml.name_attribute', label: 'Name attribute', type: 'text', hint: 'Empty: displayName or name.' },
+      { path: 'sso.saml.groups_attribute', label: 'Groups attribute', type: 'text' },
+      { path: 'sso.saml.mcp_subject_attribute', label: 'MCP subject attribute', type: 'text', hint: "The attribute whose value equals the subject (sub) of the same person's MCP access tokens, or NameID. With it, people prove who they are before they connect an MCP server to their own account. Empty: the connect link alone is the proof." },
+      { path: 'sso.saml.sp_certificate', label: "Gateway's certificate", type: 'textarea', hint: 'PEM. With the private key, the gateway signs its requests, takes encrypted assertions and supports single logout. Make a pair with: genaiopengateway saml-keygen.' },
+      { path: 'sso.saml.sp_private_key', label: "Gateway's private key", type: 'secret', hint: 'PEM; pasting it on one line is fine.' },
+      { path: 'sso.saml.require_encrypted_assertions', label: 'Assertions', type: 'bool', on: 'Must be encrypted', off: 'Encrypted or signed in the clear', hint: 'Refuse assertions the identity provider did not encrypt to the gateway.' },
+    ],
+  },
+  {
+    title: 'Developer portal',
+    note: 'People with the developer role create and rotate their own keys under My keys and access (docs/developer-portal.md).',
+    fields: [
+      { path: 'sso.portal.max_keys_per_user', label: 'Active keys per person', type: 'number', min: '1', max: '100', step: '1' },
+      { path: 'sso.portal.max_key_ttl', label: 'Longest a key may last', type: 'duration', hint: 'Between 1h and 366d.' },
+    ],
+  },
+  {
+    title: 'MCP',
+    fields: [
+      { path: 'mcp.public_url', label: 'Public URL of the gateway', type: 'text', hint: 'Names each virtual server for OAuth clients.' },
+      { path: 'mcp.refresh_interval', label: 'Refresh tool catalogs every', type: 'duration' },
+      { path: 'mcp.max_user_sessions', label: 'Upstream sessions per replica for per-user servers', type: 'int' },
+      { path: 'mcp.oauth.issuer', label: 'OAuth issuer for MCP clients', type: 'text', hint: 'Empty: clients use gateway keys.' },
+      { path: 'mcp.oauth.jwks_url', label: 'JWKS URL', type: 'text' },
+      { path: 'mcp.oauth.audience', label: 'Audience', type: 'text' },
+      { path: 'mcp.oauth.organization', label: 'Organization tokens belong to', type: 'text' },
+      { path: 'mcp.oauth.team_claim', label: 'Team claim', type: 'text' },
+      { path: 'mcp.oauth.scopes', label: 'Required scopes', type: 'list', hint: 'One per line.' },
+    ],
+  },
+  {
+    title: 'A2A agents',
+    fields: [
+      { path: 'a2a.public_url', label: 'Public URL named in agent cards', type: 'text', hint: 'Empty: the MCP public URL, or else the URL each card is requested at.' },
+      { path: 'a2a.push.enabled', label: 'Push notifications', type: 'bool', on: 'Delivered by the gateway', off: 'Refused', hint: 'Agents send task updates to the gateway, which delivers them to the webhook the caller set. Needs the public URL above.' },
+      { path: 'a2a.push.allowed_hosts', label: 'Hosts that webhooks may be on', type: 'list', hint: 'One per line: a host name, or *. and a domain for its subdomains. These may be internal. Empty: any host with a public address, over HTTPS.' },
+    ],
+  },
+];
+
+// Settings are split into pages by subject; each page holds sections from
+// above, by title (docs/admin-ui.md).
+const pages = [
+  { slug: 'sign-in', title: 'Sign-in and SSO', sections: ['Single sign-on', 'SAML sign-in', 'Developer portal'], sessions: true },
+  { slug: 'limits', title: 'Limits', sections: ['Request limits', 'If the limiter is unreachable', 'Circuit breaker'] },
+  { slug: 'data', title: 'Logging and data', sections: ['Data and refresh', 'Body logging'] },
+  { slug: 'cache', title: 'Cache', sections: ['Response cache'] },
+  { slug: 'notifications', title: 'Notifications', sections: ['Budget alerts'], streams: true },
+  { slug: 'mcp', title: 'MCP and agents', sections: ['MCP', 'A2A agents'] },
+  { slug: 'startup', title: 'Startup values', sections: [], startup: true },
+];
+
+// The default is shown in each field's hint, so only a value that is not
+// the default gets a badge saying where it comes from.
+const sourceBadge = {
+  file: html`<span class="badge warn" title="From the configuration file">Config file</span>`,
+  stored: html`<span class="badge good" title="Saved in the admin UI; wins over the configuration file">Set here</span>`,
+};
+
+const units = [[1 << 30, 'GiB'], [1 << 20, 'MiB'], [1 << 10, 'KiB']];
+const bytesText = (n) => {
+  for (const [size, unit] of units) if (n >= size && n % (size / 16) === 0) return `${+(n / size).toFixed(2)} ${unit}`;
+  return `${num(n)} bytes`;
+};
+
+// show formats a value for reading.
+function show(f, v) {
+  if (v === null || v === undefined || (Array.isArray(v) && !v.length)) {
+    return f.type === 'detectors' ? 'All' : f.type === 'roles' || f.type === 'customRoles' ? 'None' : f.zero || 'Not set';
+  }
+  switch (f.type) {
+    case 'bytes': return bytesText(v);
+    case 'bool': return v ? f.on : f.off;
+    case 'secret': return v ? 'Set' : 'Not set';
+    case 'percents': return v.map((x) => `${Math.round(x * 100)}%`).join(', ');
+    case 'duration': return v || f.zero || 'Not set';
+    case 'roles': return `${v.length} mapping${v.length === 1 ? '' : 's'}`;
+    case 'customRoles': {
+      const n = Object.keys(v).length;
+      return n ? `${n} role${n === 1 ? '' : 's'}` : 'None';
+    }
+    case 'list': case 'detectors': return v.join(', ');
+  }
+  return String(v);
+}
+
+// input is the form value of a setting, and parse its inverse. parse
+// returns undefined to leave the setting as it is.
+function input(f, v) {
+  switch (f.type) {
+    case 'bool': return String(!!v);
+    case 'list': return (v || []).join('\n');
+    case 'detectors': return v || [];
+    case 'percents': return v ? (v.length ? v.map((x) => Math.round(x * 100)).join(', ') : 'off') : '';
+    case 'roles': return v || [];
+    case 'customRoles': return Object.entries(v || {}).map(([name, r]) => ({ name, description: r.description || '', permissions: r.permissions || [] }));
+    case 'secret': return '';
+  }
+  return v ?? '';
+}
+
+function parse(f, raw) {
+  switch (f.type) {
+    case 'bool': return raw === 'true';
+    case 'bytes': case 'int': case 'number': return raw === '' ? undefined : Number(raw);
+    case 'duration': return raw.trim() === '' ? (f.zero ? '0s' : undefined) : raw.trim();
+    case 'list': return raw.split('\n').map((s) => s.trim()).filter(Boolean);
+    case 'detectors': return raw.length ? raw : null;
+    case 'percents': {
+      if (raw.trim().toLowerCase() === 'off') return [];
+      if (raw.trim() === '') return undefined;
+      const xs = raw.split(',').map((s) => Number(s.trim()) / 100);
+      if (xs.some((x) => !(x > 0 && x <= 1))) throw new Error(`${f.label}: use percentages such as "50, 80, 100", or "off".`);
+      return xs;
+    }
+    case 'roles': return raw.map((r) => Object.fromEntries(Object.entries(r).filter(([, v]) => v)));
+    case 'customRoles':
+      return Object.fromEntries(raw.filter((r) => r.name.trim()).map((r) => [r.name.trim(), { ...(r.description.trim() && { description: r.description.trim() }), permissions: r.permissions }]));
+    case 'secret': return raw === '' ? undefined : raw;
+  }
+  if (f.type === 'textarea') return raw.trim() === '' ? undefined : raw;
+  return raw.trim() === '' ? undefined : raw.trim();
+}
+
+const clone = (v) => JSON.parse(JSON.stringify(v ?? {}));
+
+function setPath(obj, path, value) {
+  const keys = path.split('.');
+  let o = obj;
+  for (const k of keys.slice(0, -1)) o = o[k] && typeof o[k] === 'object' ? o[k] : (o[k] = {});
+  o[keys.at(-1)] = value;
+}
+
+// deletePath removes a setting and the sections it leaves empty.
+function deletePath(obj, path) {
+  const keys = path.split('.');
+  const walk = (o, i) => {
+    if (!o || typeof o !== 'object') return;
+    if (i === keys.length - 1) delete o[keys[i]];
+    else {
+      walk(o[keys[i]], i + 1);
+      if (o[keys[i]] && typeof o[keys[i]] === 'object' && !Array.isArray(o[keys[i]]) && !Object.keys(o[keys[i]]).length) delete o[keys[i]];
+    }
+  };
+  walk(obj, 0);
+}
+
+const save = (spec) => api('PUT', '/admin/v1/config/settings/gateway', spec);
+
+export function Settings({ args = [], params }) {
+  const page = pages.find((p) => p.slug === args[0]) || pages[0];
+  const state = useLoad(() => api('GET', '/admin/v1/settings'));
+  const [signOut, setSignOut] = useState(false);
+  const [signedOut, setSignedOut] = useState(null);
+  return html`
+    <${PageHeader} title="Settings" sub="How this gateway runs. A value saved here applies to every replica within the refresh interval and wins over the configuration file; Reset goes back to the file's value or the default." />
+    <div class="subnav-layout">
+      <nav class="subnav" aria-label="Settings">
+        <ul role="list">${pages.map((p) => html`<li key=${p.slug}><a href=${`#/settings/${p.slug}`} class=${p === page ? 'active' : ''} aria-current=${p === page ? 'page' : undefined}>${p.title}</a></li>`)}</ul>
+      </nav>
+      <div class="subnav-body">
+        <h2 class="subnav-heading">${page.title}</h2>
+        ${page.sessions && html`<section class="panel">
+          <div class="panel-header"><div><h2>Sessions</h2><p class="muted small">End every other admin UI session now, on every replica, when someone leaves or a session may be stolen. Your session stays.</p></div>
+          <button class="secondary" onClick=${() => setSignOut(true)}>Sign out everyone else</button></div>
+          ${signedOut !== null && html`<p class="notice" role="status">Signed out ${num(signedOut)} other ${signedOut === 1 ? 'session' : 'sessions'}.</p>`}
+        </section>`}
+        ${signOut && html`<${Confirm} title="Sign out everyone else" action="Sign out everyone"
+          message="Every other admin UI session ends now, on every replica; people sign in again. Use it when someone leaves or a session may be stolen. Your session stays."
+          onClose=${() => setSignOut(false)}
+          onConfirm=${async () => { const r = await api('DELETE', '/admin/v1/sessions'); setSignedOut(r.deleted); setSignOut(false); }} />`}
+        <${Loading} state=${state}>${(d) => {
+          const fields = Object.fromEntries(d.fields.map((f) => [f.path, f]));
+          return html`
+            ${sections.filter((x) => page.sections.includes(x.title)).map((x) => html`<${Section} key=${x.title} section=${x} fields=${fields} stored=${d.stored} detectors=${d.detectors} permissions=${d.permissions || []} onSaved=${state.reload} />`)}
+            ${page.streams && html`<p class="muted small">Alert webhooks are on the <a href="#/alerts?tab=webhooks">Alerts</a> page.</p>
+              <section class="panel"><h2>Streams</h2><p class="muted small">Send usage, audit, MCP call and guardrail records to a webhook or a file as they happen (docs/streams.md).</p><${ConfigKind} kind="streams" params=${params} /></section>`}
+            ${page.startup && html`<${Startup} d=${d} />`}`;
+        }}<//>
+      </div>
+    </div>`;
+}
+
+function Section({ section, fields, stored, detectors, permissions, onSaved }) {
+  const [draft, setDraft] = useState({});
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const changed = Object.keys(draft).length > 0;
+  const write = async (change) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const spec = clone(stored);
+      change(spec);
+      await save(spec);
+      setDraft({});
+      onSaved();
+    } catch (err) {
+      setError(err);
+    }
+    setBusy(false);
+  };
+  const submit = (e) => {
+    e.preventDefault();
+    write((spec) => {
+      for (const f of section.fields) {
+        if (!(f.path in draft)) continue;
+        const v = parse(f, draft[f.path]);
+        if (v !== undefined) setPath(spec, f.path, v);
+      }
+    });
+  };
+  return html`<section class="panel">
+    <h2>${section.title}</h2>
+    ${section.note && html`<p class="muted small">${section.note}</p>`}
+    <form class="form" onSubmit=${submit}>
+      <${ErrorBox} error=${error} />
+      ${section.fields.map((f) => html`<${Setting} key=${f.path} f=${f} info=${fields[f.path] || {}} detectors=${detectors} permissions=${permissions}
+        customRoles=${('sso.custom_roles' in draft ? draft['sso.custom_roles'] : input({ type: 'customRoles' }, fields['sso.custom_roles']?.value)).map((r) => r.name.trim()).filter(Boolean)}
+        value=${f.path in draft ? draft[f.path] : input(f, fields[f.path]?.value)}
+        onChange=${(v) => setDraft({ ...draft, [f.path]: v })}
+        onReset=${() => write((spec) => deletePath(spec, f.path))} />`)}
+      ${changed && html`<footer class="savebar" role="region" aria-label=${`Unsaved changes in ${section.title}`}>
+        <span class="muted small">Unsaved changes</span>
+        <button type="button" class="secondary" onClick=${() => setDraft({})}>Discard</button>
+        <button type="submit" disabled=${busy}>${busy ? 'Saving…' : 'Save'}</button>
+      </footer>`}
+    </form>
+  </section>`;
+}
+
+function Setting({ f, info, value, detectors, permissions, customRoles, onChange, onReset }) {
+  const { catalog } = useSession();
+  const set = (e) => onChange(e.target.value);
+  const lid = 'setting-' + f.path.replace(/\./g, '-');
+  const hid = lid + '-hint';
+  const aria = { 'aria-labelledby': lid, 'aria-describedby': hid };
+  let control;
+  switch (f.type) {
+    case 'bool':
+      control = html`<select ...${aria} value=${value} onChange=${set}><option value="true">${f.on}</option><option value="false">${f.off}</option></select>`;
+      break;
+    case 'bytes':
+      control = html`<${BytesInput} value=${value} onChange=${onChange} label=${f.label} />`;
+      break;
+    case 'int':
+      control = html`<input ...${aria} type="number" min="1" step="1" value=${value} onInput=${set} />`;
+      break;
+    case 'number':
+      control = html`<input ...${aria} type="number" min=${f.min} max=${f.max} step=${f.step} value=${value} onInput=${set} />`;
+      break;
+    case 'list':
+      control = html`<textarea ...${aria} rows="3" value=${value} onInput=${set}></textarea>`;
+      break;
+    case 'textarea':
+      control = html`<textarea ...${aria} rows="6" class="mono" value=${value} onInput=${set}></textarea>`;
+      break;
+    case 'secret':
+      control = html`<input ...${aria} type="password" autocomplete="off" value=${value} placeholder=${info.value ? '•••••••• (stored; type to replace)' : ''} onInput=${set} />`;
+      break;
+    case 'model':
+      control = html`<select ...${aria} value=${value} onChange=${set}>
+        <option value="">None</option>
+        ${catalog.models.map((m) => html`<option key=${m.name} value=${m.name}>${m.name}</option>`)}
+      </select>`;
+      break;
+    case 'detectors':
+      control = html`<div class="checks">${detectors.map((n) => html`<label class="check" key=${n}>
+        <input type="checkbox" checked=${value.includes(n)} onChange=${() => onChange(value.includes(n) ? value.filter((x) => x !== n) : [...value, n])} /> ${n}
+      </label>`)}</div>`;
+      break;
+    case 'roles':
+      control = html`<${RolesEditor} roles=${value} customRoles=${customRoles} onChange=${onChange} />`;
+      break;
+    case 'customRoles':
+      control = html`<${CustomRolesEditor} roles=${value} permissions=${permissions} onChange=${onChange} />`;
+      break;
+    default:
+      control = html`<input ...${aria} value=${value} placeholder=${f.type === 'duration' ? (f.zero ? `Empty: ${f.zero.toLowerCase()}` : 'For example 30s, 5m, 24h or 7d') : ''} onInput=${set} />`;
+  }
+  return html`<div class="field setting" data-setting=${f.path} role="group" aria-labelledby=${lid}>
+    <span><span id=${lid}>${f.label}</span> ${sourceBadge[info.source] || ''}</span>
+    ${control}
+    <small class="muted" id=${hid}>
+      Default: ${show(f, info.default)}${f.hint ? ` · ${f.hint}` : ''}
+      ${info.source === 'stored' && html` · <button type="button" class="link" onClick=${onReset}>Reset</button>`}
+    </small>
+  </div>`;
+}
+
+// BytesInput edits a size in bytes as an amount and a unit, keeping the
+// value in bytes.
+function BytesInput({ value, onChange, label }) {
+  const n = value === '' || value === undefined || value === null ? null : Number(value);
+  const fit = n ? sizeUnits.find(([size]) => n % size === 0) : sizeUnits[1];
+  const [unit, setUnit] = useState(fit ? fit[0] : 1);
+  const amount = n === null ? '' : +(n / unit).toFixed(3);
+  const emit = (a, u) => onChange(a === '' ? '' : String(Math.round(Number(a) * u)));
+  return html`<div class="inline-row">
+    <input type="number" min="0" step="any" value=${amount} aria-label=${label} onInput=${(e) => emit(e.target.value, unit)} />
+    <select value=${unit} aria-label=${`${label} unit`} onChange=${(e) => { const u = Number(e.target.value); setUnit(u); if (amount !== '') emit(amount, u); }}>
+      ${sizeUnits.map(([size, name]) => html`<option key=${name} value=${size}>${name}</option>`)}
+    </select>
+  </div>`;
+}
+
+const sizeUnits = [[1 << 30, 'GiB'], [1 << 20, 'MiB'], [1 << 10, 'KiB'], [1, 'bytes']];
+
+function RolesEditor({ roles, customRoles, onChange }) {
+  const set = (i, k, v) => onChange(roles.map((r, n) => (n === i ? { ...r, [k]: v } : r)));
+  return html`<div>
+    ${roles.length > 0 && html`<div class="table-wrap"><table>
+      <thead><tr><th>Group</th><th>or email</th><th>Role</th><th>Organization</th><th>Team</th><th></th></tr></thead>
+      <tbody>${roles.map((r, i) => html`<tr key=${i}>
+        <td data-setting="sso.roles.group"><input value=${r.group || ''} onInput=${(e) => set(i, 'group', e.target.value)} /></td>
+        <td data-setting="sso.roles.email"><input value=${r.email || ''} onInput=${(e) => set(i, 'email', e.target.value)} /></td>
+        <td data-setting="sso.roles.role"><select value=${r.role || 'viewer'} onChange=${(e) => set(i, 'role', e.target.value)}>
+          <option value="owner">Owner</option><option value="admin">Admin</option><option value="viewer">Viewer</option><option value="developer">Developer</option>
+          ${[...new Set([...customRoles, ...(r.role && !['owner', 'admin', 'viewer', 'developer'].includes(r.role) ? [r.role] : [])])].map((n) => html`<option key=${n} value=${n}>${n}</option>`)}
+        </select></td>
+        <td data-setting="sso.roles.org"><input value=${r.org || ''} placeholder="All" onInput=${(e) => set(i, 'org', e.target.value)} /></td>
+        <td data-setting="sso.roles.team"><input value=${r.team || ''} placeholder="All" disabled=${!r.org} onInput=${(e) => set(i, 'team', e.target.value)} /></td>
+        <td><button type="button" class="link danger" onClick=${() => onChange(roles.filter((_, n) => n !== i))}>Remove</button></td>
+      </tr>`)}</tbody>
+    </table></div>`}
+    <button type="button" class="secondary" onClick=${() => onChange([...roles, { group: '', role: 'viewer' }])}>Add a role mapping</button>
+  </div>`;
+}
+
+// CustomRolesEditor edits named sets of permissions (docs/roles.md).
+function CustomRolesEditor({ roles, permissions, onChange }) {
+  const set = (i, k, v) => onChange(roles.map((r, n) => (n === i ? { ...r, [k]: v } : r)));
+  const toggle = (i, p) => {
+    const have = roles[i].permissions;
+    set(i, 'permissions', have.includes(p) ? have.filter((x) => x !== p) : [...have, p]);
+  };
+  return html`<div>
+    ${roles.map((r, i) => html`<fieldset class="custom-role" key=${i}>
+      <div class="row">
+        <label class="field"><span>Role</span><input value=${r.name} placeholder="billing" onInput=${(e) => set(i, 'name', e.target.value)} /></label>
+        <label class="field" data-setting="sso.custom_roles.description"><span>Description</span><input value=${r.description} onInput=${(e) => set(i, 'description', e.target.value)} /></label>
+        <button type="button" class="link danger" onClick=${() => onChange(roles.filter((_, n) => n !== i))}>Remove</button>
+      </div>
+      <div class="checks" data-setting="sso.custom_roles.permissions">${permissions.map((p) => html`<label class="check" key=${p}>
+        <input type="checkbox" checked=${r.permissions.includes(p)} onChange=${() => toggle(i, p)} /> <code>${p}</code>
+      </label>`)}</div>
+    </fieldset>`)}
+    <button type="button" class="secondary" onClick=${() => onChange([...roles, { name: '', description: '', permissions: [] }])}>Add a custom role</button>
+  </div>`;
+}
+
+// Startup shows what the process reads when it starts, which stays in the
+// environment and configuration file.
+function Startup({ d }) {
+  return html`
+    <section class="panel"><h2>Startup settings</h2>
+      <p class="muted small">Read when the gateway starts, or able to run programs on its host, so they stay in the configuration file and environment: ${d.startup.map((p, i) => html`${i ? ', ' : ''}<code>${p}</code>`)}.</p>
+      <${KV} items=${[
+        ['Version', d.version],
+        ['TLS on the gateway', d.tls ? 'Yes' : 'No'],
+        ['Metrics listener', d.metrics.listen || 'Main listener'],
+        ['Admin token', d.admin_token ? 'Set' : 'Not set'],
+        ['Store', d.store.driver],
+        ['Limiter', d.limiter.driver === 'valkey' ? 'Valkey (shared by replicas)' : 'In memory (this replica only)'],
+        ['Response cache store', d.cache.store === 'valkey' ? 'Valkey (shared by replicas)' : 'In memory, per replica'],
+        ['Encryption key', d.secrets.encryption_key ? 'Set' : 'Not set'],
+        ['Previous keys still accepted', num(d.secrets.previous_keys)],
+        ['Identity provider', d.sso.oidc?.issuer || 'None'],
+      ]} />
+    </section>
+    <section class="panel"><h2>Keys from the configuration file</h2>
+      <p class="muted small">Declared in <code>keys</code>, read-only, outside any organization. The secrets are never shown.</p>
+      <${Table} rows=${d.static_keys} rowKey=${(k) => k.name} empty="None." columns=${[
+        { label: 'Name', render: (k) => html`<strong>${k.name}</strong>` },
+        { label: 'Policy', render: (k) => policySummary(k) || 'No limits' },
+      ]} />
+    </section>`;
+}

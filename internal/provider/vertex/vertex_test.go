@@ -1,0 +1,235 @@
+package vertex
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"golang.org/x/oauth2"
+
+	"github.com/rnikadi/genaiopengateway/internal/config"
+	"github.com/rnikadi/genaiopengateway/internal/provider"
+)
+
+func TestHost(t *testing.T) {
+	for loc, want := range map[string]string{
+		"global":       "aiplatform.googleapis.com",
+		"us":           "aiplatform.us.rep.googleapis.com",
+		"eu":           "aiplatform.eu.rep.googleapis.com",
+		"europe-west4": "europe-west4-aiplatform.googleapis.com",
+	} {
+		if got := Host(loc); got != want {
+			t.Errorf("%s: %s", loc, got)
+		}
+	}
+}
+
+// fakeTokens counts token fetches, to check that a token is reused
+// until it expires.
+type fakeTokens struct{ n atomic.Int32 }
+
+func (f *fakeTokens) Token() (*oauth2.Token, error) {
+	n := f.n.Add(1)
+	return &oauth2.Token{AccessToken: "tok" + string(rune('0'+n)), TokenType: "Bearer", Expiry: time.Now().Add(time.Hour)}, nil
+}
+
+type recorded struct {
+	path   string
+	header http.Header
+	body   map[string]any
+}
+
+func start(t *testing.T, ts oauth2.TokenSource, respond func(w http.ResponseWriter, r *http.Request)) (*Provider, *recorded) {
+	t.Helper()
+	rec := &recorded{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec.path, rec.header, rec.body = r.URL.RequestURI(), r.Header.Clone(), map[string]any{}
+		_ = json.NewDecoder(r.Body).Decode(&rec.body)
+		respond(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	cfg := config.Provider{Type: config.ProviderVertex, BaseURL: srv.URL, Project: "acme-ai", Location: "europe-west4", Timeout: config.Duration(5 * time.Second)}
+	tk := &tokens{}
+	if ts != nil {
+		tk.ts = oauth2.ReuseTokenSource(nil, ts)
+	}
+	return newWithTokens(cfg, srv.Client(), tk), rec
+}
+
+func send(t *testing.T, p *Provider, ep provider.Endpoint, model string, stream bool, body string, hdr http.Header) (*provider.Response, string) {
+	t.Helper()
+	resp, err := p.Send(context.Background(), &provider.Request{Endpoint: ep, Model: model, Stream: stream, Body: []byte(body), Header: hdr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	return resp, string(out)
+}
+
+func TestGeminiOnVertex(t *testing.T) {
+	ts := &fakeTokens{}
+	p, rec := start(t, ts, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"candidates":[{"content":{"parts":[{"text":"Hi"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`)
+	})
+	_, body := send(t, p, provider.ChatCompletions, "gemini-2.5-pro", false, `{"model":"gemini-2.5-pro","messages":[{"role":"user","content":"Hi"}]}`, nil)
+	if rec.path != "/v1/projects/acme-ai/locations/europe-west4/publishers/google/models/gemini-2.5-pro:generateContent" {
+		t.Errorf("path %s", rec.path)
+	}
+	if rec.header.Get("Authorization") != "Bearer tok1" || !strings.Contains(body, `"content":"Hi"`) {
+		t.Errorf("auth %q, body %s", rec.header.Get("Authorization"), body)
+	}
+	// A publisher prefix is accepted and the token is reused.
+	send(t, p, provider.GenerateContent, "google/gemini-2.5-flash", true, `{"model":"google/gemini-2.5-flash","stream":true,"contents":[]}`, nil)
+	if rec.path != "/v1/projects/acme-ai/locations/europe-west4/publishers/google/models/gemini-2.5-flash:streamGenerateContent?alt=sse" {
+		t.Errorf("path %s", rec.path)
+	}
+	if ts.n.Load() != 1 {
+		t.Errorf("tokens fetched %d times", ts.n.Load())
+	}
+}
+
+func TestClaudeOnVertex(t *testing.T) {
+	p, rec := start(t, &fakeTokens{}, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ":streamRawPredict") {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"model\":\"claude\",\"usage\":{\"input_tokens\":5,\"output_tokens\":0}}}\n\n"+
+				"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":2}}\n\n")
+			return
+		}
+		_, _ = io.WriteString(w, `{"id":"m","type":"message","model":"claude","content":[{"type":"text","text":"Hello"}],"stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":2}}`)
+	})
+	hdr := http.Header{"Anthropic-Version": {"2023-06-01"}, "Anthropic-Beta": {"tools-2025"}}
+	resp, _ := send(t, p, provider.Messages, "anthropic/claude-sonnet-4-6", false,
+		`{"model":"anthropic/claude-sonnet-4-6","max_tokens":10,"messages":[{"role":"user","content":"Hi"}]}`, hdr)
+	if rec.path != "/v1/projects/acme-ai/locations/europe-west4/publishers/anthropic/models/claude-sonnet-4-6:rawPredict" {
+		t.Errorf("path %s", rec.path)
+	}
+	if _, ok := rec.body["model"]; ok || rec.body["anthropic_version"] != claudeVersion {
+		t.Errorf("body %v", rec.body)
+	}
+	if rec.header.Get("Anthropic-Version") != "" || rec.header.Get("Anthropic-Beta") != "tools-2025" || rec.header.Get("Authorization") != "Bearer tok1" {
+		t.Errorf("headers %v", rec.header)
+	}
+	if resp.Usage.InputTokens != 5 || resp.Usage.OutputTokens != 2 {
+		t.Errorf("usage %+v", *resp.Usage)
+	}
+
+	// Chat completions use the Anthropic translation, streamed.
+	resp, body := send(t, p, provider.ChatCompletions, "anthropic/claude-sonnet-4-6", true,
+		`{"model":"anthropic/claude-sonnet-4-6","stream":true,"messages":[{"role":"user","content":"Hi"}]}`, nil)
+	if !strings.HasSuffix(rec.path, "/claude-sonnet-4-6:streamRawPredict") || !strings.Contains(body, `"finish_reason":"stop"`) || resp.Usage.OutputTokens != 2 {
+		t.Errorf("chat stream %s %s %+v", rec.path, body, *resp.Usage)
+	}
+}
+
+func TestSupportsModel(t *testing.T) {
+	p, _ := start(t, &fakeTokens{}, func(http.ResponseWriter, *http.Request) {})
+	for _, tc := range []struct {
+		ep    provider.Endpoint
+		model string
+		want  bool
+	}{
+		{provider.ChatCompletions, "gemini-2.5-pro", true},
+		{provider.GenerateContent, "gemini-2.5-pro", true},
+		{provider.Messages, "gemini-2.5-pro", false},
+		{provider.ChatCompletions, "anthropic/claude-x", true},
+		{provider.Messages, "anthropic/claude-x", true},
+		{provider.GenerateContent, "anthropic/claude-x", false},
+		{provider.ChatCompletions, "meta/llama", false},
+		{provider.Embeddings, "gemini-embedding-001", false},
+	} {
+		if got := provider.SupportsModel(p, tc.ep, tc.model); got != tc.want {
+			t.Errorf("%s %s: %v", tc.ep, tc.model, got)
+		}
+	}
+}
+
+// A credential failure is a 502 the router can fall back from, and the
+// lookup is retried on the next request.
+func TestCredentialFailure(t *testing.T) {
+	p, _ := start(t, nil, func(w http.ResponseWriter, _ *http.Request) {})
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "/nonexistent/key.json")
+	resp, body := send(t, p, provider.ChatCompletions, "gemini-x", false, `{"model":"gemini-x","messages":[{"role":"user","content":"Hi"}]}`, nil)
+	if resp.StatusCode != http.StatusBadGateway || !provider.Retryable(resp.StatusCode) || !strings.Contains(body, "upstream credentials") {
+		t.Errorf("got %d %s", resp.StatusCode, body)
+	}
+
+	_, err := fromFile(context.Background(), "/nonexistent/key.json")
+	if err == nil || !strings.Contains(err.Error(), "credentials_file") {
+		t.Errorf("missing file: %v", err)
+	}
+	dir := t.TempDir()
+	path := dir + "/user.json"
+	if err := os.WriteFile(path, []byte(`{"type":"authorized_user"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fromFile(context.Background(), path); err == nil || !strings.Contains(err.Error(), "not supported") {
+		t.Errorf("user credentials: %v", err)
+	}
+}
+
+func TestImagenOnVertex(t *testing.T) {
+	p, rec := start(t, &fakeTokens{}, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"predictions":[{"bytesBase64Encoded":"aQ==","mimeType":"image/png"}]}`)
+	})
+	if !p.SupportsModel(provider.ImageGenerations, "imagen-4.0-generate-001") || p.SupportsModel(provider.ChatCompletions, "imagen-4.0-generate-001") ||
+		!p.SupportsModel(provider.Speech, "google/gemini-2.5-flash-preview-tts") || p.SupportsModel(provider.ImageGenerations, "anthropic/claude-sonnet-4-5") {
+		t.Fatal("model support does not follow the model id")
+	}
+	resp, body := send(t, p, provider.ImageGenerations, "imagen-4.0-generate-001", false, `{"prompt":"a falcon"}`, nil)
+	if rec.path != "/v1/projects/acme-ai/locations/europe-west4/publishers/google/models/imagen-4.0-generate-001:predict" || rec.header.Get("Authorization") != "Bearer tok1" {
+		t.Fatalf("request %s %v", rec.path, rec.header)
+	}
+	if resp.StatusCode != 200 || !strings.Contains(body, `"b64_json":"aQ=="`) || resp.Usage.Images != 1 {
+		t.Fatalf("%d %s", resp.StatusCode, body)
+	}
+}
+
+func TestParseTeamCredential(t *testing.T) {
+	key := "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n"
+	file := func(over map[string]string) []byte {
+		m := map[string]string{"type": "service_account", "project_id": "p1", "client_email": "a@p1.iam.gserviceaccount.com", "private_key": key}
+		for k, v := range over {
+			m[k] = v
+		}
+		b, _ := json.Marshal(TeamCredential{ServiceAccount: mustJSON(m)})
+		return b
+	}
+	c, err := ParseTeamCredential(file(nil))
+	if err != nil || c.Project != "p1" {
+		t.Fatalf("%+v %v", c, err)
+	}
+	if _, err := ParseTeamCredential(file(map[string]string{"token_uri": TokenURL})); err != nil {
+		t.Fatal(err)
+	}
+	for name, over := range map[string]map[string]string{
+		"type":      {"type": "external_account"},
+		"token uri": {"token_uri": "https://example.com/token"},
+		"email":     {"client_email": ""},
+		"key":       {"private_key": "x"},
+		"project":   {"project_id": ""},
+	} {
+		if _, err := ParseTeamCredential(file(over)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	if _, err := ParseTeamCredential([]byte(`[1]`)); err == nil {
+		t.Error("an array was accepted")
+	}
+}
+
+func mustJSON(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
