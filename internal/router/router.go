@@ -96,8 +96,9 @@ func (r *Router) adapter(ctx context.Context, name string) provider.Provider {
 	return r.providers[name]
 }
 
-// credentialTypes are the provider types whose api_key a team may replace.
-var credentialTypes = []string{config.ProviderOpenAI, config.ProviderAnthropic, config.ProviderGemini, config.ProviderBedrock, config.ProviderElevenLabs, config.ProviderDeepgram, config.ProviderAssemblyAI, config.ProviderStability, config.ProviderFal, config.ProviderCohere}
+// credentialTypes are the provider types a team may bring its own
+// credential for: an API key, or for vertex a service account key.
+var credentialTypes = []string{config.ProviderVertex, config.ProviderOpenAI, config.ProviderAnthropic, config.ProviderGemini, config.ProviderBedrock, config.ProviderElevenLabs, config.ProviderDeepgram, config.ProviderAssemblyAI, config.ProviderStability, config.ProviderFal, config.ProviderCohere}
 
 // CheckCredential reports why a provider cannot take a team's API key.
 func (r *Router) CheckCredential(providerName string) error {
@@ -106,7 +107,7 @@ func (r *Router) CheckCredential(providerName string) error {
 		return fmt.Errorf("unknown provider %q", providerName)
 	}
 	if !slices.Contains(credentialTypes, c.Type) {
-		return fmt.Errorf("provider %q is of type %s, which does not take an API key per team", providerName, c.Type)
+		return fmt.Errorf("provider %q is of type %s, which does not take a credential per team", providerName, c.Type)
 	}
 	return nil
 }
@@ -130,8 +131,25 @@ func (r *Router) WithAPIKey(providerName, apiKey string) (provider.Provider, err
 		return unavailable{fmt.Errorf("team credential: %w", err)}, err
 	}
 	c := r.configs[providerName]
+	if c.Type == config.ProviderVertex {
+		// The secret is a vertex.TeamCredential, not an API key.
+		p, err := vertex.NewForTeam(c, r.client, apiKey)
+		if err != nil {
+			return unavailable{fmt.Errorf("team credential: %w", err)}, err
+		}
+		return p, nil
+	}
 	c.APIKey = config.Secret(apiKey)
 	return factories[c.Type](c, r.client), nil
+}
+
+// CredentialKind says what a team stores for a provider: "api_key", or
+// "service_account" for vertex.
+func (r *Router) CredentialKind(providerName string) string {
+	if r.configs[providerName].Type == config.ProviderVertex {
+		return "service_account"
+	}
+	return "api_key"
 }
 
 // New builds a router. All adapters share one HTTP client so connections
@@ -495,6 +513,13 @@ func (r *Router) Targets(ctx context.Context, ep provider.Endpoint, model string
 func (r *Router) Dialer(ctx context.Context, providerName string) (provider.Dialer, bool) {
 	d, ok := r.adapter(ctx, providerName).(provider.Dialer)
 	return d, ok
+}
+
+// RealtimeCaller returns a provider's adapter for realtime calls over
+// WebRTC, or false when the provider is gone or does not serve them.
+func (r *Router) RealtimeCaller(ctx context.Context, providerName string) (provider.RealtimeCaller, bool) {
+	c, ok := r.adapter(ctx, providerName).(provider.RealtimeCaller)
+	return c, ok
 }
 
 // LiveDialer returns a provider's adapter for Gemini Live sessions, or

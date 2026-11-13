@@ -67,12 +67,7 @@ func (u *upstream) userSession(ctx context.Context, subject string) (*mcp.Client
 	if us.cs != nil {
 		return us.cs, nil
 	}
-	hc := &http.Client{Transport: &headerTransport{
-		base:    &bearerTransport{base: u.base, server: u.name, subject: subject, creds: u.creds},
-		headers: u.cfg.Headers,
-	}}
-	t := &mcp.StreamableClientTransport{Endpoint: u.cfg.URL, HTTPClient: hc, DisableStandaloneSSE: true, MaxRetries: -1}
-	cs, err := u.client.Connect(ctx, t, nil)
+	cs, err := u.open(ctx, subject)
 	if err != nil {
 		return nil, err
 	}

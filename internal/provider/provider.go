@@ -119,6 +119,15 @@ type Dialer interface {
 	DialRealtime(ctx context.Context, model string, header http.Header, subprotocols []string) (*websocket.Conn, *http.Response, error)
 }
 
+// RealtimeCaller is implemented by adapters that serve realtime
+// sessions over WebRTC. A call is made with Forward, at
+// /realtime/calls; its media runs between the client and the provider,
+// and DialRealtimeCall opens the WebSocket that carries its events.
+type RealtimeCaller interface {
+	Forwarder
+	DialRealtimeCall(ctx context.Context, callID string) (*websocket.Conn, *http.Response, error)
+}
+
 // LiveDialer is implemented by adapters that serve Gemini Live
 // sessions. The session's model is sent in its first message, so the
 // connection does not depend on it. The caller closes the connection.

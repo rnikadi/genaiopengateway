@@ -2,9 +2,11 @@ package mcpgw
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"reflect"
 	"regexp"
 	"strings"
@@ -32,19 +34,31 @@ var toolName = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}$`)
 // buildServer makes the MCP server for one virtual server from the
 // catalogs of its upstreams. Items that are not allowed, or that would
 // clash with an item already added, are left out.
-func (g *Gateway) buildServer(name string, vs config.VirtualServer) *mcp.Server {
+func (g *Gateway) buildServer(name string, vs config.VirtualServer) (*mcp.Server, listHashes) {
 	s := mcp.NewServer(&mcp.Implementation{Name: "genaiopengateway/" + name, Version: Version}, &mcp.ServerOptions{
 		Instructions: vs.Description,
 		// Advertised even when empty, so a client keeps listing as
-		// upstreams come and go.
+		// upstreams come and go. Clients that listen are told of changes
+		// (listen.go).
 		Capabilities: &mcp.ServerCapabilities{
-			Tools: &mcp.ToolCapabilities{}, Prompts: &mcp.PromptCapabilities{}, Resources: &mcp.ResourceCapabilities{},
+			Tools:     &mcp.ToolCapabilities{ListChanged: true},
+			Prompts:   &mcp.PromptCapabilities{ListChanged: true},
+			Resources: &mcp.ResourceCapabilities{ListChanged: true},
 		},
 		Logger: g.opts.Log,
 	})
 	s.AddReceivingMiddleware(g.middleware(name))
 	log := g.opts.Log.With("virtual_server", name)
 	tools, prompts, uris := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	var listed [3]hash.Hash
+	for i := range listed {
+		listed[i] = sha256.New()
+	}
+	note := func(kind int, v any) {
+		raw, _ := json.Marshal(v)
+		listed[kind].Write(raw)
+		listed[kind].Write([]byte{0})
+	}
 	for _, ref := range vs.Servers {
 		u := g.upstreams[ref.Server]
 		prefix := ref.NamePrefix()
@@ -59,6 +73,7 @@ func (g *Gateway) buildServer(name string, vs config.VirtualServer) *mcp.Server 
 				InputSchema: &jsonschema.Schema{Type: "object"},
 			}, g.connectTool(u))
 			tools[prefix+"connect"] = true
+			note(listTools, prefix+"connect")
 		}
 		if c == nil {
 			continue
@@ -83,6 +98,7 @@ func (g *Gateway) buildServer(name string, vs config.VirtualServer) *mcp.Server 
 				continue
 			}
 			tools[exposed] = true
+			note(listTools, &tt)
 		}
 		if ref.ExposesPrompts() {
 			for _, p := range c.Prompts {
@@ -95,6 +111,7 @@ func (g *Gateway) buildServer(name string, vs config.VirtualServer) *mcp.Server 
 				pp.Name = exposed
 				s.AddPrompt(&pp, g.forwardPrompt(u, p.Name))
 				prompts[exposed] = true
+				note(listPrompts, &pp)
 			}
 		}
 		if ref.ExposesResources() {
@@ -106,6 +123,7 @@ func (g *Gateway) buildServer(name string, vs config.VirtualServer) *mcp.Server 
 				}
 				s.AddResource(r, read)
 				uris[r.URI] = true
+				note(listResources, r)
 			}
 			for _, t := range c.Templates {
 				if uris[t.URITemplate] {
@@ -117,10 +135,15 @@ func (g *Gateway) buildServer(name string, vs config.VirtualServer) *mcp.Server 
 					continue
 				}
 				uris[t.URITemplate] = true
+				note(listResources, t)
 			}
 		}
 	}
-	return s
+	var hashes listHashes
+	for i := range listed {
+		listed[i].Sum(hashes[i][:0])
+	}
+	return s, hashes
 }
 
 // addTool adds a tool, turning the SDK's panic on an invalid definition
@@ -161,6 +184,9 @@ type call struct {
 	caller          *Caller
 	virtualServer   string
 	protocolVersion string
+	// held is set while the upstream call is held open for the server's
+	// requests (relay.go).
+	held *held
 }
 
 type callKey struct{}
@@ -191,11 +217,23 @@ func (g *Gateway) forwardTool(u *upstream, name string) mcp.ToolHandler {
 				return blockedResult(blocked), nil
 			}
 		}
-		var res *mcp.CallToolResult
-		err := g.forward(ctx, u, "tools/call", name, func(ctx context.Context, cs *mcp.ClientSession, meta mcp.Meta) (err error) {
-			res, err = cs.CallTool(ctx, &mcp.CallToolParams{Meta: meta, Name: name, Arguments: args})
-			return err
-		})
+		in := input{responses: req.Params.InputResponses, state: req.Params.RequestState}
+		res, need, err := converse(ctx, g, u, "tools/call", name, in,
+			func(ctx context.Context, cs *mcp.ClientSession, meta mcp.Meta) (*mcp.CallToolResult, error) {
+				return cs.CallTool(ctx, &mcp.CallToolParams{Meta: meta, Name: name, Arguments: args, InputResponses: in.responses, RequestState: in.state})
+			},
+			func(r *mcp.CallToolResult) (bool, mcp.InputRequestMap, string) {
+				return r != nil && r.NeedsInput(), r.InputRequests, r.RequestState
+			})
+		var ie *inputError
+		if errors.As(err, &ie) {
+			g.opts.Metrics.ObserveMCPToolCall(u.name, name, telemetry.MCPToolError)
+			return blockedResult(ie.msg), nil
+		}
+		if need != nil {
+			g.opts.Metrics.ObserveMCPToolCall(u.name, name, telemetry.MCPOk)
+			return &mcp.CallToolResult{InputRequests: need.requests, RequestState: need.state}, nil
+		}
 		if err == nil && res != nil && g.opts.Guard != nil {
 			res = g.guardResult(ctx, c, res)
 		}
@@ -307,12 +345,18 @@ func (g *Gateway) forwardPrompt(u *upstream, name string) mcp.PromptHandler {
 	return func(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 		c := callFrom(ctx)
 		c.Server, c.Name = u.name, name
-		var res *mcp.GetPromptResult
-		err := g.forward(ctx, u, "prompts/get", name, func(ctx context.Context, cs *mcp.ClientSession, meta mcp.Meta) (err error) {
-			res, err = cs.GetPrompt(ctx, &mcp.GetPromptParams{Meta: meta, Name: name, Arguments: req.Params.Arguments})
-			return err
-		})
-		return res, rpcConnect(err)
+		in := input{responses: req.Params.InputResponses, state: req.Params.RequestState}
+		res, need, err := converse(ctx, g, u, "prompts/get", name, in,
+			func(ctx context.Context, cs *mcp.ClientSession, meta mcp.Meta) (*mcp.GetPromptResult, error) {
+				return cs.GetPrompt(ctx, &mcp.GetPromptParams{Meta: meta, Name: name, Arguments: req.Params.Arguments, InputResponses: in.responses, RequestState: in.state})
+			},
+			func(r *mcp.GetPromptResult) (bool, mcp.InputRequestMap, string) {
+				return r != nil && r.NeedsInput(), r.InputRequests, r.RequestState
+			})
+		if need != nil {
+			return &mcp.GetPromptResult{InputRequests: need.requests, RequestState: need.state}, nil
+		}
+		return res, rpcInput(rpcConnect(err))
 	}
 }
 
@@ -321,12 +365,18 @@ func (g *Gateway) forwardRead(u *upstream) mcp.ResourceHandler {
 		uri := req.Params.URI
 		c := callFrom(ctx)
 		c.Server, c.Name = u.name, uri
-		var res *mcp.ReadResourceResult
-		err := g.forward(ctx, u, "resources/read", uri, func(ctx context.Context, cs *mcp.ClientSession, meta mcp.Meta) (err error) {
-			res, err = cs.ReadResource(ctx, &mcp.ReadResourceParams{Meta: meta, URI: uri})
-			return err
-		})
-		return res, rpcConnect(err)
+		in := input{responses: req.Params.InputResponses, state: req.Params.RequestState}
+		res, need, err := converse(ctx, g, u, "resources/read", uri, in,
+			func(ctx context.Context, cs *mcp.ClientSession, meta mcp.Meta) (*mcp.ReadResourceResult, error) {
+				return cs.ReadResource(ctx, &mcp.ReadResourceParams{Meta: meta, URI: uri, InputResponses: in.responses, RequestState: in.state})
+			},
+			func(r *mcp.ReadResourceResult) (bool, mcp.InputRequestMap, string) {
+				return r != nil && r.NeedsInput(), r.InputRequests, r.RequestState
+			})
+		if need != nil {
+			return &mcp.ReadResourceResult{InputRequests: need.requests, RequestState: need.state}, nil
+		}
+		return res, rpcInput(rpcConnect(err))
 	}
 }
 
@@ -348,6 +398,7 @@ func (g *Gateway) forward(ctx context.Context, u *upstream, method, name string,
 	c := callFrom(ctx)
 	ctx, cancel := detach(ctx)
 	defer cancel()
+	ctx = context.WithValue(ctx, callKey{}, c)
 	subject := ""
 	if u.perUser() {
 		if c.caller == nil || c.caller.Subject == "" {
@@ -377,7 +428,7 @@ func (g *Gateway) forward(ctx context.Context, u *upstream, method, name string,
 		return rpcErr
 	}
 	msg := "upstream MCP server " + u.name + " failed"
-	if errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, context.DeadlineExceeded) || (c.held != nil && context.Cause(c.held.ctx) == context.DeadlineExceeded) {
 		msg = "upstream MCP server " + u.name + " timed out"
 	}
 	g.opts.Log.Warn("MCP upstream request failed", "server", u.name, "method", method, "err", err)
@@ -451,6 +502,7 @@ var knownMethods = map[string]bool{
 	"initialize": true, "server/discover": true, "ping": true,
 	"tools/list": true, "tools/call": true, "prompts/list": true, "prompts/get": true,
 	"resources/list": true, "resources/templates/list": true, "resources/read": true,
+	listenMethod: true,
 }
 
 // middleware wraps every request to a virtual server: it continues the
@@ -461,6 +513,9 @@ func (g *Gateway) middleware(vs string) mcp.Middleware {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 			if strings.HasPrefix(method, "notifications/") {
 				return next(ctx, method, req)
+			}
+			if method == listenMethod {
+				return g.listen(ctx, vs, next, req)
 			}
 			start := time.Now()
 			caller := callerOf(req)

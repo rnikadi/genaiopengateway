@@ -59,13 +59,23 @@ func (p *Provider) Supports(e provider.Endpoint) bool {
 // DialRealtime implements provider.Dialer: the realtime WebSocket at
 // the base URL, with the provider's key.
 func (p *Provider) DialRealtime(ctx context.Context, model string, header http.Header, subprotocols []string) (*websocket.Conn, *http.Response, error) {
+	return p.dialRealtime(ctx, "model", model, header, subprotocols)
+}
+
+// DialRealtimeCall implements provider.RealtimeCaller: the WebSocket
+// beside a WebRTC call, which carries the call's events.
+func (p *Provider) DialRealtimeCall(ctx context.Context, callID string) (*websocket.Conn, *http.Response, error) {
+	return p.dialRealtime(ctx, "call_id", callID, nil, nil)
+}
+
+func (p *Provider) dialRealtime(ctx context.Context, param, value string, header http.Header, subprotocols []string) (*websocket.Conn, *http.Response, error) {
 	u, err := url.Parse(p.cfg.BaseURL + "/realtime")
 	if err != nil {
 		return nil, nil, err
 	}
 	u.Scheme = map[string]string{"https": "wss", "http": "ws"}[u.Scheme]
 	q := u.Query()
-	q.Set("model", model)
+	q.Set(param, value)
 	u.RawQuery = q.Encode()
 	h := header.Clone()
 	if h == nil {

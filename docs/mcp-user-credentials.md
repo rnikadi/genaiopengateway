@@ -58,10 +58,28 @@ MCP client retries the call ──▶ gateway calls GitHub as alice
 
 1. **A call needs a token.** A `tools/call`, `prompts/get` or `resources/read` routed to a `user_auth` upstream, from a caller with OAuth subject `alice` and no stored token, does not reach the upstream. The gateway creates a **connect request**: a random id, the server, the subject, the virtual server, and a 10 minute expiry, stored in the store.
 2. **The client is told where to go.** The gateway answers with the JSON-RPC error `-32042` (URL elicitation required, MCP 2025-11-25) carrying `{mode: "url", url, elicitationId, message}`. Its message contains the link too, for clients that only show messages. A `tools/call` from a client on an older version (by its `Mcp-Protocol-Version` header; the gateway is stateless, so it does not see the client's capabilities) gets a tool result with `isError: true` and the same link and instructions as text, which every client shows to the user.
-3. **The user opens the URL**, `{public_url}/mcp/connect/{id}`. When `sso.oidc` is configured with the same issuer as `mcp.oauth`, the gateway first signs the user in with the identity provider, the same one that issues MCP tokens, and refuses to continue unless the signed-in subject equals the connect request's subject. This is what stops a leaked or phished link from binding someone else's upstream account to Alice. Without it the link itself is the proof, so it is single use, expires in 10 minutes, and is only ever sent to the authenticated MCP client. Either way the link works once, and a cookie set when it is opened must come back with the upstream's callback, so the flow finishes in the browser that started it. Signing in for this check does not need a role on the gateway and starts no admin session.
+3. **The user opens the URL**, `{public_url}/mcp/connect/{id}`. When `sso.oidc` is configured with the same issuer as `mcp.oauth`, the gateway first signs the user in with the identity provider, the same one that issues MCP tokens, and refuses to continue unless the signed-in subject equals the connect request's subject. With SAML sign-in the gateway does the same when `sso.saml.mcp_subject_attribute` is set (below). This is what stops a leaked or phished link from binding someone else's upstream account to Alice. Without it the link itself is the proof, so it is single use, expires in 10 minutes, and is only ever sent to the authenticated MCP client. Either way the link works once, and a cookie set when it is opened must come back with the upstream's callback, so the flow finishes in the browser that started it. Signing in for this check does not need a role on the gateway and starts no admin session.
 4. **Upstream consent.** The gateway redirects to the upstream's authorization endpoint with PKCE, `state` bound to the connect request, and the configured scopes.
 5. **Callback.** The gateway exchanges the code, encrypts and stores the access and refresh tokens for `(server, subject)`, deletes the connect request, writes an audit entry (`mcp.connection.create`), and shows a page saying the connection worked and the user can return to their client.
 6. **Retry.** The client calls again. Clients that support URL elicitation retry on their own after `notifications/elicitation/complete`; the gateway cannot send that on a stateless request, so they retry when the user confirms, as the spec allows.
+
+### With SAML sign-in
+
+MCP clients always authenticate with OAuth tokens, so `mcp.oauth` names an OAuth issuer even where people sign in to the gateway with SAML. The two usually are the same identity provider, which knows each person under one identifier. Tell the gateway which SAML attribute carries the value that is the `sub` of the same person's MCP tokens:
+
+```yaml
+sso:
+  saml:
+    idp_metadata_url: https://idp.example.com/metadata
+    acs_url: https://gateway.example.com/ui/auth/saml/acs
+    mcp_subject_attribute: uid        # or NameID
+```
+
+The connect link and the connections page then send the browser through SAML sign-in and compare that attribute with the connect request's subject, as with OIDC. It needs no role and starts no admin session. An assertion without the attribute, or with several values for it, is refused.
+
+To find the attribute, decode one MCP access token and look at its `sub`, then have the identity provider send the same value in the assertion. Where `sub` is the user's id in the identity provider (Keycloak's default), add an attribute mapped to that id. Where it is the sign-in name or email, the NameID often already equals it. Where the identity provider issues a different `sub` to each application, the two cannot be compared: keep the link as the proof, or sign in to the gateway with OIDC.
+
+Set it only when the two values really are the same for every user: it is what stops one person from finishing a link made for another. Without it the link itself is the proof, as described above.
 
 ## Calls with a user's token
 
@@ -97,7 +115,7 @@ New table `mcp_connect_requests` (id hash, the hash of the state sent upstream o
 
 - `GET /admin/v1/mcp/connections?server=&subject=`: subject, server, scopes, created, last used. Never tokens.
 - `DELETE /admin/v1/mcp/connections/{server}/{subject}`: revokes at the upstream when it has a revocation endpoint (RFC 7009), then deletes. Audited.
-- **A self-service page**, `{public_url}/mcp/connections` (v1.2). A user signs in with the identity provider and sees the upstream accounts they connected: the server, the scopes, when they connected and when it was last used, never tokens. **Disconnect** revokes the token at the upstream when it has a revocation endpoint, deletes it, and is audited as `mcp.connection.delete` with the user as the actor. The page also names the `user_auth` servers they have not connected. It needs no role on the gateway and starts no admin session, like the connect flow: a signed cookie remembers who signed in for 15 minutes, and the disconnect form carries a token from that cookie and must come from the gateway's own origin. The page exists only when `sso.oidc` uses the same issuer as `mcp.oauth`, because that is the only way the gateway can tell that the browser's user is the MCP user; otherwise owners revoke connections. Developers find a link to it on **My keys and access**.
+- **A self-service page**, `{public_url}/mcp/connections` (v1.2). A user signs in with the identity provider and sees the upstream accounts they connected: the server, the scopes, when they connected and when it was last used, never tokens. **Disconnect** revokes the token at the upstream when it has a revocation endpoint, deletes it, and is audited as `mcp.connection.delete` with the user as the actor. The page also names the `user_auth` servers they have not connected. It needs no role on the gateway and starts no admin session, like the connect flow: a signed cookie remembers who signed in for 15 minutes, and the disconnect form carries a token from that cookie and must come from the gateway's own origin. The page exists only when the gateway can tell that the browser's user is the MCP user: `sso.oidc` uses the same issuer as `mcp.oauth`, or `sso.saml.mcp_subject_attribute` is set. Otherwise owners revoke connections. Developers find a link to it on **My keys and access**.
 - Roles: owners see and revoke all connections. Organization admins and viewers see none, because connections belong to people, not organizations.
 - The admin UI's MCP page gets a Connections table with a Revoke action.
 

@@ -434,6 +434,11 @@ type SAML struct {
 	EmailAttribute  string `yaml:"email_attribute"`
 	NameAttribute   string `yaml:"name_attribute"`
 	GroupsAttribute string `yaml:"groups_attribute"`
+	// MCPSubjectAttribute names the assertion attribute whose value is
+	// the subject of the same user's MCP access tokens, or "NameID" for
+	// the NameID. With it, the MCP connect flow and connections page
+	// check who the browser's user is (docs/mcp-user-credentials.md).
+	MCPSubjectAttribute string `yaml:"mcp_subject_attribute"`
 	// SPCertificate and SPPrivateKey are the gateway's own key pair, as
 	// PEM (gateway saml-keygen makes one). With them the gateway signs
 	// its requests, takes encrypted assertions and supports single
@@ -800,12 +805,26 @@ type A2A struct {
 	// Default: mcp.public_url, or else the URL of each card request.
 	PublicURL string              `yaml:"public_url"`
 	Agents    map[string]A2AAgent `yaml:"agents"`
+	Push      A2APush             `yaml:"push"`
+}
+
+// A2APush lets callers set push notifications, which the gateway takes
+// from the agent and delivers (docs/a2a.md#push-notifications).
+type A2APush struct {
+	Enabled bool `yaml:"enabled"`
+	// AllowedHosts are the hosts callers' webhooks may be on: a host
+	// name, or "*." and a domain for its subdomains. They may be
+	// internal. Empty allows any host with a public address, over HTTPS.
+	AllowedHosts []string `yaml:"allowed_hosts"`
 }
 
 // A2AAgent is an upstream A2A agent reached over JSON-RPC.
 type A2AAgent struct {
 	// URL is the agent's JSON-RPC endpoint.
 	URL string `yaml:"url"`
+	// RESTURL is the base of the agent's HTTP+JSON (REST) binding, when
+	// it offers one. At least one of URL and RESTURL is set.
+	RESTURL string `yaml:"rest_url"`
 	// CardURL is where the agent's card is. Default: the URL's origin
 	// with /.well-known/agent-card.json.
 	CardURL     string            `yaml:"card_url"`
@@ -851,7 +870,21 @@ type MCPServer struct {
 	// UserAuth makes the gateway call this server with each user's own
 	// OAuth token (docs/mcp-user-credentials.md).
 	UserAuth *UserAuth `yaml:"user_auth"`
+	// ClientRequests names what this server may ask of the client
+	// through the gateway while it serves a call: "elicitation" (input
+	// from the user) and "sampling" (a completion from the client's
+	// model). Empty means nothing (docs/mcp.md#requests-for-input).
+	ClientRequests []string `yaml:"client_requests"`
 }
+
+// What an MCP server may ask of the client.
+const (
+	MCPElicitation = "elicitation"
+	MCPSampling    = "sampling"
+)
+
+// Relays reports whether the server may ask the client for kind.
+func (s MCPServer) Relays(kind string) bool { return slices.Contains(s.ClientRequests, kind) }
 
 // UserAuth registers the gateway as an OAuth client of an upstream MCP
 // server. Endpoints left empty are discovered from the server's metadata.
@@ -1595,6 +1628,9 @@ func (c *Config) validateMCP(add func(string, ...any)) {
 			if s.Command[0] == "" {
 				add("mcp server %q: command must name a program", name)
 			}
+			if len(s.ClientRequests) > 0 {
+				add("mcp server %q: client_requests is for url servers", name)
+			}
 			if len(s.Headers) > 0 || s.UserAuth != nil {
 				add("mcp server %q: headers and user_auth are for url servers; a command server takes env", name)
 			}
@@ -1609,6 +1645,11 @@ func (c *Config) validateMCP(add func(string, ...any)) {
 		}
 		if s.PinTools == "" {
 			s.PinTools = PinOn
+		}
+		for _, k := range s.ClientRequests {
+			if k != MCPElicitation && k != MCPSampling {
+				add("mcp server %q: client_requests takes elicitation and sampling, not %q", name, k)
+			}
 		}
 		if s.PinTools == PinStrict && c.Store.Driver == "" {
 			add("mcp server %q: pin_tools: strict needs a store, where approvals are kept", name)
@@ -1761,12 +1802,32 @@ func (c *Config) validateA2A(add func(string, ...any)) {
 	if a.PublicURL != "" && !httpURL(a.PublicURL) {
 		add("a2a.public_url must be an http or https URL")
 	}
+	if a.Push.Enabled {
+		if a.PublicURL == "" && c.MCP.PublicURL == "" {
+			add("a2a.push needs a2a.public_url, where agents send notifications")
+		}
+		if c.Store.Driver == "" {
+			add("a2a.push needs a store, where callers' webhooks are kept")
+		}
+	}
+	for _, h := range a.Push.AllowedHosts {
+		if h == "" || strings.ContainsAny(h, "/: ") || strings.Contains(strings.TrimPrefix(h, "*."), "*") {
+			add("a2a.push.allowed_hosts: %q must be a host name, or *. and a domain", h)
+		}
+	}
 	for name, ag := range a.Agents {
 		if !mcpName.MatchString(name) {
 			add("a2a agent %q: names use lowercase letters, digits, - and _", name)
 		}
-		if !httpURL(ag.URL) {
+		ag.RESTURL = strings.TrimRight(ag.RESTURL, "/")
+		a.Agents[name] = ag
+		switch {
+		case ag.URL == "" && ag.RESTURL == "":
+			add("a2a agent %q: set url (JSON-RPC), rest_url (HTTP+JSON) or both", name)
+		case ag.URL != "" && !httpURL(ag.URL):
 			add("a2a agent %q: url must be an http or https URL", name)
+		case ag.RESTURL != "" && !httpURL(ag.RESTURL):
+			add("a2a agent %q: rest_url must be an http or https URL", name)
 		}
 		if ag.CardURL != "" && !httpURL(ag.CardURL) {
 			add("a2a agent %q: card_url must be an http or https URL", name)

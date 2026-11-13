@@ -4,7 +4,7 @@ The gateway is split into a stateless **data plane** that serves every request a
 
 Model calls (and MCP calls from v0.2, see [mcp.md](mcp.md)) pass through the same chain:
 
-1. **Ingress:** HTTP and SSE today; WebSocket and WebRTC with realtime audio in v0.8.
+1. **Ingress:** HTTP and SSE today; WebSocket with realtime audio since v0.8, and WebRTC signalling for realtime calls, whose audio runs between the client and the provider.
 2. **Authentication:** gateway key to org, team and key policy, from the in-memory snapshot.
 3. **Policy and limits:** model allow lists, RPM, TPM and budgets at every level.
 4. **Guardrails:** request size limits in v0.1; PII, patterns, classifier models and webhooks in v0.5 ([guardrails.md](guardrails.md)).

@@ -40,19 +40,29 @@ type myConn struct {
 	Expires int64  `json:"e"`
 }
 
-func myConnMAC(cfg *config.OIDC, raw []byte) []byte {
-	m := hmac.New(sha256.New, flowKey(cfg))
+// myConnMAC signs the cookie with a key every replica has: the one that
+// signs OIDC sign-in flows, or with SAML one derived from the key that
+// encrypts stored secrets, which user_auth servers require.
+func myConnMAC(cfg *config.Config, raw []byte) []byte {
+	var key []byte
+	if verifySubject(cfg) == viaOIDC {
+		key = flowKey(cfg.SSO.OIDC)
+	} else {
+		sum := sha256.Sum256([]byte("genaiopengateway mcp connections\x00" + cfg.Secrets.EncryptionKey.Value()))
+		key = sum[:]
+	}
+	m := hmac.New(sha256.New, key)
 	m.Write([]byte("mcp connections\x00"))
 	m.Write(raw)
 	return m.Sum(nil)
 }
 
-func sealMyConn(cfg *config.OIDC, c *myConn) string {
+func sealMyConn(cfg *config.Config, c *myConn) string {
 	raw, _ := json.Marshal(c)
 	return base64.RawURLEncoding.EncodeToString(raw) + "." + base64.RawURLEncoding.EncodeToString(myConnMAC(cfg, raw))
 }
 
-func openMyConn(cfg *config.OIDC, v string) (*myConn, error) {
+func openMyConn(cfg *config.Config, v string) (*myConn, error) {
 	body, sig, ok := strings.Cut(v, ".")
 	raw, err1 := base64.RawURLEncoding.DecodeString(body)
 	mac, err2 := base64.RawURLEncoding.DecodeString(sig)
@@ -84,7 +94,7 @@ func userAuthServers(cfg *config.Config) []string {
 // myConnectionsURL is the page's address, or empty when the gateway
 // cannot tell who a user is or has no per-user upstreams.
 func myConnectionsURL(cfg *config.Config) string {
-	if !verifySubject(cfg) || len(userAuthServers(cfg)) == 0 {
+	if verifySubject(cfg) == "" || len(userAuthServers(cfg)) == 0 {
 		return ""
 	}
 	return strings.TrimRight(cfg.MCP.PublicURL, "/") + myConnectionsPath
@@ -94,12 +104,16 @@ func myConnectionsURL(cfg *config.Config) string {
 // first.
 func (s *Server) myConnections(w http.ResponseWriter, r *http.Request) {
 	cfg := s.rt.Load().cfg
-	if !verifySubject(cfg) {
+	if verifySubject(cfg) == "" {
 		connectPage(w, http.StatusNotFound, "This page is not set up",
-			"Seeing your own MCP connections needs the gateway's sign-in to use the identity provider that issues MCP tokens. Ask an administrator to remove a connection for you.")
+			"Seeing your own MCP connections needs the gateway's sign-in to use the identity provider that issues MCP tokens, or with SAML the attribute that carries their subject. Ask an administrator to remove a connection for you.")
 		return
 	}
-	me, err := openMyConn(cfg.SSO.OIDC, readCookie(r, myConnCookie))
+	me, err := openMyConn(cfg, readCookie(r, myConnCookie))
+	if err != nil && verifySubject(cfg) == viaSAML {
+		s.samlStart(w, r, cfg.SSO.SAML, samlFlow{Return: "/ui/", Mine: true})
+		return
+	}
 	if err != nil {
 		c, err := s.oidc(r.Context(), cfg.SSO.OIDC)
 		if err != nil {
@@ -138,7 +152,7 @@ func (s *Server) myConnections(w http.ResponseWriter, r *http.Request) {
 }
 
 // mySignedIn finishes the sign-in for the page.
-func (s *Server) mySignedIn(w http.ResponseWriter, r *http.Request, cfg *config.OIDC, subject, email string) {
+func (s *Server) mySignedIn(w http.ResponseWriter, r *http.Request, cfg *config.Config, subject, email string) {
 	me := &myConn{Subject: subject, Email: email, CSRF: randomString(), Expires: time.Now().Add(myConnTTL).Unix()}
 	setCookie(w, r, myConnCookie, sealMyConn(cfg, me), myConnTTL)
 	http.Redirect(w, r, myConnectionsPath, http.StatusFound)
@@ -148,11 +162,11 @@ func (s *Server) mySignedIn(w http.ResponseWriter, r *http.Request, cfg *config.
 // revoking it at the upstream when the upstream allows.
 func (s *Server) disconnectMine(w http.ResponseWriter, r *http.Request) {
 	cfg := s.rt.Load().cfg
-	if !verifySubject(cfg) {
+	if verifySubject(cfg) == "" {
 		http.NotFound(w, r)
 		return
 	}
-	me, err := openMyConn(cfg.SSO.OIDC, readCookie(r, myConnCookie))
+	me, err := openMyConn(cfg, readCookie(r, myConnCookie))
 	if err != nil {
 		connectPage(w, http.StatusUnauthorized, "Your sign-in has expired", "Open your connections page again to sign in.")
 		return

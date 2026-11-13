@@ -1,0 +1,55 @@
+# Cedar policies shared by organizations, reconciled by the operator
+# (docs/operator.md). They are added in front of the policies of each
+# GatewayOrganization the set selects.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: gatewaycedarpolicysets.genaiopengateway.io
+spec:
+  group: genaiopengateway.io
+  scope: Namespaced
+  names:
+    plural: gatewaycedarpolicysets
+    singular: gatewaycedarpolicyset
+    kind: GatewayCedarPolicySet
+    shortNames: [gcedar]
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - {name: All, type: boolean, jsonPath: .spec.allOrganizations}
+        - {name: Ready, type: string, jsonPath: ".status.conditions[?(@.type==\"Ready\")].status"}
+        - {name: Age, type: date, jsonPath: .metadata.creationTimestamp}
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [cedar]
+              properties:
+                cedar: {type: string, description: Cedar policies (docs/cedar.md).}
+                organizations:
+                  type: array
+                  description: Names of the organizations the policies apply to, each managed by a GatewayOrganization.
+                  items: {type: string}
+                allOrganizations: {type: boolean, description: Apply the policies to every organization managed by a GatewayOrganization.}
+            status:
+              type: object
+              properties:
+                observedGeneration: {type: integer}
+                appliedHash: {type: string}
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: [type, status]
+                    properties:
+                      type: {type: string}
+                      status: {type: string}
+                      reason: {type: string}
+                      message: {type: string}
+                      lastTransitionTime: {type: string, format: date-time}

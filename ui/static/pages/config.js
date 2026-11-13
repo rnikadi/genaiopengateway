@@ -507,6 +507,8 @@ function MCPServerForm({ spec, onChange }) {
       <//>
     </div>
     <${Field} label="Headers" setting="mcp.servers.headers" hint="Sent to the server, such as an API key. Values are encrypted."><${Headers} ...${p} path="headers" secret /><//>
+    <${Field} label="May ask the client for" setting="mcp.servers.client_requests" hint="What the server may request while it serves a call. elicitation: input from the user, shown by their MCP client. sampling: a completion from the client's model. None checked: such requests are refused. Check these only for servers you trust to ask people questions.">
+      <${Checks} ...${p} path="client_requests" options=${['elicitation', 'sampling']} /><//>
     <label class="check"><input type="checkbox" checked=${userAuth} onChange=${() => onChange(put(spec, 'user_auth', userAuth ? undefined : { client_id: '' }))} /> Call the server with each user's own sign-in (OAuth)</label>
     ${userAuth && html`
       <div class="row">
@@ -603,7 +605,8 @@ function AgentForm({ spec, onChange }) {
   const { me } = useSession();
   const p = { spec, onChange };
   return html`
-    <${Field} label="URL" setting="a2a.agents.url" hint="The agent's JSON-RPC endpoint."><${Text} ...${p} path="url" required /><//>
+    <${Field} label="URL" setting="a2a.agents.url" hint="The agent's JSON-RPC endpoint. Leave empty for an agent that offers only HTTP+JSON."><${Text} ...${p} path="url" /><//>
+    <${Field} label="HTTP+JSON URL" setting="a2a.agents.rest_url" hint="The base of the agent's HTTP+JSON (REST) binding, if it offers one. Callers can then use that binding through the gateway too."><${Text} ...${p} path="rest_url" /><//>
     <${Field} label="Card URL" setting="a2a.agents.card_url" hint="Default: /.well-known/agent-card.json at the URL's host."><${Text} ...${p} path="card_url" /><//>
     <${Field} label="Description" setting="a2a.agents.description"><${Text} ...${p} path="description" /><//>
     <${Field} label="Timeout" setting="a2a.agents.timeout" hint="For calls that do not stream, and for a stream to start. Default: 5m."><${Text} ...${p} path="timeout" placeholder="5m" /><//>

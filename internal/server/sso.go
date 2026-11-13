@@ -217,7 +217,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if f.Mine {
-		s.mySignedIn(w, r, oc, idt.Subject, verifiedEmail(claims))
+		s.mySignedIn(w, r, s.rt.Load().cfg, idt.Subject, verifiedEmail(claims))
 		return
 	}
 	if _, ok := claims[oc.GroupsClaim]; !ok {

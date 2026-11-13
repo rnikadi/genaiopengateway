@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestA2AObjects(t *testing.T) {
@@ -32,6 +33,64 @@ func TestA2AObjects(t *testing.T) {
 			}
 			if _, err := s.GetA2AObject(ctx, "planner", A2ATask, "missing"); !errors.Is(err, ErrNotFound) {
 				t.Fatalf("missing = %v", err)
+			}
+		})
+	}
+}
+
+func TestA2APush(t *testing.T) {
+	for name, s := range backends(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			now := time.Now()
+			for _, p := range []*A2APush{
+				{ID: "h1", Agent: "planner", TaskID: "t1", ConfigID: "c1", OrgID: "org", TeamID: "team", KeyID: "k", URL: "https://a.example/1", Secret: "sealed", ExpiresAt: now.Add(time.Hour)},
+				{ID: "h2", Agent: "planner", OrgID: "org", TeamID: "team", KeyID: "k", URL: "https://a.example/2", ExpiresAt: now.Add(time.Hour)},
+				{ID: "h3", Agent: "planner", TaskID: "t1", ConfigID: "c3", OrgID: "org", TeamID: "team", KeyID: "k", URL: "https://a.example/3", ExpiresAt: now.Add(-time.Minute)},
+			} {
+				if err := s.InsertA2APush(ctx, p); err != nil {
+					t.Fatal(err)
+				}
+			}
+			p, err := s.GetA2APush(ctx, "h1", now)
+			if err != nil || p.URL != "https://a.example/1" || p.Secret != "sealed" || p.TaskID != "t1" || p.TeamID != "team" {
+				t.Fatalf("get: %+v %v", p, err)
+			}
+			if _, err := s.GetA2APush(ctx, "h3", now); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("an expired configuration: %v", err)
+			}
+			// Naming fills in what is unknown and changes nothing known.
+			for _, id := range []string{"h1", "h2"} {
+				if err := s.NameA2APush(ctx, id, "t9", "c9"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if p, _ := s.GetA2APush(ctx, "h1", now); p.TaskID != "t1" || p.ConfigID != "c1" {
+				t.Fatalf("a named configuration was renamed: %+v", p)
+			}
+			if p, _ := s.GetA2APush(ctx, "h2", now); p.TaskID != "t9" || p.ConfigID != "c9" {
+				t.Fatalf("naming: %+v", p)
+			}
+			if err := s.DeleteA2APush(ctx, "planner", "t1", "other"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.GetA2APush(ctx, "h1", now); err != nil {
+				t.Fatal("deleting another configuration removed this one")
+			}
+			if err := s.DeleteA2APush(ctx, "planner", "t1", "c1"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.GetA2APush(ctx, "h1", now); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("after delete: %v", err)
+			}
+			if err := s.DeleteA2APush(ctx, "planner", "t9", ""); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.GetA2APush(ctx, "h2", now); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("after deleting a task's configurations: %v", err)
+			}
+			if n, err := s.PruneA2APush(ctx, now); err != nil || n != 1 {
+				t.Fatalf("prune: %d %v", n, err)
 			}
 		})
 	}

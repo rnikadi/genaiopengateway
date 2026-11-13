@@ -96,6 +96,7 @@ const sections = [
       { path: 'sso.saml.email_attribute', label: 'Email attribute', type: 'text', hint: 'Empty: email, mail or the NameID.' },
       { path: 'sso.saml.name_attribute', label: 'Name attribute', type: 'text', hint: 'Empty: displayName or name.' },
       { path: 'sso.saml.groups_attribute', label: 'Groups attribute', type: 'text' },
+      { path: 'sso.saml.mcp_subject_attribute', label: 'MCP subject attribute', type: 'text', hint: "The attribute whose value equals the subject (sub) of the same person's MCP access tokens, or NameID. With it, people prove who they are before they connect an MCP server to their own account. Empty: the connect link alone is the proof." },
       { path: 'sso.saml.sp_certificate', label: "Gateway's certificate", type: 'textarea', hint: 'PEM. With the private key, the gateway signs its requests, takes encrypted assertions and supports single logout. Make a pair with: genaiopengateway saml-keygen.' },
       { path: 'sso.saml.sp_private_key', label: "Gateway's private key", type: 'secret', hint: 'PEM; pasting it on one line is fine.' },
       { path: 'sso.saml.require_encrypted_assertions', label: 'Assertions', type: 'bool', on: 'Must be encrypted', off: 'Encrypted or signed in the clear', hint: 'Refuse assertions the identity provider did not encrypt to the gateway.' },
@@ -127,6 +128,8 @@ const sections = [
     title: 'A2A agents',
     fields: [
       { path: 'a2a.public_url', label: 'Public URL named in agent cards', type: 'text', hint: 'Empty: the MCP public URL, or else the URL each card is requested at.' },
+      { path: 'a2a.push.enabled', label: 'Push notifications', type: 'bool', on: 'Delivered by the gateway', off: 'Refused', hint: 'Agents send task updates to the gateway, which delivers them to the webhook the caller set. Needs the public URL above.' },
+      { path: 'a2a.push.allowed_hosts', label: 'Hosts that webhooks may be on', type: 'list', hint: 'One per line: a host name, or *. and a domain for its subdomains. These may be internal. Empty: any host with a public address, over HTTPS.' },
     ],
   },
 ];

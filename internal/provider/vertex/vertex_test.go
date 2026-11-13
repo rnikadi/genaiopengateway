@@ -192,3 +192,44 @@ func TestImagenOnVertex(t *testing.T) {
 		t.Fatalf("%d %s", resp.StatusCode, body)
 	}
 }
+
+func TestParseTeamCredential(t *testing.T) {
+	key := "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n"
+	file := func(over map[string]string) []byte {
+		m := map[string]string{"type": "service_account", "project_id": "p1", "client_email": "a@p1.iam.gserviceaccount.com", "private_key": key}
+		for k, v := range over {
+			m[k] = v
+		}
+		b, _ := json.Marshal(TeamCredential{ServiceAccount: mustJSON(m)})
+		return b
+	}
+	c, err := ParseTeamCredential(file(nil))
+	if err != nil || c.Project != "p1" {
+		t.Fatalf("%+v %v", c, err)
+	}
+	if _, err := ParseTeamCredential(file(map[string]string{"token_uri": TokenURL})); err != nil {
+		t.Fatal(err)
+	}
+	for name, over := range map[string]map[string]string{
+		"type":      {"type": "external_account"},
+		"token uri": {"token_uri": "https://example.com/token"},
+		"email":     {"client_email": ""},
+		"key":       {"private_key": "x"},
+		"project":   {"project_id": ""},
+	} {
+		if _, err := ParseTeamCredential(file(over)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	if _, err := ParseTeamCredential([]byte(`[1]`)); err == nil {
+		t.Error("an array was accepted")
+	}
+}
+
+func mustJSON(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}

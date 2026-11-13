@@ -53,10 +53,16 @@ type Server struct {
 	draining atomic.Bool
 	log      *slog.Logger
 	client   *http.Client
-	routing  *router.Health
+	// rtc are the realtime calls over WebRTC this replica watches, by
+	// call id.
+	rtc     sync.Map
+	routing *router.Health
 	// a2aCards caches agent cards by agent name.
 	a2aCards sync.Map
-	streams  *stream.Manager
+	// pushClient delivers A2A push notifications to public addresses
+	// only; pushTrusted to the hosts the configuration names.
+	pushClient, pushTrusted *http.Client
+	streams                 *stream.Manager
 
 	// store and usage are nil when no database is configured. A data
 	// plane has no store but a plane, which its snapshot comes from and
@@ -120,6 +126,8 @@ type Server struct {
 // New builds a server. st may be nil.
 func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error) {
 	s := &Server{log: log, client: newUpstreamClient(), routing: router.NewHealth(), store: st, cfgRev: -1}
+	s.pushClient = newPublicClient()
+	s.pushTrusted = &http.Client{Transport: s.client.Transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	if strings.Contains(cfg.Admin.Token.Value(), "change-me") {
 		log.Warn("the admin token is the sample from the Compose files: anyone who has read them is an owner; set GATEWAY_ADMIN_TOKEN to a random value (openssl rand -hex 32)")
 	}
@@ -273,6 +281,8 @@ func (s *Server) Start(ctx context.Context) {
 
 // Close flushes queued usage records and releases background resources.
 func (s *Server) Close(ctx context.Context) {
+	// First, so the calls' last charges and request lines are kept.
+	s.endRealtimeCalls(ctx)
 	if s.usage != nil {
 		s.usage.Close(ctx)
 		s.calls.Close(ctx)
@@ -431,6 +441,11 @@ func (s *Server) pruneLoop(ctx context.Context) {
 				}
 			}
 		}
+		if n, err := s.store.PruneA2APush(ctx, now); err != nil {
+			s.log.Error("pruning A2A push configurations failed", "err", err)
+		} else if n > 0 {
+			s.log.Info("pruned A2A push configurations", "rows", n)
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -539,6 +554,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/batches/{id}", s.batchCall(http.MethodGet, ""))
 	mux.HandleFunc("POST /v1/batches/{id}/cancel", s.batchCall(http.MethodPost, "/cancel"))
 	mux.HandleFunc("GET /v1/realtime", s.realtime)
+	mux.HandleFunc("POST /v1/realtime/calls", s.realtimeCall)
+	mux.HandleFunc("POST /v1/realtime/calls/{call_id}/hangup", s.realtimeHangup)
+	mux.HandleFunc("OPTIONS /v1/realtime/calls", realtimeCallCORS)
+	mux.HandleFunc("OPTIONS /v1/realtime/calls/{call_id}/hangup", realtimeCallCORS)
 	mux.HandleFunc("GET /ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent", s.live)
 	mux.HandleFunc("GET /bedrock/model/{model}/invoke-with-bidirectional-stream", s.bidi)
 	if s.store != nil {
@@ -548,6 +567,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /a2a/{name}", s.serveA2A)
 	mux.HandleFunc("GET /a2a/{name}/.well-known/agent-card.json", s.a2aCard)
 	mux.HandleFunc("GET /a2a/{name}/.well-known/agent.json", s.a2aCard)
+	mux.HandleFunc("/a2a/{name}/{path...}", s.serveA2AREST)
+	mux.HandleFunc("POST /a2a/{name}/push/{secret}", s.a2aPushNotify)
 	mux.HandleFunc("/mcp/{name}", s.serveMCP)
 	if s.store != nil {
 		mux.HandleFunc("GET /mcp/connect/callback", s.connectCallback)

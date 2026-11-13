@@ -24,6 +24,7 @@ Request and response bodies follow the [OpenAI API reference](https://platform.o
 | `POST /v1/files` (`purpose=batch`), `GET /v1/files`, `GET`/`DELETE /v1/files/{id}`, `GET /v1/files/{id}/content` | Batch input files ([batch.md](batch.md)). An upload is checked line by line, routed by the model its lines name, rewritten to the target's model and kept on that target. Output and error files of the caller's batches download here too. Other teams get `404` | v0.8 |
 | `POST /v1/batches`, `GET /v1/batches`, `GET /v1/batches/{id}`, `POST /v1/batches/{id}/cancel` | OpenAI's Batch API on the input file's target. A batch is charged once, from the usage it reports when it finishes, less the target's `batch_discount` | v0.8 |
 | `GET /v1/realtime?model=` | OpenAI realtime over WebSocket ([modalities.md](modalities.md)). The key comes in `Authorization` or, from browsers, the `openai-insecure-api-key.<key>` subprotocol. Each `response.done` is charged; a spent budget or `limits.max_realtime_session` ends the session with an `error` event. Refused for keys with guardrails | v0.8 |
+| `POST /v1/realtime/calls`, `POST /v1/realtime/calls/{call_id}/hangup` | OpenAI realtime over WebRTC ([modalities.md](modalities.md#realtime-over-webrtc)). The gateway makes the call with the client's SDP offer and returns the answer; audio runs between the client and the provider, and the gateway charges each response and hangs up on a spent budget or `limits.max_realtime_session`. Refused for keys with guardrails | v1.1 |
 
 ### Authentication
 

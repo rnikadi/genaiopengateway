@@ -32,8 +32,9 @@ This document is the design for v0.2. Decisions are recorded in ADRs [0011](adr/
 | --- | --- |
 | stdio servers | Supported from v0.12 as [hosted stdio servers](#hosted-stdio-servers), set in the config file. |
 | The deprecated HTTP+SSE transport | Deprecated by the spec since 2025-03-26. |
-| Server-to-client requests: sampling, elicitation, roots, and the 2026-07-28 multi round-trip results that carry them | Rare in remote servers, and sampling, roots and logging are deprecated by the spec. A tool that needs input gets a clear error. |
-| The tasks extension, completions, subscriptions and list-changed notifications to clients | Clients see changes through `ttlMs` on list results and by listing again. |
+| Elicitation and sampling | Supported from v1.4 for servers set to ask: see [Requests for input](#requests-for-input). Roots are not passed on: a remote server has no use for the client's folders. |
+| List-changed notifications | Supported from v1.4: see [Change notifications](#change-notifications). |
+| The tasks extension, completions and resource subscriptions | The MCP SDK the gateway builds on does not implement tasks yet. Long calls run within the server's `timeout`. |
 | Admin API for MCP servers | MCP servers are infrastructure, like providers, so they live in config (ADR 0003). Pins and audit are runtime data and do have admin endpoints. |
 
 ## Request flow
@@ -68,6 +69,36 @@ With `pin_tools: true` on an upstream (the default), the gateway hashes each too
 Pins live in the store, shared by every replica. Without a store they live in memory, so every restart is a new first sight, and `strict` is not allowed. An approval shows the tool at once on the replica that took it, and on the others after their next refresh. Changes and approvals are written to the admin audit log (`mcp_tool.changed` by `gateway`, `mcp_tool.approve` by the admin).
 
 The hash covers the whole definition except `_meta`, which carries nothing for the model and may change on every listing.
+
+## Requests for input
+
+A server can ask the client for something while it serves a call: **elicitation** asks the user (a form, or a link to open), and **sampling** asks the client's model for a completion (deprecated by MCP 2026-07-28, and still used by servers). The gateway passes these on only for servers you allow:
+
+```yaml
+mcp:
+  servers:
+    travel:
+      url: https://mcp.travel.example/mcp
+      client_requests: [elicitation, sampling]   # default: none
+```
+
+Leave it empty for servers you would not trust to ask your people questions. An elicitation is text the server wrote, shown by the user's own MCP client, so a hostile server could use it to ask for a password. Guardrails do not check these requests.
+
+How it works:
+
+- **Clients need MCP 2026-07-28 or later.** The client gets a result of type `input_required` with the server's requests, shows them, and makes the call again with the answers. Every exchange is an ordinary request, so any replica can serve it. An older client gets an error it can show: for `tools/call` a result with `isError: true`, otherwise a JSON-RPC error.
+- **Servers on 2026-07-28** ask the same way, so their requests, their request state and the client's answers pass through unchanged.
+- **Older servers** ask with a request of their own in the middle of the call. The gateway holds that call open, hands the client an `input_required` result with one request, `input`, and gives the server the answer when the client calls again. The held call lives on the replica that started it, for up to five minutes per question. With several replicas the client's next call must reach the same one, so route `/mcp/` with session affinity (by the `Authorization` header, for example) if you use such servers; a call that lands elsewhere gets an error that says to start again. Only the caller that started a call can answer it. Each held call uses a session of its own with the server.
+- A server that asks for something it is not allowed, or for the client's roots, gets no answer, and the call fails with an error that names the server.
+- Each request passed on is an [audit record](#audit-records) with the method `elicitation/create` or `sampling/createMessage`, under the tool that asked. With body logging on, the request and answer are in the logged bodies of the call.
+
+`client_requests` is for `url` servers; hosted stdio servers cannot ask.
+
+## Change notifications
+
+A client on MCP 2026-07-28 can open a `subscriptions/listen` stream on a virtual server. The gateway then sends `notifications/tools/list_changed`, `notifications/prompts/list_changed` and `notifications/resources/list_changed` when what that virtual server lists changes: an upstream added or removed something, a tool was approved or hidden by pinning, or the configuration changed. The gateway learns of upstream changes at its next refresh (`mcp.refresh_interval`), so a notification follows a change within that time.
+
+A stream is closed after 30 minutes, and the client opens a new one, which checks its credentials again. Each replica serves up to 2,000 streams. Older clients cannot be notified by a stateless server; they see changes through `ttlMs` on list results and by listing again.
 
 ## Upstream sessions
 
@@ -131,6 +162,7 @@ mcp:
         Authorization: Bearer ${GITHUB_MCP_TOKEN}
       timeout: 60s                          # per call; default 60s
       pin_tools: true                       # true (default) | strict | false
+      client_requests: []                   # elicitation, sampling: what the server may ask the client; see Requests for input
     linear:
       url: https://mcp.linear.app/mcp
       user_auth:                            # call with each user's own token; see mcp-user-credentials.md
@@ -199,6 +231,8 @@ Protocol-level failures use HTTP status codes, so any client or proxy can see th
 | Upstream unreachable or timed out | JSON-RPC error `-32603` with `data.server` |
 | Tool returned an error | Passed through as a result with `isError: true` |
 | The user has not connected a `user_auth` server | JSON-RPC error `-32042` (URL elicitation required) with the connect link, or for `tools/call` from clients before 2025-11-25 a result with `isError: true` and the link |
+| A server asks for input that cannot be passed on (the client is older than 2026-07-28, or the server is not set to ask) | For `tools/call` a result with `isError: true`; otherwise JSON-RPC error `-32600` |
+| A held call is answered too late, twice, by another caller or on another replica | JSON-RPC error `-32602` that says to make the call again |
 | A gateway key calls a `user_auth` server | JSON-RPC error `-32600`: these servers need an OAuth caller |
 
 ## Security
@@ -209,6 +243,7 @@ The threats listed in [security.md](security.md) and their controls in v0.2:
 | --- | --- |
 | Token passthrough: a client token forwarded to an upstream, or an upstream accepting tokens minted for someone else | Client credentials are never forwarded. Upstreams receive only the credentials configured for them. OAuth tokens are checked for the gateway's own audience. |
 | Tool poisoning through a malicious description | Admins choose which servers and tools each virtual server exposes; pinning makes descriptions reviewable. |
+| A server phishes users through elicitation, or spends the client's model through sampling | Both are refused unless `client_requests` allows them for that server, and each one passed on is audited. |
 | Rug pull: a tool definition changes after approval | Pinning hides changed tools until approved again. |
 | Name collision or shadowing across servers | Per-upstream prefixes; a collision within a virtual server fails config validation. |
 | Confused deputy | The gateway does not run an OAuth proxy or dynamic client registration; it is only a resource server. |
