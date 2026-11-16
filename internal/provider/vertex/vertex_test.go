@@ -233,3 +233,54 @@ func mustJSON(v any) json.RawMessage {
 	}
 	return b
 }
+
+func TestRerankOnVertex(t *testing.T) {
+	p, rec := start(t, &fakeTokens{}, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"records":[{"id":"2","score":0.9},{"id":"0","score":0.4},{"id":"7","score":0.3}]}`)
+	})
+	if !provider.SupportsModel(p, provider.Rerank, "semantic-ranker-default@latest") || provider.SupportsModel(p, provider.ChatCompletions, "semantic-ranker-default@latest") || provider.SupportsModel(p, provider.Rerank, "gemini-2.5-pro") {
+		t.Fatal("SupportsModel")
+	}
+	resp, body := send(t, p, provider.Rerank, "semantic-ranker-default@latest", false,
+		`{"model":"rank","query":"capital of Laos","documents":["Oslo",{"text":"Bangkok","title":"x"},"Vientiane"],"top_n":2,"return_documents":true}`, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("%d %s", resp.StatusCode, body)
+	}
+	if rec.path != "/v1/projects/acme-ai/locations/global/rankingConfigs/default_ranking_config:rank" || rec.header.Get("X-Goog-User-Project") != "acme-ai" || rec.header.Get("Authorization") != "Bearer tok1" {
+		t.Fatalf("request: %s %v", rec.path, rec.header)
+	}
+	records := rec.body["records"].([]any)
+	if rec.body["model"] != "semantic-ranker-default@latest" || rec.body["topN"] != 2.0 || len(records) != 3 || records[1].(map[string]any)["content"] != "Bangkok" || records[2].(map[string]any)["id"] != "2" {
+		t.Fatalf("body: %v", rec.body)
+	}
+	var out struct {
+		Results []struct {
+			Index    int     `json:"index"`
+			Score    float64 `json:"relevance_score"`
+			Document struct {
+				Text string `json:"text"`
+			} `json:"document"`
+		} `json:"results"`
+	}
+	// A record the request does not have is left out.
+	if err := json.Unmarshal([]byte(body), &out); err != nil || len(out.Results) != 2 || out.Results[0].Index != 2 || out.Results[0].Document.Text != "Vientiane" || out.Results[1].Index != 0 || out.Results[1].Score != 0.4 {
+		t.Fatalf("answer: %s", body)
+	}
+	if resp, body := send(t, p, provider.Rerank, "semantic-ranker-default@latest", false, `{"documents":["a"]}`, nil); resp.StatusCode != 400 || !strings.Contains(body, "query") {
+		t.Fatalf("no query: %d %s", resp.StatusCode, body)
+	}
+
+	// The multi-regions have endpoints of their own; the upstream's
+	// error reaches the client.
+	p.cfg.BaseURL, p.cfg.Location = "", "eu"
+	if got := p.rankURL(); got != "https://eu-discoveryengine.googleapis.com/v1/projects/acme-ai/locations/eu/rankingConfigs/default_ranking_config:rank" {
+		t.Fatalf("eu: %s", got)
+	}
+	p, _ = start(t, &fakeTokens{}, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(429)
+		_, _ = io.WriteString(w, `{"error":{"code":429,"message":"quota","status":"RESOURCE_EXHAUSTED"}}`)
+	})
+	if resp, body := send(t, p, provider.Rerank, "semantic-ranker-fast@latest", false, `{"query":"q","documents":["a"]}`, nil); resp.StatusCode != 429 || !strings.Contains(body, "quota") {
+		t.Fatalf("error: %d %s", resp.StatusCode, body)
+	}
+}

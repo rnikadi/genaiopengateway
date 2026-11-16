@@ -1,6 +1,6 @@
 // Package vertex adapts Vertex AI: Gemini models through the gemini
-// adapter and Claude models through the anthropic adapter, with Google
-// credentials (docs/cloud-providers.md).
+// adapter, Claude models through the anthropic adapter and the ranking
+// API for rerank, with Google credentials (docs/cloud-providers.md).
 package vertex
 
 import (
@@ -37,6 +37,9 @@ const scope = "https://www.googleapis.com/auth/cloud-platform"
 
 // Provider is a Vertex AI upstream.
 type Provider struct {
+	cfg    config.Provider
+	client *http.Client
+	auth   *tokens
 	gemini *gemini.Provider
 	claude *anthropic.Provider
 }
@@ -129,6 +132,7 @@ func newWithTokens(cfg config.Provider, client *http.Client, t *tokens) *Provide
 		return prefix + pub + "/models/" + url.PathEscape(name) + ":" + method
 	}
 	return &Provider{
+		cfg: cfg, client: client, auth: t,
 		gemini: gemini.NewUpstream(cfg, client, gemini.Upstream{URL: modelURL, Authorize: t.authorize}),
 		claude: anthropic.NewUpstream(cfg, client, anthropic.Upstream{
 			URL: func(model string, stream bool) string {
@@ -167,7 +171,7 @@ func Split(model string) (publisher, name string) {
 // Supports implements provider.Provider.
 func (p *Provider) Supports(e provider.Endpoint) bool {
 	return e == provider.ChatCompletions || e == provider.Messages || e == provider.GenerateContent ||
-		e == provider.ImageGenerations || e == provider.Speech
+		e == provider.ImageGenerations || e == provider.Speech || e == provider.Rerank
 }
 
 // SupportsModel implements provider.ModelSupporter: Messages is served
@@ -176,6 +180,9 @@ func (p *Provider) Supports(e provider.Endpoint) bool {
 func (p *Provider) SupportsModel(e provider.Endpoint, model string) bool {
 	switch pub, name := Split(model); pub {
 	case google_:
+		if isRanker(name) || e == provider.Rerank {
+			return isRanker(name) && e == provider.Rerank
+		}
 		return p.gemini.SupportsModel(e, name)
 	case anthropic_:
 		return p.claude.Supports(e)
@@ -185,8 +192,11 @@ func (p *Provider) SupportsModel(e provider.Endpoint, model string) bool {
 
 // Send implements provider.Provider.
 func (p *Provider) Send(ctx context.Context, req *provider.Request) (*provider.Response, error) {
-	switch pub, _ := Split(req.Model); pub {
+	switch pub, name := Split(req.Model); pub {
 	case google_:
+		if req.Endpoint == provider.Rerank {
+			return p.rerank(ctx, req, name)
+		}
 		return p.gemini.Send(ctx, req)
 	case anthropic_:
 		return p.claude.Send(ctx, req)

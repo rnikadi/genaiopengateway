@@ -94,7 +94,7 @@ func isEmbedding(model string) bool {
 
 // Supports implements provider.Provider.
 func (p *Provider) Supports(e provider.Endpoint) bool {
-	return e == provider.ChatCompletions || e == provider.Messages || e == provider.Embeddings || e == provider.ImageGenerations || e == provider.Videos || e == provider.BidiStream
+	return e == provider.ChatCompletions || e == provider.Messages || e == provider.Embeddings || e == provider.ImageGenerations || e == provider.Videos || e == provider.BidiStream || e == provider.Rerank
 }
 
 // SupportsModel implements provider.ModelSupporter: Messages is served
@@ -109,7 +109,9 @@ func (p *Provider) SupportsModel(e provider.Endpoint, model string) bool {
 	case provider.BidiStream:
 		return isSonic(model)
 	case provider.ChatCompletions:
-		return !isEmbedding(model) && !isImageModel(model) && !isReel(model) && !isSonic(model)
+		return !isEmbedding(model) && !isImageModel(model) && !isReel(model) && !isSonic(model) && !isRerank(model)
+	case provider.Rerank:
+		return isRerank(model)
 	case provider.ImageGenerations:
 		return isImageModel(model)
 	case provider.Messages:
@@ -131,6 +133,8 @@ func (p *Provider) Send(ctx context.Context, req *provider.Request) (*provider.R
 		return p.images(ctx, req)
 	case provider.Videos:
 		return p.video(ctx, req)
+	case provider.Rerank:
+		return p.rerank(ctx, req)
 	}
 	resp, err := p.claude.Send(ctx, req)
 	if err != nil || resp.StatusCode == http.StatusOK {
