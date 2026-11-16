@@ -818,13 +818,36 @@ type A2APush struct {
 	AllowedHosts []string `yaml:"allowed_hosts"`
 }
 
-// A2AAgent is an upstream A2A agent reached over JSON-RPC.
+// GRPCTarget returns the host and port of a grpc:// or grpcs:// URL,
+// and whether it uses TLS.
+func GRPCTarget(raw string) (target string, tls bool, err error) {
+	u, perr := url.Parse(raw)
+	if perr != nil || u.Host == "" || (u.Scheme != "grpc" && u.Scheme != "grpcs") || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.User != nil {
+		return "", false, errors.New("must be grpc://host:port, or grpcs://host:port for TLS")
+	}
+	tls = u.Scheme == "grpcs"
+	if u.Port() == "" {
+		if !tls {
+			return "", false, errors.New("must name a port")
+		}
+		return u.Host + ":443", true, nil
+	}
+	return u.Host, tls, nil
+}
+
+// A2AAgent is an upstream A2A agent.
 type A2AAgent struct {
 	// URL is the agent's JSON-RPC endpoint.
 	URL string `yaml:"url"`
 	// RESTURL is the base of the agent's HTTP+JSON (REST) binding, when
 	// it offers one. At least one of URL and RESTURL is set.
 	RESTURL string `yaml:"rest_url"`
+	// GRPCURL is where the agent's gRPC binding of A2A 1.0 is, when it
+	// offers one: grpc://host:port, or grpcs://host:port with TLS.
+	GRPCURL string `yaml:"grpc_url"`
+	// GRPCTenant is the tenant the agent's card names for its gRPC
+	// interface, if any. The gateway sends it in each request.
+	GRPCTenant string `yaml:"grpc_tenant"`
 	// CardURL is where the agent's card is. Default: the URL's origin
 	// with /.well-known/agent-card.json.
 	CardURL     string            `yaml:"card_url"`
@@ -1822,12 +1845,22 @@ func (c *Config) validateA2A(add func(string, ...any)) {
 		ag.RESTURL = strings.TrimRight(ag.RESTURL, "/")
 		a.Agents[name] = ag
 		switch {
-		case ag.URL == "" && ag.RESTURL == "":
-			add("a2a agent %q: set url (JSON-RPC), rest_url (HTTP+JSON) or both", name)
+		case ag.URL == "" && ag.RESTURL == "" && ag.GRPCURL == "":
+			add("a2a agent %q: set url (JSON-RPC), rest_url (HTTP+JSON) or grpc_url (gRPC)", name)
 		case ag.URL != "" && !httpURL(ag.URL):
 			add("a2a agent %q: url must be an http or https URL", name)
 		case ag.RESTURL != "" && !httpURL(ag.RESTURL):
 			add("a2a agent %q: rest_url must be an http or https URL", name)
+		}
+		if ag.GRPCURL != "" {
+			if _, _, err := GRPCTarget(ag.GRPCURL); err != nil {
+				add("a2a agent %q: grpc_url %v", name, err)
+			}
+			if ag.URL == "" && ag.RESTURL == "" && ag.CardURL == "" {
+				add("a2a agent %q: set card_url, since an agent with only grpc_url has no address to find its card at", name)
+			}
+		} else if ag.GRPCTenant != "" {
+			add("a2a agent %q: grpc_tenant needs grpc_url", name)
 		}
 		if ag.CardURL != "" && !httpURL(ag.CardURL) {
 			add("a2a agent %q: card_url must be an http or https URL", name)

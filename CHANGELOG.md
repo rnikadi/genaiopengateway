@@ -16,6 +16,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- The gRPC binding of A2A 1.0 ([docs/a2a.md](docs/a2a.md#grpc)). An agent with `grpc_url` is served at the gateway's own address as `lf.a2a.v1.A2AService`, with the agent's name in each request's `tenant` field, and gets the checks of the other bindings. The gateway now also serves HTTP/2 without TLS (h2c), which gRPC behind a load balancer needs.
 - Realtime over WebRTC ([docs/modalities.md](docs/modalities.md#realtime-over-webrtc)): `POST /v1/realtime/calls` makes an OpenAI realtime call with a gateway key and returns the SDP answer. Audio runs between the client and the provider; the gateway watches the call's events at the provider, charges each response, and hangs up when a budget is spent or the session is too long.
 - The operator watches its resources ([docs/operator.md](docs/operator.md#how-it-works)), so a change is applied within a second instead of at the next pass; `operator.interval` is now only the time between full passes. A new kind, `GatewayCedarPolicySet`, holds Cedar policies shared by several organizations. Run `kubectl apply -f crds/` from the chart to install it; without it the operator works as before.
 

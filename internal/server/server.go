@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"google.golang.org/grpc"
+
 	"github.com/rnikadi/genaiopengateway/internal/alerts"
 	"github.com/rnikadi/genaiopengateway/internal/auth"
 	"github.com/rnikadi/genaiopengateway/internal/cache"
@@ -59,6 +61,10 @@ type Server struct {
 	routing *router.Health
 	// a2aCards caches agent cards by agent name.
 	a2aCards sync.Map
+	// a2aGRPC relays the gRPC binding of A2A, and a2aConns are the
+	// connections to agents' gRPC addresses, by grpc_url.
+	a2aGRPC  *grpc.Server
+	a2aConns sync.Map
 	// pushClient delivers A2A push notifications to public addresses
 	// only; pushTrusted to the hosts the configuration names.
 	pushClient, pushTrusted *http.Client
@@ -127,6 +133,7 @@ type Server struct {
 func New(cfg *config.Config, log *slog.Logger, st *store.Store) (*Server, error) {
 	s := &Server{log: log, client: newUpstreamClient(), routing: router.NewHealth(), store: st, cfgRev: -1}
 	s.pushClient = newPublicClient()
+	s.a2aGRPC = s.newA2AGRPC()
 	s.pushTrusted = &http.Client{Transport: s.client.Transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	if strings.Contains(cfg.Admin.Token.Value(), "change-me") {
 		log.Warn("the admin token is the sample from the Compose files: anyone who has read them is an owner; set GATEWAY_ADMIN_TOKEN to a random value (openssl rand -hex 32)")
@@ -302,6 +309,7 @@ func (s *Server) Close(ctx context.Context) {
 	case <-ctx.Done():
 	}
 	s.mcp.Close()
+	s.closeA2AGRPC()
 	if s.valkey != nil {
 		_ = s.valkey.Close()
 	}
@@ -569,6 +577,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /a2a/{name}/.well-known/agent.json", s.a2aCard)
 	mux.HandleFunc("/a2a/{name}/{path...}", s.serveA2AREST)
 	mux.HandleFunc("POST /a2a/{name}/push/{secret}", s.a2aPushNotify)
+	mux.HandleFunc("POST "+a2aGRPCPath+"{method}", s.serveA2AGRPCRequest)
 	mux.HandleFunc("/mcp/{name}", s.serveMCP)
 	if s.store != nil {
 		mux.HandleFunc("GET /mcp/connect/callback", s.connectCallback)
