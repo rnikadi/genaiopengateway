@@ -346,13 +346,16 @@ function ProviderForm({ spec, onChange }) {
         <${Field} label="Service account key file" setting="providers.credentials_file" hint="A path on the gateway's disk. Empty uses Application Default Credentials.">
           <${Text} ...${p} path="credentials_file" />
         <//>
-        <${Field} label="Cloud Storage folder" setting="providers.gcs_output_uri" hint="Where Veo writes videos. Empty has Veo return each video in its answer, which suits short videos.">
+        <${Field} label="Cloud Storage folder" setting="providers.gcs_output_uri" hint="Where Veo writes videos and batches keep their files. Empty has Veo return each video in its answer, which suits short videos, and turns batches off.">
           <${Text} ...${p} path="gcs_output_uri" placeholder="gs://bucket/gateway" />
         <//>`
       : t === 'bedrock'
         ? html`<${Field} label="Region" setting="providers.region"><${Text} ...${p} path="region" placeholder="us-east-1" /><//>
-          <${Field} label="Nova Reel output" setting="providers.s3_output_uri" hint="An S3 folder in the same region where Nova Reel writes videos. Empty turns Nova Reel off. Reading videos back needs AWS credentials, not an API key.">
-            <${Text} ...${p} path="s3_output_uri" placeholder="s3://bucket/videos" />
+          <${Field} label="S3 folder" setting="providers.s3_output_uri" hint="An S3 folder in the same region where Nova Reel writes videos and batches keep their files. Empty turns both off. Reading it needs AWS credentials, not an API key.">
+            <${Text} ...${p} path="s3_output_uri" placeholder="s3://bucket/gateway" />
+          <//>
+          <${Field} label="Batch role" setting="providers.batch_role_arn" hint="The IAM role Bedrock assumes to run batch jobs. It needs to read and write the S3 folder. Empty turns batches off.">
+            <${Text} ...${p} path="batch_role_arn" placeholder="arn:aws:iam::123456789012:role/bedrock-batch" />
           <//>`
         : ''}
     <${Field} label="Base URL" setting="providers.base_url" hint=${t === 'openai' ? 'Required.' : 'Empty uses the provider\'s own endpoint.'}><${Text} ...${p} path="base_url" /><//>

@@ -16,6 +16,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- Batches on Bedrock and Vertex AI. A `bedrock` provider with `s3_output_uri` and the new `batch_role_arn`, or a `vertex` provider with `gcs_output_uri`, serves OpenAI's Batch API for chat completions through the cloud's own batch jobs: the gateway translates the uploaded file, starts the job, and gives the results back as OpenAI output and error files under the client's `custom_id` ([docs/batch.md](docs/batch.md#native)). Not yet run against live cloud accounts.
 - Veo on Vertex AI ([docs/modalities.md](docs/modalities.md#veo-on-vertex-ai)): a `vertex` target whose model starts with `veo-` serves `/v1/videos` as a job. The video comes from the operation, or from the provider's new `gcs_output_uri` folder when one is set.
 - Rerank on the clouds ([docs/modalities.md](docs/modalities.md#providers)): `/v1/rerank` reaches Cohere Rerank and Amazon Rerank on Bedrock, and the ranking API (`semantic-ranker-*`) on Vertex AI, with the request and answer of Cohere's API.
 - The gRPC binding of A2A 1.0 ([docs/a2a.md](docs/a2a.md#grpc)). An agent with `grpc_url` is served at the gateway's own address as `lf.a2a.v1.A2AService`, with the agent's name in each request's `tenant` field, and gets the checks of the other bindings. The gateway now also serves HTTP/2 without TLS (h2c), which gRPC behind a load balancer needs.

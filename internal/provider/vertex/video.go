@@ -153,13 +153,16 @@ type operation struct {
 	} `json:"response"`
 }
 
-// Forward implements provider.Forwarder for Veo jobs: retrieve reads
-// the operation, content returns the video, and delete forgets the
-// job, which Vertex AI has no call to delete.
-func (p *Provider) Forward(ctx context.Context, method, path string, _ io.Reader, _ string) (*http.Response, error) {
+// Forward implements provider.Forwarder for batches (batch.go) and for
+// Veo jobs: retrieve reads the operation, content returns the video,
+// and delete forgets the job, which Vertex AI has no call to delete.
+func (p *Provider) Forward(ctx context.Context, method, path string, in io.Reader, contentType string) (*http.Response, error) {
+	if path == "/files" || path == "/batches" || strings.HasPrefix(path, "/files/") || strings.HasPrefix(path, "/batches/") {
+		return p.forwardBatch(ctx, method, path, in, contentType)
+	}
 	rest, ok := strings.CutPrefix(path, "/videos/")
 	if !ok {
-		return jsonReply(http.StatusNotFound, errorJSON("not_found", "Vertex AI serves only Veo jobs here")), nil
+		return jsonReply(http.StatusNotFound, errorJSON("not_found", "Vertex AI serves only batches and Veo jobs here")), nil
 	}
 	rest, _, _ = strings.Cut(rest, "?")
 	id, suffix, _ := strings.Cut(rest, "/")

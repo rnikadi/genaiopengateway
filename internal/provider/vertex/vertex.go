@@ -175,7 +175,7 @@ func Split(model string) (publisher, name string) {
 // Supports implements provider.Provider.
 func (p *Provider) Supports(e provider.Endpoint) bool {
 	return e == provider.ChatCompletions || e == provider.Messages || e == provider.GenerateContent ||
-		e == provider.ImageGenerations || e == provider.Speech || e == provider.Rerank || e == provider.Videos
+		e == provider.ImageGenerations || e == provider.Speech || e == provider.Rerank || e == provider.Videos || e == provider.Batches
 }
 
 // SupportsModel implements provider.ModelSupporter: Messages is served
@@ -184,6 +184,11 @@ func (p *Provider) Supports(e provider.Endpoint) bool {
 func (p *Provider) SupportsModel(e provider.Endpoint, model string) bool {
 	switch pub, name := Split(model); pub {
 	case google_:
+		if e == provider.Batches {
+			// Batch prediction jobs run Gemini chat models, and need
+			// a Cloud Storage folder for their files.
+			return p.cfg.GCSOutputURI != "" && !isRanker(name) && !isVeo(name) && p.gemini.SupportsModel(provider.ChatCompletions, name)
+		}
 		if isRanker(name) || e == provider.Rerank {
 			return isRanker(name) && e == provider.Rerank
 		}
@@ -192,7 +197,7 @@ func (p *Provider) SupportsModel(e provider.Endpoint, model string) bool {
 		}
 		return p.gemini.SupportsModel(e, name)
 	case anthropic_:
-		return p.claude.Supports(e)
+		return e != provider.Batches && p.claude.Supports(e)
 	}
 	return false
 }

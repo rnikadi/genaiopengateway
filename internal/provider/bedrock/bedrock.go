@@ -42,6 +42,9 @@ type Provider struct {
 	cfg    config.Provider
 	client *http.Client
 	base   string
+	// control is the URL of the Bedrock control plane, which runs batch
+	// jobs.
+	control string
 	// s3URL returns the HTTPS URL of an S3 object; tests point it at a
 	// fake.
 	s3URL  func(bucket, key string) string
@@ -62,6 +65,7 @@ func newWithCredentials(cfg config.Provider, client *http.Client, creds aws.Cred
 	if p.base == "" {
 		p.base = "https://bedrock-runtime." + cfg.Region + ".amazonaws.com"
 	}
+	p.control = "https://bedrock." + cfg.Region + ".amazonaws.com"
 	p.s3URL = func(bucket, key string) string {
 		return "https://" + bucket + ".s3." + cfg.Region + ".amazonaws.com/" + key
 	}
@@ -94,20 +98,23 @@ func isEmbedding(model string) bool {
 
 // Supports implements provider.Provider.
 func (p *Provider) Supports(e provider.Endpoint) bool {
-	return e == provider.ChatCompletions || e == provider.Messages || e == provider.Embeddings || e == provider.ImageGenerations || e == provider.Videos || e == provider.BidiStream || e == provider.Rerank
+	return e == provider.ChatCompletions || e == provider.Messages || e == provider.Embeddings || e == provider.ImageGenerations || e == provider.Videos || e == provider.BidiStream || e == provider.Rerank || e == provider.Batches
 }
 
 // SupportsModel implements provider.ModelSupporter: Messages is served
 // for Claude models, embeddings for Titan and Cohere embedding models,
 // images for Nova Canvas and Titan Image, videos for Nova Reel when an
-// S3 output is configured, bidirectional streams for Nova Sonic, and
-// chat completions for every other model.
+// S3 output is configured, bidirectional streams for Nova Sonic, chat
+// completions for every other model, and batches for those chat models
+// when an S3 folder and a batch role are configured.
 func (p *Provider) SupportsModel(e provider.Endpoint, model string) bool {
 	switch e {
 	case provider.Videos:
 		return isReel(model) && p.cfg.S3OutputURI != ""
 	case provider.BidiStream:
 		return isSonic(model)
+	case provider.Batches:
+		return p.batches() && p.SupportsModel(provider.ChatCompletions, model)
 	case provider.ChatCompletions:
 		return !isEmbedding(model) && !isImageModel(model) && !isReel(model) && !isSonic(model) && !isRerank(model)
 	case provider.Rerank:
@@ -219,9 +226,9 @@ func (s *signer) authorize(r *http.Request) error {
 	return s.v4.SignHTTP(r.Context(), c, r, hex.EncodeToString(sum.Sum(nil)), "bedrock", s.region, time.Now())
 }
 
-// signS3 signs a bodyless S3 request with SigV4. S3 takes no Bedrock
-// API key, so it needs credentials from the AWS default chain.
-func (s *signer) signS3(r *http.Request) error {
+// signS3 signs an S3 request that carries body with SigV4. S3 takes no
+// Bedrock API key, so it needs credentials from the AWS default chain.
+func (s *signer) signS3(r *http.Request, body []byte) error {
 	creds, err := s.credentials(r.Context())
 	if err != nil {
 		return err
@@ -230,8 +237,8 @@ func (s *signer) signS3(r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	empty := sha256.Sum256(nil)
-	hash := hex.EncodeToString(empty[:])
+	sum := sha256.Sum256(body)
+	hash := hex.EncodeToString(sum[:])
 	r.Header.Set("X-Amz-Content-Sha256", hash)
 	return s.v4.SignHTTP(r.Context(), c, r, hash, "s3", s.region, time.Now())
 }
