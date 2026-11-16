@@ -689,6 +689,10 @@ type Provider struct {
 	// S3OutputURI is where a bedrock provider's Nova Reel jobs write
 	// their videos, such as s3://bucket/videos, in the provider's region.
 	S3OutputURI string `yaml:"s3_output_uri"`
+	// GCSOutputURI is a Cloud Storage folder of a vertex provider, such
+	// as gs://bucket/gateway, where Veo writes videos. Without it Veo
+	// returns videos in its answers.
+	GCSOutputURI string `yaml:"gcs_output_uri"`
 	// Residency labels where the provider processes data, such as eu or
 	// us. Organizations, teams and keys can be pinned to labels
 	// (docs/routing.md#data-residency).
@@ -1155,6 +1159,9 @@ func (c *Config) validate() error {
 				add("provider %q: vertex needs project and location", name)
 			} else if !vertexLocation.MatchString(p.Location) || !vertexProject.MatchString(p.Project) {
 				add("provider %q: project or location has characters a Google Cloud name cannot have", name)
+			}
+			if u := p.GCSOutputURI; u != "" && (!strings.HasPrefix(u, "gs://") || len(strings.TrimPrefix(u, "gs://")) < 3) {
+				add("provider %q: gcs_output_uri must be a gs:// URI, such as gs://bucket/gateway", name)
 			}
 		case ProviderBedrock:
 			if !awsRegion.MatchString(p.Region) {

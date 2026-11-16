@@ -16,6 +16,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- Veo on Vertex AI ([docs/modalities.md](docs/modalities.md#veo-on-vertex-ai)): a `vertex` target whose model starts with `veo-` serves `/v1/videos` as a job. The video comes from the operation, or from the provider's new `gcs_output_uri` folder when one is set.
 - Rerank on the clouds ([docs/modalities.md](docs/modalities.md#providers)): `/v1/rerank` reaches Cohere Rerank and Amazon Rerank on Bedrock, and the ranking API (`semantic-ranker-*`) on Vertex AI, with the request and answer of Cohere's API.
 - The gRPC binding of A2A 1.0 ([docs/a2a.md](docs/a2a.md#grpc)). An agent with `grpc_url` is served at the gateway's own address as `lf.a2a.v1.A2AService`, with the agent's name in each request's `tenant` field, and gets the checks of the other bindings. The gateway now also serves HTTP/2 without TLS (h2c), which gRPC behind a load balancer needs.
 - Realtime over WebRTC ([docs/modalities.md](docs/modalities.md#realtime-over-webrtc)): `POST /v1/realtime/calls` makes an OpenAI realtime call with a gateway key and returns the SDP answer. Audio runs between the client and the provider; the gateway watches the call's events at the provider, charges each response, and hangs up when a budget is spent or the session is too long.

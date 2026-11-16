@@ -2,6 +2,7 @@ package vertex
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -282,5 +283,122 @@ func TestRerankOnVertex(t *testing.T) {
 	})
 	if resp, body := send(t, p, provider.Rerank, "semantic-ranker-fast@latest", false, `{"query":"q","documents":["a"]}`, nil); resp.StatusCode != 429 || !strings.Contains(body, "quota") {
 		t.Fatalf("error: %d %s", resp.StatusCode, body)
+	}
+}
+
+func TestVeoOnVertex(t *testing.T) {
+	const model = "projects/acme-ai/locations/europe-west4/publishers/google/models/veo-3.0-generate-001"
+	const opName = model + "/operations/op42"
+	state := "running"
+	var paths []string
+	p, rec := start(t, &fakeTokens{}, func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.RequestURI())
+		switch {
+		case strings.HasSuffix(r.URL.Path, ":predictLongRunning"):
+			_, _ = io.WriteString(w, `{"name":"`+opName+`"}`)
+		case strings.HasSuffix(r.URL.Path, ":fetchPredictOperation"):
+			switch state {
+			case "running":
+				_, _ = io.WriteString(w, `{"name":"`+opName+`"}`)
+			case "bytes":
+				_, _ = io.WriteString(w, `{"name":"`+opName+`","done":true,"response":{"videos":[{"bytesBase64Encoded":"dmVvLW1wNA==","mimeType":"video/mp4"}]}}`)
+			case "gcs":
+				_, _ = io.WriteString(w, `{"name":"`+opName+`","done":true,"response":{"videos":[{"gcsUri":"gs://acme-videos/veo/123/sample_0.mp4","mimeType":"video/mp4"}]}}`)
+			case "elsewhere":
+				_, _ = io.WriteString(w, `{"name":"`+opName+`","done":true,"response":{"videos":[{"gcsUri":"gs://other-bucket/secret.mp4"}]}}`)
+			case "filtered":
+				_, _ = io.WriteString(w, `{"name":"`+opName+`","done":true,"response":{"raiMediaFilteredCount":1,"raiMediaFilteredReasons":["violence"]}}`)
+			}
+		case strings.HasPrefix(r.URL.Path, "/storage/v1/b/acme-videos/o/"):
+			if r.Header.Get("Authorization") == "" || r.URL.Query().Get("alt") != "media" {
+				w.WriteHeader(403)
+				return
+			}
+			_, _ = io.WriteString(w, "gcs-mp4")
+		default:
+			w.WriteHeader(404)
+		}
+	})
+	if !provider.SupportsModel(p, provider.Videos, "veo-3.0-generate-001") || provider.SupportsModel(p, provider.ChatCompletions, "veo-3.0-generate-001") || provider.SupportsModel(p, provider.Videos, "gemini-2.5-pro") {
+		t.Fatal("SupportsModel")
+	}
+	resp, body := send(t, p, provider.Videos, "veo-3.0-generate-001", false, `{"model":"clips","prompt":"a falcon","seconds":"6","size":"1080x1920"}`, nil)
+	var job struct{ ID, Status, Seconds string }
+	if err := json.Unmarshal([]byte(body), &job); err != nil || resp.StatusCode != 200 || job.Status != "queued" || job.Seconds != "6" || !strings.HasPrefix(job.ID, videoPrefix) {
+		t.Fatalf("create: %d %s", resp.StatusCode, body)
+	}
+	if resp.Usage.VideoSeconds != 6 {
+		t.Fatalf("usage: %+v", resp.Usage)
+	}
+	params := rec.body["parameters"].(map[string]any)
+	if rec.path != "/v1/"+model+":predictLongRunning" || params["durationSeconds"] != 6.0 || params["aspectRatio"] != "9:16" || params["resolution"] != "1080p" || params["storageUri"] != nil {
+		t.Fatalf("request: %s %v", rec.path, rec.body)
+	}
+	call := func(method, path string) (int, string, string) {
+		t.Helper()
+		resp, err := p.Forward(context.Background(), method, path, nil, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return resp.StatusCode, resp.Header.Get("Content-Type"), string(b)
+	}
+	if code, _, body := call("GET", "/videos/"+job.ID); code != 200 || !strings.Contains(body, `"in_progress"`) || rec.body["operationName"] != opName {
+		t.Fatalf("retrieve: %d %s %v", code, body, rec.body)
+	}
+	if code, _, _ := call("GET", "/videos/"+job.ID+"/content"); code != 404 {
+		t.Fatalf("content before the video is ready: %d", code)
+	}
+	// Without a Cloud Storage folder the video comes in the operation.
+	state = "bytes"
+	if code, _, body := call("GET", "/videos/"+job.ID); code != 200 || !strings.Contains(body, `"completed"`) || strings.Contains(body, "dmVv") {
+		t.Fatalf("retrieve when done: %d %s", code, body)
+	}
+	if code, ct, body := call("GET", "/videos/"+job.ID+"/content"); code != 200 || ct != "video/mp4" || body != "veo-mp4" {
+		t.Fatalf("content: %d %s %q", code, ct, body)
+	}
+	// With one, Veo writes there and the gateway reads it from there only.
+	state = "gcs"
+	if code, _, _ := call("GET", "/videos/"+job.ID+"/content"); code != 502 {
+		t.Fatalf("a Cloud Storage video without gcs_output_uri: %d", code)
+	}
+	p.cfg.GCSOutputURI, p.gcsBase = "gs://acme-videos/veo", p.base
+	if code, ct, body := call("GET", "/videos/"+job.ID+"/content"); code != 200 || ct != "video/mp4" || body != "gcs-mp4" {
+		t.Fatalf("content from Cloud Storage: %d %s %q", code, ct, body)
+	}
+	state = "elsewhere"
+	if code, _, _ := call("GET", "/videos/"+job.ID+"/content"); code != 502 {
+		t.Fatalf("a video in another bucket: %d", code)
+	}
+	_, _ = send(t, p, provider.Videos, "veo-3.0-generate-001", false, `{"prompt":"a falcon"}`, nil)
+	if got := rec.body["parameters"].(map[string]any)["storageUri"]; got != "gs://acme-videos/veo/" {
+		t.Fatalf("storageUri: %v", got)
+	}
+	state = "filtered"
+	if code, _, body := call("GET", "/videos/"+job.ID); code != 200 || !strings.Contains(body, `"failed"`) || !strings.Contains(body, "violence") {
+		t.Fatalf("filtered: %d %s", code, body)
+	}
+	if code, _, body := call("DELETE", "/videos/"+job.ID); code != 200 || !strings.Contains(body, "video.deleted") {
+		t.Fatalf("delete: %d %s", code, body)
+	}
+
+	// An id cannot name another project, another kind of resource or a
+	// path outside the model's operations.
+	before := len(paths)
+	for _, name := range []string{
+		"projects/other/locations/europe-west4/publishers/google/models/veo-3.0-generate-001/operations/x",
+		"projects/acme-ai/locations/europe-west4/publishers/google/models/gemini-2.5-pro/operations/x",
+		model + "/operations/../../../x",
+		model + "/operations/x?y=1",
+		"projects/acme-ai/locations/europe-west4/endpoints/1/operations/x",
+	} {
+		id := videoPrefix + base64.RawURLEncoding.EncodeToString([]byte(name))
+		if code, _, _ := call("GET", "/videos/"+id); code != 404 {
+			t.Errorf("%s: %d", name, code)
+		}
+	}
+	if code, _, _ := call("GET", "/videos/veo_abc"); code != 404 || len(paths) != before {
+		t.Fatalf("foreign ids reached the upstream: %v", paths[before:])
 	}
 }

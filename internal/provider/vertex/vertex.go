@@ -37,11 +37,14 @@ const scope = "https://www.googleapis.com/auth/cloud-platform"
 
 // Provider is a Vertex AI upstream.
 type Provider struct {
-	cfg    config.Provider
-	client *http.Client
-	auth   *tokens
-	gemini *gemini.Provider
-	claude *anthropic.Provider
+	// base is the URL of the Vertex AI API for the location, and
+	// gcsBase that of the Cloud Storage JSON API.
+	base, gcsBase string
+	cfg           config.Provider
+	client        *http.Client
+	auth          *tokens
+	gemini        *gemini.Provider
+	claude        *anthropic.Provider
 }
 
 // New returns an adapter for cfg, using Application Default Credentials
@@ -132,6 +135,7 @@ func newWithTokens(cfg config.Provider, client *http.Client, t *tokens) *Provide
 		return prefix + pub + "/models/" + url.PathEscape(name) + ":" + method
 	}
 	return &Provider{
+		base: base, gcsBase: "https://storage.googleapis.com",
 		cfg: cfg, client: client, auth: t,
 		gemini: gemini.NewUpstream(cfg, client, gemini.Upstream{URL: modelURL, Authorize: t.authorize}),
 		claude: anthropic.NewUpstream(cfg, client, anthropic.Upstream{
@@ -171,7 +175,7 @@ func Split(model string) (publisher, name string) {
 // Supports implements provider.Provider.
 func (p *Provider) Supports(e provider.Endpoint) bool {
 	return e == provider.ChatCompletions || e == provider.Messages || e == provider.GenerateContent ||
-		e == provider.ImageGenerations || e == provider.Speech || e == provider.Rerank
+		e == provider.ImageGenerations || e == provider.Speech || e == provider.Rerank || e == provider.Videos
 }
 
 // SupportsModel implements provider.ModelSupporter: Messages is served
@@ -182,6 +186,9 @@ func (p *Provider) SupportsModel(e provider.Endpoint, model string) bool {
 	case google_:
 		if isRanker(name) || e == provider.Rerank {
 			return isRanker(name) && e == provider.Rerank
+		}
+		if isVeo(name) || e == provider.Videos {
+			return isVeo(name) && e == provider.Videos
 		}
 		return p.gemini.SupportsModel(e, name)
 	case anthropic_:
@@ -196,6 +203,9 @@ func (p *Provider) Send(ctx context.Context, req *provider.Request) (*provider.R
 	case google_:
 		if req.Endpoint == provider.Rerank {
 			return p.rerank(ctx, req, name)
+		}
+		if req.Endpoint == provider.Videos {
+			return p.video(ctx, req, name)
 		}
 		return p.gemini.Send(ctx, req)
 	case anthropic_:

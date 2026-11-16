@@ -59,50 +59,13 @@ func (p *Provider) rerank(ctx context.Context, req *provider.Request, model stri
 		body["topN"] = rr.TopN
 	}
 	raw, _ := json.Marshal(body)
-	ctx, cancel := context.WithTimeout(ctx, p.cfg.Timeout.Std())
-	defer cancel()
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.rankURL(), bytes.NewReader(raw))
-	if err != nil {
-		return nil, err
-	}
-	hreq.Header.Set("Content-Type", "application/json")
 	// The ranking API bills and counts quota against this project.
-	hreq.Header.Set("X-Goog-User-Project", p.cfg.Project)
-	for k, v := range p.cfg.Headers {
-		hreq.Header.Set(k, v)
-	}
-	if err := p.auth.authorize(hreq); err != nil {
-		return errorResponse(http.StatusBadGateway, "api_error", "upstream credentials: "+err.Error()), nil
-	}
-	resp, err := p.client.Do(hreq)
+	status, hdr, buf, err := p.call(ctx, http.MethodPost, p.rankURL(), raw, http.Header{"X-Goog-User-Project": {p.cfg.Project}})
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	buf, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		var ge struct {
-			Error struct {
-				Message string `json:"message"`
-				Status  string `json:"status"`
-			} `json:"error"`
-		}
-		_ = json.Unmarshal(buf, &ge)
-		msg, typ := ge.Error.Message, strings.ToLower(ge.Error.Status)
-		if msg == "" {
-			msg = "the upstream answered HTTP " + strconv.Itoa(resp.StatusCode)
-		}
-		if typ == "" {
-			typ = "api_error"
-		}
-		out := errorResponse(resp.StatusCode, typ, msg)
-		if ra := resp.Header.Get("Retry-After"); ra != "" {
-			out.Header.Set("Retry-After", ra)
-		}
-		return out, nil
+	if status != http.StatusOK {
+		return googleError(status, hdr, buf), nil
 	}
 	var out struct {
 		Records []struct {
@@ -122,6 +85,68 @@ func (p *Provider) rerank(ctx context.Context, req *provider.Request, model stri
 		results = append(results, provider.RerankResult{Index: i, Score: *r.Score})
 	}
 	return rr.Response("", results), nil
+}
+
+// call sends a JSON request to a Google API with the provider's
+// credentials and reads the answer. A credential failure is a 502,
+// which allows fallback.
+func (p *Provider) call(ctx context.Context, method, u string, body []byte, extra http.Header) (int, http.Header, []byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, p.cfg.Timeout.Std())
+	defer cancel()
+	var rd io.Reader
+	if body != nil {
+		rd = bytes.NewReader(body)
+	}
+	hreq, err := http.NewRequestWithContext(ctx, method, u, rd)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	if body != nil {
+		hreq.Header.Set("Content-Type", "application/json")
+	}
+	for k, v := range extra {
+		hreq.Header[k] = v
+	}
+	for k, v := range p.cfg.Headers {
+		hreq.Header.Set(k, v)
+	}
+	if err := p.auth.authorize(hreq); err != nil {
+		b, _ := json.Marshal(map[string]any{"error": map[string]any{"message": "upstream credentials: " + err.Error(), "status": "API_ERROR"}})
+		return http.StatusBadGateway, http.Header{}, b, nil
+	}
+	resp, err := p.client.Do(hreq)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	defer resp.Body.Close()
+	buf, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	return resp.StatusCode, resp.Header, buf, nil
+}
+
+// googleError is a Google API's error in the shape clients read.
+func googleError(status int, hdr http.Header, buf []byte) *provider.Response {
+	var ge struct {
+		Error struct {
+			Message string `json:"message"`
+			Status  string `json:"status"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(buf, &ge)
+	msg, typ := ge.Error.Message, strings.ToLower(ge.Error.Status)
+	if msg == "" {
+		msg = "the upstream answered HTTP " + strconv.Itoa(status)
+	}
+	if typ == "" {
+		typ = "api_error"
+	}
+	out := errorResponse(status, typ, msg)
+	if ra := hdr.Get("Retry-After"); ra != "" {
+		out.Header.Set("Retry-After", ra)
+	}
+	return out
 }
 
 // errorResponse builds an error response in the shape rerank clients

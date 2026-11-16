@@ -138,6 +138,7 @@ providers:
     project: acme-ai-prod
     location: global                 # global, us, eu, or a region
     # credentials_file: /var/run/secrets/gcp/key.json   (default: Application Default Credentials)
+    # gcs_output_uri: gs://acme-ai/gateway   (where Veo writes videos; see modalities.md)
   bedrock:
     type: bedrock                    # every Bedrock model; see cloud-providers.md
     region: eu-central-1

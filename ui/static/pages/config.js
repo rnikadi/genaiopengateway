@@ -345,6 +345,9 @@ function ProviderForm({ spec, onChange }) {
         </div>
         <${Field} label="Service account key file" setting="providers.credentials_file" hint="A path on the gateway's disk. Empty uses Application Default Credentials.">
           <${Text} ...${p} path="credentials_file" />
+        <//>
+        <${Field} label="Cloud Storage folder" setting="providers.gcs_output_uri" hint="Where Veo writes videos. Empty has Veo return each video in its answer, which suits short videos.">
+          <${Text} ...${p} path="gcs_output_uri" placeholder="gs://bucket/gateway" />
         <//>`
       : t === 'bedrock'
         ? html`<${Field} label="Region" setting="providers.region"><${Text} ...${p} path="region" placeholder="us-east-1" /><//>
