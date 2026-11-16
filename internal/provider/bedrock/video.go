@@ -141,13 +141,17 @@ type invocation struct {
 	} `json:"outputDataConfig"`
 }
 
-// Forward implements provider.Forwarder for Nova Reel jobs: retrieve
-// reads the invocation, content reads output.mp4 from S3, and delete
-// forgets the job, leaving the video in the bucket.
-func (p *Provider) Forward(ctx context.Context, method, path string, _ io.Reader, _ string) (*http.Response, error) {
+// Forward implements provider.Forwarder for batches (batch.go) and for
+// Nova Reel jobs: retrieve reads the invocation, content reads
+// output.mp4 from S3, and delete forgets the job, leaving the video in
+// the bucket.
+func (p *Provider) Forward(ctx context.Context, method, path string, body io.Reader, contentType string) (*http.Response, error) {
+	if path == "/files" || path == "/batches" || strings.HasPrefix(path, "/files/") || strings.HasPrefix(path, "/batches/") {
+		return p.forwardBatch(ctx, method, path, body, contentType)
+	}
 	rest, ok := strings.CutPrefix(path, "/videos/")
 	if !ok {
-		return jsonReply(http.StatusNotFound, "Bedrock serves only Nova Reel jobs here"), nil
+		return jsonReply(http.StatusNotFound, "Bedrock serves only batches and Nova Reel jobs here"), nil
 	}
 	rest, _, _ = strings.Cut(rest, "?")
 	id, suffix, _ := strings.Cut(rest, "/")
@@ -216,7 +220,7 @@ func (p *Provider) download(ctx context.Context, s3URI, invocationID string) (*h
 		cancel()
 		return nil, err
 	}
-	if err := p.auth.signS3(req); err != nil {
+	if err := p.auth.signS3(req, nil); err != nil {
 		cancel()
 		return jsonReply(http.StatusNotImplemented, "reading the video from S3 needs AWS credentials from the default chain: "+err.Error()), nil
 	}

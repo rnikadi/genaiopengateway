@@ -127,6 +127,8 @@ providers:
       - {id: amazon.nova-lite-v1:0, kind: chat, price: {input_per_mtok: 0.06, output_per_mtok: 0.24}}
       - {id: amazon.titan-embed-text-v2:0, kind: embeddings, price: {input_per_mtok: 0.02}}
       - {id: amazon.nova-reel-v1:1, kind: video, price: {per_video_second: 0.08}}
+      - {id: cohere.rerank-v3-5:0, kind: rerank, price: {per_request: 0.002}}
+      - {id: amazon.rerank-v1:0, kind: rerank, price: {per_request: 0.001}}
       - {id: amazon.nova-sonic-v1:0, kind: bidi_stream, price: {input_per_mtok: 0.06, output_per_mtok: 0.24, audio_input_per_mtok: 3.4, audio_output_per_mtok: 13.6}}
   - id: vertex
     name: Google Vertex AI
@@ -139,6 +141,9 @@ providers:
     models:
       - {id: gemini-2.5-pro, kind: chat, price: {input_per_mtok: 1.25, output_per_mtok: 10}}
       - {id: gemini-2.5-flash, kind: chat, price: {input_per_mtok: 0.3, output_per_mtok: 2.5}}
+      - {id: semantic-ranker-default@latest, kind: rerank, price: {per_request: 0.001}}
+      - {id: veo-3.0-generate-001, kind: video, price: {per_video_second: 0.4}}
+      - {id: veo-3.0-fast-generate-001, kind: video, price: {per_video_second: 0.15}}
   - id: cohere
     name: Cohere
     type: cohere

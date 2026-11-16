@@ -345,11 +345,17 @@ function ProviderForm({ spec, onChange }) {
         </div>
         <${Field} label="Service account key file" setting="providers.credentials_file" hint="A path on the gateway's disk. Empty uses Application Default Credentials.">
           <${Text} ...${p} path="credentials_file" />
+        <//>
+        <${Field} label="Cloud Storage folder" setting="providers.gcs_output_uri" hint="Where Veo writes videos and batches keep their files. Empty has Veo return each video in its answer, which suits short videos, and turns batches off.">
+          <${Text} ...${p} path="gcs_output_uri" placeholder="gs://bucket/gateway" />
         <//>`
       : t === 'bedrock'
         ? html`<${Field} label="Region" setting="providers.region"><${Text} ...${p} path="region" placeholder="us-east-1" /><//>
-          <${Field} label="Nova Reel output" setting="providers.s3_output_uri" hint="An S3 folder in the same region where Nova Reel writes videos. Empty turns Nova Reel off. Reading videos back needs AWS credentials, not an API key.">
-            <${Text} ...${p} path="s3_output_uri" placeholder="s3://bucket/videos" />
+          <${Field} label="S3 folder" setting="providers.s3_output_uri" hint="An S3 folder in the same region where Nova Reel writes videos and batches keep their files. Empty turns both off. Reading it needs AWS credentials, not an API key.">
+            <${Text} ...${p} path="s3_output_uri" placeholder="s3://bucket/gateway" />
+          <//>
+          <${Field} label="Batch role" setting="providers.batch_role_arn" hint="The IAM role Bedrock assumes to run batch jobs. It needs to read and write the S3 folder. Empty turns batches off.">
+            <${Text} ...${p} path="batch_role_arn" placeholder="arn:aws:iam::123456789012:role/bedrock-batch" />
           <//>`
         : ''}
     <${Field} label="Base URL" setting="providers.base_url" hint=${t === 'openai' ? 'Required.' : 'Empty uses the provider\'s own endpoint.'}><${Text} ...${p} path="base_url" /><//>
@@ -607,6 +613,8 @@ function AgentForm({ spec, onChange }) {
   return html`
     <${Field} label="URL" setting="a2a.agents.url" hint="The agent's JSON-RPC endpoint. Leave empty for an agent that offers only HTTP+JSON."><${Text} ...${p} path="url" /><//>
     <${Field} label="HTTP+JSON URL" setting="a2a.agents.rest_url" hint="The base of the agent's HTTP+JSON (REST) binding, if it offers one. Callers can then use that binding through the gateway too."><${Text} ...${p} path="rest_url" /><//>
+    <${Field} label="gRPC address" setting="a2a.agents.grpc_url" hint="The agent's gRPC binding of A2A 1.0, if it offers one: grpc://host:port, or grpcs://host:port with TLS."><${Text} ...${p} path="grpc_url" placeholder="grpcs://agent.example.com:443" /><//>
+    <${Field} label="gRPC tenant" setting="a2a.agents.grpc_tenant" hint="The tenant the agent's own card names for its gRPC interface, if any."><${Text} ...${p} path="grpc_tenant" /><//>
     <${Field} label="Card URL" setting="a2a.agents.card_url" hint="Default: /.well-known/agent-card.json at the URL's host."><${Text} ...${p} path="card_url" /><//>
     <${Field} label="Description" setting="a2a.agents.description"><${Text} ...${p} path="description" /><//>
     <${Field} label="Timeout" setting="a2a.agents.timeout" hint="For calls that do not stream, and for a stream to start. Default: 5m."><${Text} ...${p} path="timeout" placeholder="5m" /><//>

@@ -104,7 +104,9 @@ jobs:
 
   e2e:
     # The Docker Compose setup with Dex, driven by a browser.
-    runs-on: ubuntu-latest
+    # Pinned: the pinned Playwright cannot install its browser on the
+    # image ubuntu-latest moved to (Ubuntu 26.04).
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - name: Start the Compose setup with sign-in
@@ -142,7 +144,9 @@ jobs:
 
   quickstart:
     # Zero-config start and the setup wizard, driven by a browser.
-    runs-on: ubuntu-latest
+    # Pinned: the pinned Playwright cannot install its browser on the
+    # image ubuntu-latest moved to (Ubuntu 26.04).
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7

@@ -12,6 +12,8 @@ a2a:
     planner:
       url: https://planner.internal.example.com/a2a     # the agent's JSON-RPC endpoint
       # rest_url: https://planner.internal.example.com/rest   # its HTTP+JSON binding, if it has one; url, rest_url or both
+      # grpc_url: grpcs://planner.internal.example.com:443   # its gRPC binding of A2A 1.0, if it has one
+      # grpc_tenant: ""                                      # the tenant its card names for gRPC, if any
       # card_url: https://planner.internal.example.com/.well-known/agent-card.json   # default: at the url's host
       headers: {Authorization: "Bearer ${PLANNER_TOKEN}"}  # sent to the agent, never to callers
       timeout: 5m                                          # default 5m; see below
@@ -32,6 +34,8 @@ Each agent is served at `/a2a/{name}`, with its card at `/a2a/{name}/.well-known
 | JSON-RPC | `url` | `POST /a2a/{name}` with the methods of 0.3 (`message/send`, `tasks/get`, …) or of 1.0 (`SendMessage`, `GetTask`, …) |
 | HTTP+JSON (REST) | `rest_url` | 1.0: `POST /a2a/{name}/message:send`, `POST …/message:stream`, `GET …/tasks/{id}`, `POST …/tasks/{id}:cancel`, `POST` or `GET …/tasks/{id}:subscribe`. 0.3: the same paths after `/a2a/{name}/v1` |
 
+| gRPC | `grpc_url` | A2A 1.0 only: the methods of `lf.a2a.v1.A2AService` at the gateway's own address, with the agent's name in each request's `tenant` field. See [gRPC](#grpc) |
+
 A request goes to the agent over the binding it arrived on, in the protocol version the caller used; the gateway does not translate between bindings or versions. The `A2A-Version` and `A2A-Extensions` headers are passed on. A caller that uses a binding the agent is not configured for gets `UnsupportedOperation`.
 
 Point an A2A client at the card and give it a gateway key as a bearer token:
@@ -47,7 +51,7 @@ client = ClientFactory(ClientConfig(httpx_client=http)).create(card)
 
 The card a caller sees is the agent's own, with these changes:
 
-- The interfaces are the gateway's, one for each binding the agent is configured for. A 1.0 card lists them in `supportedInterfaces`, at the protocol version the agent declares for that binding; a 0.3 card has the gateway's `url`, and HTTP+JSON in `additionalInterfaces` when both are configured. Bindings the gateway does not relay, such as gRPC, are removed.
+- The interfaces are the gateway's, one for each binding the agent is configured for. A 1.0 card lists them in `supportedInterfaces`, at the protocol version the agent declares for that binding; a 0.3 card has the gateway's `url`, and HTTP+JSON in `additionalInterfaces` when both are configured. A gRPC interface is the gateway's host and port with the agent's name as `tenant`. Bindings the agent is not configured for are removed.
 - The only security scheme is `gateway`, an HTTP bearer token, which is a gateway key.
 - `capabilities.pushNotifications` is true only when the agent sends them and the gateway is set to [deliver them](#push-notifications). The extended card is off (`supportsAuthenticatedExtendedCard`, or `capabilities.extendedAgentCard` in 1.0). `capabilities.streaming` is false when the agent has output guardrails.
 - `signatures` are removed, since they cover the card as the agent wrote it.
@@ -93,6 +97,27 @@ Where the gateway delivers to:
 
 Each delivery is logged as `a2a push notification` with the agent, task, owner and the webhook's status, and counted in `gog_a2a_requests_total` with the method `push/notify`.
 
+## gRPC
+
+An agent with `grpc_url` is also offered over the gRPC binding of A2A 1.0. A gRPC request has no path to name the agent in, so the `tenant` field of each request does: the gateway's card for the agent lists a `GRPC` interface whose `url` is the gateway's host and port and whose `tenant` is the agent's name, and A2A clients copy that tenant into their requests.
+
+```python
+channel = grpc.secure_channel("gateway.example.com:443", grpc.ssl_channel_credentials())
+stub = a2a_pb2_grpc.A2AServiceStub(channel)
+task = stub.SendMessage(
+    a2a_pb2.SendMessageRequest(tenant="planner", message=message),
+    metadata=[("authorization", f"Bearer {GATEWAY_KEY}")],
+)
+```
+
+- The gateway key goes in the `authorization` metadata, as a bearer token, or in `x-api-key`.
+- Everything under [What the gateway checks](#what-the-gateway-checks) applies. Errors are gRPC statuses with the A2A reason in a `google.rpc.ErrorInfo`, such as `NOT_FOUND` with `TASK_NOT_FOUND`. The agent's own errors pass through with their details, except `UNAUTHENTICATED` and `PERMISSION_DENIED`, which are about the gateway's credentials and become `INTERNAL`.
+- The agent gets the request with `grpc_tenant` as its tenant (none by default), the agent's `headers` as metadata, and the caller's `a2a-version` and `a2a-extensions` metadata.
+- `grpc://` is plaintext and `grpcs://` is TLS, checked against the system's certificate authorities. An agent with only `grpc_url` needs `card_url`.
+- Push notification configurations work as over the other bindings; notifications themselves are HTTP posts whatever the binding.
+
+gRPC needs HTTP/2 from the client to the gateway. The gateway serves it on its normal port, with TLS (`tls`) or without (h2c), so a load balancer or ingress in front must speak gRPC or HTTP/2 to the backend: for ingress-nginx that is the `nginx.ingress.kubernetes.io/backend-protocol: "GRPC"` annotation on a rule for the path `/lf.a2a.v1.A2AService/`, and for an AWS ALB a target group with protocol version gRPC. The gateway relays gRPC for A2A 1.0 only; the gRPC service of A2A 0.3 is a different one.
+
 ## Timeouts and streams
 
 `timeout` bounds a call that does not stream. For `message/stream` and `tasks/resubscribe` it bounds only the wait for the stream to start; the stream then runs as long as the agent keeps it open, and each event is passed on as it arrives.
@@ -103,8 +128,7 @@ Every call is logged as `a2a request` with the request id, agent, method (named 
 
 ## Not in this version
 
-- The gRPC binding. Agents must offer JSON-RPC or HTTP+JSON.
-- Translating between bindings or protocol versions: a caller uses a binding and version the agent offers.
+- Translating between bindings or protocol versions: a caller uses a binding and version the agent offers. gRPC is relayed for A2A 1.0 only.
 - Listing tasks.
 - The authenticated extended card.
 - OAuth access tokens for callers: A2A callers use gateway keys.

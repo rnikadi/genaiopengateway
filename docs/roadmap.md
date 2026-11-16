@@ -17,7 +17,6 @@
 Plans after 1.0 are made in the open, as RFCs in GitHub discussions and on the roadmap board. Candidates raised so far:
 
 - The [third-party security audit](security-audit.md), as soon as it is funded.
-- The A2A gRPC binding.
 - Three maintaining organizations and a foundation proposal, as the [charter](https://github.com/rnikadi/genaiopengateway/blob/main/CHARTER.md) sets out.
 
 ## Community, in every phase

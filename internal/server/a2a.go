@@ -126,6 +126,10 @@ type a2aCall struct {
 	// configuration it names.
 	op                   a2aOp
 	pushTask, pushConfig string
+	// grpc is true for a request over the gRPC binding, whose errors
+	// are kept in grpcErr and not written.
+	grpc    bool
+	grpcErr error
 }
 
 // restErrors maps a JSON-RPC or A2A error code to the HTTP status, the
@@ -150,6 +154,10 @@ var restErrors = map[int]struct {
 // answers with an HTTP status and a google.rpc.Status body.
 func (c *a2aCall) rpcError(w http.ResponseWriter, code int, status, msg string) {
 	c.status = status
+	if c.grpc {
+		c.grpcErr = grpcError(code, msg)
+		return
+	}
 	if c.rest {
 		e := restErrors[code]
 		if e.status == 0 {
@@ -576,37 +584,14 @@ func (c *a2aCall) forward(w http.ResponseWriter, r *http.Request, req *http.Requ
 	if !c.rest {
 		result, _ = out["result"].(map[string]any)
 	}
-	if c.op.push != "" && result != nil {
-		c.restorePush(ctx, result, c.pushTask)
-		raw, _ = json.Marshal(out)
-		if c.op.push == "delete" {
-			if err := c.s.store.DeleteA2APush(ctx, c.name, c.pushTask, c.pushConfig); err != nil {
-				c.s.log.Error("deleting an A2A push configuration failed", "request_id", c.rid, "err", err)
-			}
-		}
-	}
 	if result != nil {
-		c.record(ctx, result)
-		names := c.agent.Guardrails
-		if c.rt.guards.Applies(config.StageOutput, names) {
-			parts := textParts(result)
-			texts := make([]string, len(parts))
-			for i, p := range parts {
-				texts[i] = p["text"].(string)
-			}
-			meta := guardMeta(c.rid, c.p)
-			res := c.rt.guards.Run(ctx, config.StageOutput, names, texts, meta)
-			c.s.recordGuardrails(meta, res.Decisions)
-			if res.Blocked != nil {
-				c.rpcError(w, a2aInvalidResponse, "guardrail_blocked", blockedMessage(res.Blocked))
-				return
-			}
-			if res.Changed {
-				for i, p := range parts {
-					p["text"] = res.Texts[i]
-				}
-				raw, _ = json.Marshal(out)
-			}
+		changed, blocked := c.settle(ctx, result)
+		if blocked != "" {
+			c.rpcError(w, a2aInvalidResponse, "guardrail_blocked", blocked)
+			return
+		}
+		if changed {
+			raw, _ = json.Marshal(out)
 		}
 	} else if out["error"] != nil {
 		c.status = "agent_error"
@@ -617,6 +602,46 @@ func (c *a2aCall) forward(w http.ResponseWriter, r *http.Request, req *http.Requ
 	}
 	w.Header().Set("Content-Type", ct)
 	_, _ = w.Write(raw)
+}
+
+// settle does the gateway's part for a result that does not stream: it
+// puts the caller's webhook URLs back into push configurations, records
+// who owns the tasks and contexts the result names, and runs the
+// agent's output guardrails. It reports whether it changed the result,
+// and why a guardrail blocked it, if one did.
+func (c *a2aCall) settle(ctx context.Context, result map[string]any) (changed bool, blocked string) {
+	if c.op.push != "" {
+		c.restorePush(ctx, result, c.pushTask)
+		changed = true
+		if c.op.push == "delete" {
+			if err := c.s.store.DeleteA2APush(ctx, c.name, c.pushTask, c.pushConfig); err != nil {
+				c.s.log.Error("deleting an A2A push configuration failed", "request_id", c.rid, "err", err)
+			}
+		}
+	}
+	c.record(ctx, result)
+	names := c.agent.Guardrails
+	if !c.rt.guards.Applies(config.StageOutput, names) {
+		return changed, ""
+	}
+	parts := textParts(result)
+	texts := make([]string, len(parts))
+	for i, p := range parts {
+		texts[i] = p["text"].(string)
+	}
+	meta := guardMeta(c.rid, c.p)
+	res := c.rt.guards.Run(ctx, config.StageOutput, names, texts, meta)
+	c.s.recordGuardrails(meta, res.Decisions)
+	if res.Blocked != nil {
+		return false, blockedMessage(res.Blocked)
+	}
+	if res.Changed {
+		for i, p := range parts {
+			p["text"] = res.Texts[i]
+		}
+		changed = true
+	}
+	return changed, ""
 }
 
 // relayStream passes an agent's event stream through, flushing each
@@ -816,6 +841,10 @@ func (s *Server) a2aCard(w http.ResponseWriter, r *http.Request) {
 		if agent.RESTURL != "" {
 			ours = append(ours, map[string]any{"url": self, "protocolBinding": "HTTP+JSON", "protocolVersion": version("HTTP+JSON")})
 		}
+		if agent.GRPCURL != "" {
+			// gRPC has no path to name the agent in, so the tenant does.
+			ours = append(ours, map[string]any{"url": grpcAddress(base), "protocolBinding": "GRPC", "protocolVersion": version("GRPC"), "tenant": name})
+		}
 		card["supportedInterfaces"] = ours
 		for _, k := range []string{"url", "preferredTransport", "additionalInterfaces", "security", "supportsAuthenticatedExtendedCard"} {
 			delete(card, k)
@@ -824,7 +853,11 @@ func (s *Server) a2aCard(w http.ResponseWriter, r *http.Request) {
 		card["securityRequirements"] = []any{map[string]any{"schemes": map[string]any{"gateway": map[string]any{"list": []any{}}}}}
 		caps["extendedAgentCard"] = false
 	} else {
-		// A card of A2A 0.3.
+		// A card of A2A 0.3, whose gRPC binding is another service.
+		if agent.URL == "" && agent.RESTURL == "" {
+			writeError(w, provider.ChatCompletions, http.StatusBadGateway, codeAllTargetsFailed, "the agent's card is of A2A 0.3; the gateway relays gRPC for A2A 1.0 only")
+			return
+		}
 		card["url"] = self
 		delete(card, "additionalInterfaces")
 		if agent.URL != "" {
@@ -861,6 +894,9 @@ func (s *Server) agentCard(ctx context.Context, name string, agent config.A2AAge
 			at = agent.RESTURL
 		}
 		u, err := url.Parse(at)
+		if err == nil && u.Host == "" {
+			err = errors.New("the agent has no card_url")
+		}
 		if err != nil {
 			return nil, err
 		}

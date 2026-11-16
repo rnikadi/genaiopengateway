@@ -150,7 +150,7 @@ On Bedrock, `/v1/messages` is served for model ids and inference profile ids tha
 | --- | --- |
 | Embeddings on Gemini and Vertex | Different endpoints and no token counts on the Gemini API. The `openai` type with Gemini's compatible endpoint covers them meanwhile. |
 | Bedrock Guardrails, Knowledge Bases and Agents | Cloud features outside a model call. Bedrock Guardrails can still be attached to an inference profile on the AWS side. |
-| Video and rerank on Vertex AI, Gemini and Bedrock, and image edits on them | Their jobs, outputs and request shapes do not map onto OpenAI's (issue #35). `openai` targets serve them. |
+| Image edits on Vertex AI, Gemini and Bedrock | Their request shapes do not map onto OpenAI's (issue #35). `openai` targets serve them. Video and rerank on the clouds are in [modalities.md](modalities.md#providers). |
 | Fetching image URLs for the client | It would let clients make the gateway fetch any URL. Clients send data URLs. |
 | Provisioned throughput settings | Picked through the model id or ARN, which already works. |
 | Azure OpenAI with Entra ID tokens | Azure's v1 API works with the `openai` type and an API key today. Entra ID auth can be added if asked. |

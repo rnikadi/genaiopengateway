@@ -103,6 +103,7 @@ func run(path, dataDir string, log *slog.Logger) error {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
+		Protocols:         serverProtocols(),
 	}
 
 	errc := make(chan error, 2)
@@ -215,4 +216,14 @@ func reload(path string, current *config.Config, srv *server.Server, log *slog.L
 		log.Warn("listen, tls and metrics changes take effect after a restart")
 	}
 	log.Info("config reloaded")
+}
+
+// serverProtocols are HTTP/1.1 and HTTP/2, the second also without TLS
+// (h2c), which gRPC clients and proxies use behind a load balancer.
+func serverProtocols() *http.Protocols {
+	p := new(http.Protocols)
+	p.SetHTTP1(true)
+	p.SetHTTP2(true)
+	p.SetUnencryptedHTTP2(true)
+	return p
 }

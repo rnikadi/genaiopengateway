@@ -30,9 +30,11 @@ Native translations come after, each in the adapter that already serves the clou
 | --- | --- | --- | --- |
 | `images.generations` | Imagen (`imagen-*`) through `:predict` | Imagen through `:predict` | Nova Canvas and Titan Image (`amazon.nova-canvas-*`, `amazon.titan-image-*`) through InvokeModel |
 | `audio.speech` | Gemini TTS (`*-tts`) through `generateContent` | Gemini TTS through `generateContent` | not offered |
+| `rerank` | The ranking API (`semantic-ranker-*`) | not offered | Cohere Rerank and Amazon Rerank (`cohere.rerank-*`, `amazon.rerank-*`) through InvokeModel |
 
 - **Images**: `prompt` and `n` carry over. `size` becomes Imagen's nearest `aspectRatio`, or Bedrock's `width` and `height`; `auto` uses the model's default. The answer is OpenAI's `data[].b64_json`, so images are counted as for `openai` targets. Image edits stay on `openai` targets.
 - **Speech**: `input` is the text and `voice` is passed through as the Gemini voice name, such as `Kore`; OpenAI voice names are not mapped, since they sound different. Gemini returns 24 kHz PCM, which the gateway answers as WAV, or raw with `response_format: pcm`; other formats get `400`. Characters are counted as for `openai` targets, and the tokens Gemini reports are recorded too, since Google prices TTS by token.
+- **Rerank**: `query`, `documents`, `top_n` and `return_documents` carry over, and the answer is Cohere's `results[]` with `index` and `relevance_score`, best first. A document is a string, or an object, of which the model gets the `text` field, or its JSON when it has none. Both clouds take up to 1000 documents. On Vertex AI the ranking API belongs to Vertex AI Search, so the project needs the Discovery Engine API enabled and the credentials the `discoveryengine.rankingConfigs.rank` permission; it is served from the `us` or `eu` multi-region when that is the provider's `location`, and from the global endpoint otherwise. Neither cloud reports tokens, so price these targets with `per_request`.
 - Which endpoint a cloud target serves follows from its model id, as chat and embeddings already do.
 
 ### Speech providers with their own APIs
@@ -92,6 +94,25 @@ A `gemini` target whose model starts with `veo-`, such as `veo-3.0-generate-001`
 - **Content** downloads the video from the Gemini API's file service with the provider's key. The gateway only sends the key to the provider's own host.
 - **Delete** forgets the job in the gateway; Veo keeps generated videos for two days and has no delete.
 
+### Veo on Vertex AI
+
+A `vertex` target whose model starts with `veo-` serves `videos` the same way, with Google credentials and in the provider's project and location:
+
+```yaml
+providers:
+  vertex:
+    type: vertex
+    project: acme-ai-prod
+    location: us-central1
+    # gcs_output_uri: gs://acme-videos/veo   # optional; see Content
+```
+
+- **Create** calls the model's `predictLongRunning` with the same `prompt`, `seconds` and `size` as on the Gemini API, and meters the requested seconds.
+- **Retrieve** reads the operation with `fetchPredictOperation`: `in_progress`, `completed`, or `failed` with the reason.
+- **Content**: without `gcs_output_uri`, Vertex AI returns the video inside the operation and the gateway answers it from there. That holds a whole video in memory for each download, so it suits short clips. With `gcs_output_uri`, a Cloud Storage folder, Veo writes the video there and the gateway streams it from there; the credentials then need `storage.objects.get` on the folder, and Vertex AI's service agent must be able to write to it. The gateway reads only objects under that folder.
+- **Delete** forgets the job in the gateway. Videos in your bucket stay, under your lifecycle rules.
+- A job id names an operation of a Veo model in the provider's own project and location; any other id is refused without a call.
+
 ### Nova Reel on Bedrock
 
 A `bedrock` target whose model is Nova Reel, such as `amazon.nova-reel-v1:1`, serves `videos` when the provider sets `s3_output_uri`, an S3 folder in the provider's region that Bedrock can write to:
@@ -108,8 +129,6 @@ providers:
 - **Retrieve** reads the invocation with GetAsyncInvoke: `in_progress`, `completed`, or `failed` with Bedrock's message.
 - **Content** reads `output.mp4` from the invocation's folder in S3, signed with SigV4. S3 does not take Bedrock API keys, so this needs credentials from the AWS default chain with `s3:GetObject` on the folder; with only an API key, content answers `501`.
 - **Delete** forgets the job in the gateway and leaves the video in the bucket, where your lifecycle rules apply.
-
-Veo through Vertex AI and cloud rerank stay in issue #35: Vertex writes videos to Cloud Storage, which needs a design of its own.
 
 ### Gemini Live
 

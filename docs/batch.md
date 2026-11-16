@@ -34,7 +34,57 @@ Errors are `400` with the line number, so a client fixes the file before it spen
 
 A virtual model's targets are tried in order, as for any request, among those whose provider serves batches. The gateway rewrites `body.model` in every line to the target's upstream model, so the same file works whichever target takes it, and uploads to the first that accepts it. The file, and every batch made from it, stays on that target: output, errors and cancels go back to where the batch runs.
 
-Batches are served by `openai` providers (OpenAI and Azure OpenAI's v1 API). Native Vertex AI and Bedrock batch jobs read from and write to cloud storage buckets, not uploaded files, and are left for later.
+Batches are served by `openai` providers (OpenAI and Azure OpenAI's v1 API), and by `bedrock` and `vertex` providers through their own batch jobs, described next.
+
+## Bedrock and Vertex AI {#native}
+
+Bedrock and Vertex AI run batches as jobs that read a file from cloud storage and write results back there, in their own request formats. The gateway hides that: clients upload the same OpenAI file and read the same OpenAI results, and the gateway translates in both directions.
+
+| | `bedrock` | `vertex` |
+| --- | --- | --- |
+| Turned on by | `s3_output_uri` and `batch_role_arn` | `gcs_output_uri` |
+| Models | every chat model | Gemini models |
+| Job | a model invocation job of type Converse | a batch prediction job |
+| Requests | `/v1/chat/completions` only | `/v1/chat/completions` only |
+
+```yaml
+providers:
+  bedrock:
+    type: bedrock
+    region: us-east-1
+    s3_output_uri: s3://acme-ai/gateway
+    batch_role_arn: arn:aws:iam::123456789012:role/bedrock-batch
+  vertex:
+    type: vertex
+    project: acme-ai-prod
+    location: us-central1
+    gcs_output_uri: gs://acme-ai/gateway
+```
+
+What happens on each call:
+
+- **Upload.** Each line is translated as a single chat completion would be, to a Converse request on Bedrock or a `generateContent` request on Vertex AI. A line the target cannot serve rejects the file with its `custom_id`. The gateway writes three objects below `<folder>/batches/<file id>/`: `source.jsonl` (the file as uploaded, after guardrail redactions), `input.jsonl` (the translation) and `meta.json`.
+- **Create.** The gateway starts the job on `input.jsonl`, with results below `out/` in the same folder. Bedrock runs the job as `batch_role_arn`.
+- **Retrieve and cancel.** The job's state becomes an OpenAI status: `validating`, `in_progress`, `completed`, `failed`, `cancelling`, `cancelled` or `expired`. A job that finished with some failed requests is `completed`, with the failures in the error file.
+- **Results.** The output file holds one line per answered request, as a chat completion under the client's `custom_id`; the error file holds the requests that failed. Both are translated while they are streamed. Neither cloud keeps the order of the input, so match results by `custom_id`.
+- **Usage.** Bedrock reports a job's token totals in its manifest. Vertex AI reports them per request, so the gateway sums the results once when the job ends. A cancelled or expired job is charged for what it answered.
+- **Delete.** Deleting the input file removes the three objects the gateway wrote. Result files stay in the bucket until a lifecycle rule or an operator removes them, and they cannot be read through the gateway once the input file is gone.
+
+Ids name the job and the file (`file_br_…`, `batch_br_…`, `file_vx_…`, `batch_vx_…`), so the gateway stores nothing beyond the usual records, and it reads only objects below the provider's folder.
+
+Permissions:
+
+- **Bedrock.** The gateway's AWS credentials need `bedrock:CreateModelInvocationJob`, `GetModelInvocationJob` and `StopModelInvocationJob`, `iam:PassRole` on the batch role, and `s3:GetObject`, `s3:PutObject` and `s3:DeleteObject` on the folder. S3 takes no Bedrock API key, so batches need credentials from the AWS default chain. The batch role must trust `bedrock.amazonaws.com` and be able to read and write the folder.
+- **Vertex AI.** The gateway's credentials need `aiplatform.batchPredictionJobs.create`, `get` and `cancel`, and `storage.objects.create`, `get`, `list` and `delete` on the folder. Vertex AI's service agent must be able to read and write it too.
+
+Limits to know:
+
+- Bedrock refuses a job with fewer records than its quota's minimum, which is 100 for most models. The refusal arrives when the batch is created, with Bedrock's message.
+- Both clouds offer batch for some models and regions only. A model without it fails when the batch is created.
+- Vertex AI does not return a request's id, so the gateway carries each request's row in a `gog_row` label and reads it back from the result. Labels on Vertex AI also appear in billing reports.
+- Claude on Vertex AI, embeddings and the Responses API are not served in native batches.
+- Set `batch_discount` on the target to the cloud's batch price cut, as for OpenAI.
+- These adapters are tested against fakes built from the published API descriptions. They have not been run against live Bedrock or Vertex AI accounts yet.
 
 ## Ownership
 
@@ -73,6 +123,7 @@ models:
 ## Testing
 
 - Store tests on SQLite and Postgres: records, ownership listing, and the charge claim taking effect once.
+- Adapter tests for Bedrock and Vertex AI against fake S3, Cloud Storage and job APIs: translation of the input, the job request, status mapping, results by `custom_id`, the error file, usage, and ids that name objects outside the folder.
 - Server tests against a fake upstream: upload checks and line errors, model rewriting and fallback, input guardrails with redaction, refusal when output guardrails apply, ownership across teams, output file download, charging once with the discount, the refresh loop, and `501` without a database.
 - Admin tests: scoping by role, cancel and its audit record.
 - The OpenAI SDK conformance run uploads a file, creates, retrieves, lists and cancels a batch, and downloads its output.
@@ -80,6 +131,6 @@ models:
 
 ## Not in this design
 
-- Native Vertex AI and Bedrock batch jobs, which work from cloud storage.
+- Native batches for requests other than chat completions, and for Claude on Vertex AI.
 - Files for other purposes, such as Responses `input_file` or fine-tuning.
 - Checking batch output with output guardrails.

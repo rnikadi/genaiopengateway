@@ -138,11 +138,13 @@ providers:
     project: acme-ai-prod
     location: global                 # global, us, eu, or a region
     # credentials_file: /var/run/secrets/gcp/key.json   (default: Application Default Credentials)
+    # gcs_output_uri: gs://acme-ai/gateway   (where Veo writes videos and batches keep files; see modalities.md, batch.md)
   bedrock:
     type: bedrock                    # every Bedrock model; see cloud-providers.md
     region: eu-central-1
     # api_key: ${AWS_BEARER_TOKEN_BEDROCK}   (default: the AWS credential chain, signed with SigV4)
-    # s3_output_uri: s3://acme-videos/reel   (where Nova Reel writes videos; see modalities.md)
+    # s3_output_uri: s3://acme-ai/gateway    (where Nova Reel writes videos and batches keep files; see modalities.md, batch.md)
+    # batch_role_arn: arn:aws:iam::123456789012:role/bedrock-batch   (the role batch jobs run as; see batch.md)
     residency: eu                    # optional label; keys pinned to a residency use only matching providers (routing.md)
 
 models:

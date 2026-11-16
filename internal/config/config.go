@@ -687,8 +687,18 @@ type Provider struct {
 	// signed with credentials from the AWS default chain.
 	Region string `yaml:"region"`
 	// S3OutputURI is where a bedrock provider's Nova Reel jobs write
-	// their videos, such as s3://bucket/videos, in the provider's region.
+	// their videos and its batches keep their files, such as
+	// s3://bucket/gateway, in the provider's region.
 	S3OutputURI string `yaml:"s3_output_uri"`
+	// BatchRoleARN is the IAM role a bedrock provider's batch jobs run
+	// as. Bedrock assumes it to read the input and write the results in
+	// S3OutputURI. Batches are served when both are set.
+	BatchRoleARN string `yaml:"batch_role_arn"`
+	// GCSOutputURI is a Cloud Storage folder of a vertex provider, such
+	// as gs://bucket/gateway, where Veo writes videos and batches keep
+	// their files. Without it Veo returns videos in its answers, and
+	// batches are not served.
+	GCSOutputURI string `yaml:"gcs_output_uri"`
 	// Residency labels where the provider processes data, such as eu or
 	// us. Organizations, teams and keys can be pinned to labels
 	// (docs/routing.md#data-residency).
@@ -818,13 +828,36 @@ type A2APush struct {
 	AllowedHosts []string `yaml:"allowed_hosts"`
 }
 
-// A2AAgent is an upstream A2A agent reached over JSON-RPC.
+// GRPCTarget returns the host and port of a grpc:// or grpcs:// URL,
+// and whether it uses TLS.
+func GRPCTarget(raw string) (target string, tls bool, err error) {
+	u, perr := url.Parse(raw)
+	if perr != nil || u.Host == "" || (u.Scheme != "grpc" && u.Scheme != "grpcs") || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.User != nil {
+		return "", false, errors.New("must be grpc://host:port, or grpcs://host:port for TLS")
+	}
+	tls = u.Scheme == "grpcs"
+	if u.Port() == "" {
+		if !tls {
+			return "", false, errors.New("must name a port")
+		}
+		return u.Host + ":443", true, nil
+	}
+	return u.Host, tls, nil
+}
+
+// A2AAgent is an upstream A2A agent.
 type A2AAgent struct {
 	// URL is the agent's JSON-RPC endpoint.
 	URL string `yaml:"url"`
 	// RESTURL is the base of the agent's HTTP+JSON (REST) binding, when
 	// it offers one. At least one of URL and RESTURL is set.
 	RESTURL string `yaml:"rest_url"`
+	// GRPCURL is where the agent's gRPC binding of A2A 1.0 is, when it
+	// offers one: grpc://host:port, or grpcs://host:port with TLS.
+	GRPCURL string `yaml:"grpc_url"`
+	// GRPCTenant is the tenant the agent's card names for its gRPC
+	// interface, if any. The gateway sends it in each request.
+	GRPCTenant string `yaml:"grpc_tenant"`
 	// CardURL is where the agent's card is. Default: the URL's origin
 	// with /.well-known/agent-card.json.
 	CardURL     string            `yaml:"card_url"`
@@ -1133,12 +1166,18 @@ func (c *Config) validate() error {
 			} else if !vertexLocation.MatchString(p.Location) || !vertexProject.MatchString(p.Project) {
 				add("provider %q: project or location has characters a Google Cloud name cannot have", name)
 			}
+			if u := p.GCSOutputURI; u != "" && (!strings.HasPrefix(u, "gs://") || len(strings.TrimPrefix(u, "gs://")) < 3) {
+				add("provider %q: gcs_output_uri must be a gs:// URI, such as gs://bucket/gateway", name)
+			}
 		case ProviderBedrock:
 			if !awsRegion.MatchString(p.Region) {
 				add("provider %q: bedrock needs a region such as us-east-1", name)
 			}
 			if u := p.S3OutputURI; u != "" && (!strings.HasPrefix(u, "s3://") || len(strings.TrimPrefix(u, "s3://")) < 3) {
 				add("provider %q: s3_output_uri must be an s3:// URI, such as s3://bucket/videos", name)
+			}
+			if p.BatchRoleARN != "" && (!strings.HasPrefix(p.BatchRoleARN, "arn:") || p.S3OutputURI == "") {
+				add("provider %q: batch_role_arn must be an IAM role ARN, and needs s3_output_uri", name)
 			}
 		default:
 			add("provider %q: type must be one of %s, got %q", name, strings.Join(ProviderTypes, ", "), p.Type)
@@ -1822,12 +1861,22 @@ func (c *Config) validateA2A(add func(string, ...any)) {
 		ag.RESTURL = strings.TrimRight(ag.RESTURL, "/")
 		a.Agents[name] = ag
 		switch {
-		case ag.URL == "" && ag.RESTURL == "":
-			add("a2a agent %q: set url (JSON-RPC), rest_url (HTTP+JSON) or both", name)
+		case ag.URL == "" && ag.RESTURL == "" && ag.GRPCURL == "":
+			add("a2a agent %q: set url (JSON-RPC), rest_url (HTTP+JSON) or grpc_url (gRPC)", name)
 		case ag.URL != "" && !httpURL(ag.URL):
 			add("a2a agent %q: url must be an http or https URL", name)
 		case ag.RESTURL != "" && !httpURL(ag.RESTURL):
 			add("a2a agent %q: rest_url must be an http or https URL", name)
+		}
+		if ag.GRPCURL != "" {
+			if _, _, err := GRPCTarget(ag.GRPCURL); err != nil {
+				add("a2a agent %q: grpc_url %v", name, err)
+			}
+			if ag.URL == "" && ag.RESTURL == "" && ag.CardURL == "" {
+				add("a2a agent %q: set card_url, since an agent with only grpc_url has no address to find its card at", name)
+			}
+		} else if ag.GRPCTenant != "" {
+			add("a2a agent %q: grpc_tenant needs grpc_url", name)
 		}
 		if ag.CardURL != "" && !httpURL(ag.CardURL) {
 			add("a2a agent %q: card_url must be an http or https URL", name)
